@@ -33,14 +33,27 @@ pip install -r requirements.txt
 - Check `devlog.md` for a history of what's been done across sessions
 - Check `CLAUDE.md` for project rules and conventions — update it as preferences evolve
 
+## Running the Simulation
+With the virtual environment active:
+```bash
+python main.py
+```
+This opens a matplotlib window showing a 2D ray trace through a 200mm f/5 Newtonian telescope.
+
 ## Project Structure
 ```
 telescopeSimulationProject/
-├── CLAUDE.md        # Instructions for Claude Code
-├── GUIDE.md         # This file — reference guide for you
-├── devlog.md        # Development log across sessions
-├── venv/            # Python virtual environment (don't edit or commit)
-└── ...              # Source code to come
+├── CLAUDE.md              # Instructions for Claude Code
+├── GUIDE.md               # This file — reference guide for you
+├── devlog.md              # Development log across sessions
+├── requirements.txt       # Python dependencies
+├── main.py                # Entry point — run this to see the ray trace
+├── venv/                  # Python virtual environment (don't edit or commit)
+└── telescope_sim/         # Main package
+    ├── physics/           # Ray dataclass and reflection math
+    ├── geometry/          # Mirror types and telescope assembly
+    ├── source/            # Light source definitions
+    └── plotting/          # 2D visualization
 ```
 
 ## Things to Remember
