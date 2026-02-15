@@ -1,7 +1,8 @@
-"""2D side-view ray trace visualization."""
+"""2D side-view ray trace visualization and focal plane imaging."""
 
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.colors import LinearSegmentedColormap
 
 from telescope_sim.physics.ray import Ray
 
@@ -82,47 +83,31 @@ def plot_ray_trace(rays: list[Ray], components: dict,
     return fig
 
 
-def plot_spot_diagram(rays: list[Ray],
-                      title: str = "Spot Diagram at Focal Plane",
-                      figsize: tuple[float, float] = (7, 7),
-                      show_rms: bool = True,
-                      show_max: bool = True,
-                      save_path: str | None = None) -> plt.Figure:
-    """Plot a spot diagram showing where rays converge at the focal plane.
+def _find_focal_plane_positions(rays: list[Ray]) -> np.ndarray | None:
+    """Find where traced rays cross the best focal plane.
 
-    After tracing, each ray's final segment (post-secondary) travels
-    toward the focal area. This function finds the focal plane position
-    where the rays are most concentrated and plots their crossing points.
+    Extracts the final segment of each ray (post-secondary), scans
+    for the x-position where ray spread is minimized, and returns
+    the y-offsets (centered on zero) at that plane.
 
     Args:
-        rays: List of fully traced Ray objects (with populated history).
-        title: Plot title.
-        figsize: Figure size in inches.
-        show_rms: Show the RMS spot size circle (default True).
-        show_max: Show the max extent circle (default True).
-        save_path: If provided, save the figure to this path.
+        rays: List of fully traced Ray objects.
 
     Returns:
-        The matplotlib Figure object.
+        Array of y-offsets at the focal plane, centered on zero.
+        Returns None if no valid rays are found.
     """
-    # Only use rays that completed the full trace (4 history points)
     traced_rays = [r for r in rays if len(r.history) >= 4]
     if not traced_rays:
-        fig, ax = plt.subplots(figsize=figsize)
-        ax.set_title(title)
-        ax.text(0.5, 0.5, "No fully traced rays", ha="center",
-                va="center", transform=ax.transAxes)
-        return fig
+        return None
 
-    # Extract the final segment of each ray (secondary → focal area)
-    # and find the best focal plane (x-position where y-spread is minimized)
     segments = []
     for ray in traced_rays:
         p_start = np.array(ray.history[-2])
         p_end = np.array(ray.history[-1])
         segments.append((p_start, p_end))
 
-    # Sample x-positions along the final segments to find best focus
+    # Scan x-positions to find best focus
     x_min = min(s[0][0] for s in segments)
     x_max = max(s[1][0] for s in segments)
     test_x_positions = np.linspace(x_min, x_max, 200)
@@ -158,7 +143,39 @@ def plot_spot_diagram(rays: list[Ray],
 
     y_positions = np.array(y_positions)
     y_center = np.mean(y_positions)
-    y_offsets = y_positions - y_center  # Center on zero
+    return y_positions - y_center
+
+
+def plot_spot_diagram(rays: list[Ray],
+                      title: str = "Spot Diagram at Focal Plane",
+                      figsize: tuple[float, float] = (7, 7),
+                      show_rms: bool = True,
+                      show_max: bool = True,
+                      save_path: str | None = None) -> plt.Figure:
+    """Plot a spot diagram showing where rays converge at the focal plane.
+
+    After tracing, each ray's final segment (post-secondary) travels
+    toward the focal area. This function finds the focal plane position
+    where the rays are most concentrated and plots their crossing points.
+
+    Args:
+        rays: List of fully traced Ray objects (with populated history).
+        title: Plot title.
+        figsize: Figure size in inches.
+        show_rms: Show the RMS spot size circle (default True).
+        show_max: Show the max extent circle (default True).
+        save_path: If provided, save the figure to this path.
+
+    Returns:
+        The matplotlib Figure object.
+    """
+    y_offsets = _find_focal_plane_positions(rays)
+    if y_offsets is None:
+        fig, ax = plt.subplots(figsize=figsize)
+        ax.set_title(title)
+        ax.text(0.5, 0.5, "No fully traced rays", ha="center",
+                va="center", transform=ax.transAxes)
+        return fig
 
     # Spot size metrics
     rms_spot = np.std(y_offsets)
@@ -205,6 +222,108 @@ def plot_spot_diagram(rays: list[Ray],
             transform=ax.transAxes, fontsize=10,
             verticalalignment="bottom",
             bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.8))
+
+    plt.tight_layout()
+
+    if save_path:
+        fig.savefig(save_path, dpi=150, bbox_inches="tight")
+
+    return fig
+
+
+def plot_focal_image(rays: list[Ray],
+                     title: str = "Simulated Focal Plane Image",
+                     figsize: tuple[float, float] = (7, 7),
+                     image_size_mm: float | None = None,
+                     num_pixels: int = 256,
+                     blur_sigma_mm: float | None = None,
+                     colormap: str = "hot",
+                     save_path: str | None = None) -> plt.Figure:
+    """Render a simulated image at the focal plane.
+
+    Each ray's crossing point on the focal plane contributes a
+    Gaussian blob of intensity. The result looks like what you'd
+    see through the eyepiece:
+    - Point source: a blurred dot (tighter = better optics)
+    - Uniform source: even illumination
+
+    This same approach will work for extended sources (e.g., Jupiter)
+    once source rays carry angular/positional information.
+
+    Args:
+        rays: List of fully traced Ray objects.
+        title: Plot title.
+        figsize: Figure size in inches.
+        image_size_mm: Width/height of the image region in mm.
+                       If None, auto-scales based on the ray spread.
+        num_pixels: Resolution of the image grid.
+        blur_sigma_mm: Gaussian blur radius in mm for each ray.
+                       If None, auto-scales to ~3x the RMS spot size
+                       (or a minimum for very tight spots).
+        colormap: Matplotlib colormap name.
+        save_path: If provided, save the figure to this path.
+
+    Returns:
+        The matplotlib Figure object.
+    """
+    y_offsets = _find_focal_plane_positions(rays)
+    if y_offsets is None:
+        fig, ax = plt.subplots(figsize=figsize)
+        ax.set_title(title)
+        ax.text(0.5, 0.5, "No fully traced rays", ha="center",
+                va="center", transform=ax.transAxes)
+        return fig
+
+    rms_spot = np.std(y_offsets)
+
+    # Auto-determine blur size if not specified
+    if blur_sigma_mm is None:
+        blur_sigma_mm = max(rms_spot * 3.0, 0.005)
+
+    # Auto-determine image extent
+    if image_size_mm is None:
+        extent = max(np.max(np.abs(y_offsets)) * 8, blur_sigma_mm * 10)
+        image_size_mm = extent
+
+    half_size = image_size_mm / 2.0
+    pixel_size = image_size_mm / num_pixels
+
+    # Build the 2D image by accumulating Gaussian blobs
+    # Since we're in 2D simulation, rays only have y-offsets.
+    # We place them along y=0 on the focal plane (x-axis of image).
+    image = np.zeros((num_pixels, num_pixels))
+
+    # Pixel coordinate arrays
+    coords = np.linspace(-half_size, half_size, num_pixels)
+    xx, yy = np.meshgrid(coords, coords)
+
+    for y_off in y_offsets:
+        # Each ray contributes a 2D Gaussian centered at (y_off, 0)
+        dist_sq = (xx - y_off) ** 2 + yy ** 2
+        image += np.exp(-dist_sq / (2.0 * blur_sigma_mm ** 2))
+
+    # Normalize to [0, 1]
+    if image.max() > 0:
+        image = image / image.max()
+
+    # Plot
+    fig, ax = plt.subplots(figsize=figsize)
+
+    ax.imshow(image, extent=[-half_size, half_size, -half_size, half_size],
+              origin="lower", cmap=colormap, vmin=0, vmax=1)
+
+    ax.set_xlabel("Position (mm)")
+    ax.set_ylabel("Position (mm)")
+    ax.set_title(title)
+
+    # Add info text
+    ax.text(0.02, 0.02,
+            f"RMS spot: {rms_spot:.4f} mm\n"
+            f"Blur sigma: {blur_sigma_mm:.4f} mm\n"
+            f"Rays: {len(y_offsets)}",
+            transform=ax.transAxes, fontsize=9,
+            verticalalignment="bottom", color="white",
+            bbox=dict(boxstyle="round", facecolor="black", alpha=0.6))
 
     plt.tight_layout()
 

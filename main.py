@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 
 from telescope_sim.geometry import NewtonianTelescope
 from telescope_sim.source import create_parallel_rays
-from telescope_sim.plotting import plot_ray_trace, plot_spot_diagram
+from telescope_sim.plotting import plot_focal_image, plot_ray_trace, plot_spot_diagram
 
 
 def main():
@@ -20,7 +20,7 @@ def main():
     telescope = NewtonianTelescope(
         primary_diameter=200.0,   # mm
         focal_length=1000.0,      # mm (f/5)
-        #primary_type = "spherical"
+        primary_type = "spherical"
     )
 
 
@@ -50,6 +50,10 @@ def main():
     plot_spot_diagram(
         rays,
         title=f"Spot Diagram — {telescope.primary_type.title()} Primary",
+    )
+    plot_focal_image(
+        rays,
+        title=f"Simulated Image — {telescope.primary_type.title()} Primary",
     )
     plt.show()
 
