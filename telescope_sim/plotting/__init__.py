@@ -1,5 +1,5 @@
 """Plotting module: visualization of ray traces and optical systems."""
 
-from telescope_sim.plotting.ray_trace_plot import plot_ray_trace
+from telescope_sim.plotting.ray_trace_plot import plot_ray_trace, plot_spot_diagram
 
-__all__ = ["plot_ray_trace"]
+__all__ = ["plot_ray_trace", "plot_spot_diagram"]

@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 
 from telescope_sim.geometry import NewtonianTelescope
 from telescope_sim.source import create_parallel_rays
-from telescope_sim.plotting import plot_ray_trace
+from telescope_sim.plotting import plot_ray_trace, plot_spot_diagram
 
 
 def main():
@@ -20,7 +20,9 @@ def main():
     telescope = NewtonianTelescope(
         primary_diameter=200.0,   # mm
         focal_length=1000.0,      # mm (f/5)
+        #primary_type = "spherical"
     )
+
 
     print(f"Telescope: {telescope.primary_diameter}mm "
           f"f/{telescope.focal_ratio:.1f} Newtonian")
@@ -41,9 +43,13 @@ def main():
 
     # --- Visualize ---
     components = telescope.get_components_for_plotting()
-    fig = plot_ray_trace(
+    plot_ray_trace(
         rays, components,
         title="200mm f/5 Newtonian Reflector — Ray Trace",
+    )
+    plot_spot_diagram(
+        rays,
+        title=f"Spot Diagram — {telescope.primary_type.title()} Primary",
     )
     plt.show()
 
