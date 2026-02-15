@@ -40,6 +40,11 @@ python main.py
 ```
 This opens a matplotlib window showing a 2D ray trace through a 200mm f/5 Newtonian telescope.
 
+## Running Tests
+```bash
+python -m pytest tests/ -v
+```
+
 ## Project Structure
 ```
 telescopeSimulationProject/
