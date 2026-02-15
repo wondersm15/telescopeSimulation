@@ -85,6 +85,8 @@ def plot_ray_trace(rays: list[Ray], components: dict,
 def plot_spot_diagram(rays: list[Ray],
                       title: str = "Spot Diagram at Focal Plane",
                       figsize: tuple[float, float] = (7, 7),
+                      show_rms: bool = True,
+                      show_max: bool = True,
                       save_path: str | None = None) -> plt.Figure:
     """Plot a spot diagram showing where rays converge at the focal plane.
 
@@ -96,6 +98,8 @@ def plot_spot_diagram(rays: list[Ray],
         rays: List of fully traced Ray objects (with populated history).
         title: Plot title.
         figsize: Figure size in inches.
+        show_rms: Show the RMS spot size circle (default True).
+        show_max: Show the max extent circle (default True).
         save_path: If provided, save the figure to this path.
 
     Returns:
@@ -172,12 +176,18 @@ def plot_spot_diagram(rays: list[Ray],
     ax.axhline(0, color="gray", linewidth=0.5, alpha=0.5)
     ax.axvline(0, color="gray", linewidth=0.5, alpha=0.5)
 
-    # Draw a circle showing the RMS spot size
-    if rms_spot > 1e-6:
-        circle = plt.Circle((0, 0), rms_spot, fill=False,
-                             color="red", linestyle="--", linewidth=1.5,
-                             label=f"RMS spot: {rms_spot:.3f} mm")
-        ax.add_patch(circle)
+    # Draw spot size circles
+    if show_rms and rms_spot > 1e-6:
+        rms_circle = plt.Circle((0, 0), rms_spot, fill=False,
+                                color="red", linestyle="--", linewidth=1.5,
+                                label=f"RMS spot: {rms_spot:.3f} mm")
+        ax.add_patch(rms_circle)
+
+    if show_max and max_spot > 1e-6:
+        max_circle = plt.Circle((0, 0), max_spot, fill=False,
+                                color="blue", linestyle=":", linewidth=1.5,
+                                label=f"Max extent: {max_spot:.3f} mm")
+        ax.add_patch(max_circle)
 
     ax.set_xlim(-margin, margin)
     ax.set_ylim(-margin, margin)
