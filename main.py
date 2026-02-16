@@ -38,7 +38,7 @@ def main():
     # --- Create incoming light ---
     # Parallel rays from a star (point source at infinity)
     rays = create_parallel_rays(
-        num_rays=11,
+        num_rays=101,
         aperture_diameter=telescope.primary_diameter,
         entry_height=telescope.tube_length * 1.15,
     )
