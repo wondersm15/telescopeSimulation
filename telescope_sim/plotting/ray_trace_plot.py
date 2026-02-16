@@ -1,10 +1,17 @@
 """2D side-view ray trace visualization and focal plane imaging."""
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.special import j1
 
 from telescope_sim.physics.ray import Ray
+
+if TYPE_CHECKING:
+    from telescope_sim.geometry.telescope import NewtonianTelescope
 
 
 def plot_ray_trace(rays: list[Ray], components: dict,
@@ -144,6 +151,134 @@ def _find_focal_plane_positions(rays: list[Ray]) -> np.ndarray | None:
     y_positions = np.array(y_positions)
     y_center = np.mean(y_positions)
     return y_positions - y_center
+
+
+def _trace_dense_rays(telescope: NewtonianTelescope,
+                      num_rays: int = 501) -> list[Ray]:
+    """Create and trace a dense set of rays through the telescope.
+
+    Used internally by plot_focal_image and plot_psf_profile so that
+    physics-based imaging is independent of the user's visual ray count.
+
+    Args:
+        telescope: The telescope to trace through.
+        num_rays: Number of rays to trace (more = smoother results).
+
+    Returns:
+        List of traced Ray objects.
+    """
+    from telescope_sim.source import create_parallel_rays
+
+    rays = create_parallel_rays(
+        num_rays=num_rays,
+        aperture_diameter=telescope.primary_diameter,
+        entry_height=telescope.tube_length * 1.15,
+    )
+    telescope.trace_rays(rays)
+    return rays
+
+
+def _analytical_focal_offsets(telescope: NewtonianTelescope,
+                              num_zones: int = 1001) -> np.ndarray:
+    """Compute focal plane offsets from exact mirror geometry formulas.
+
+    Instead of tracing rays through the simulation, this evaluates
+    the closed-form aberration equations for the primary mirror type.
+
+    Parabolic: all offsets are identically zero (perfect on-axis focus
+    by definition of a paraboloid).
+
+    Spherical: exact transverse spherical aberration derived from the
+    mirror equation (x^2 + (y-R)^2 = R^2) and law of reflection.
+    For a ray at pupil height h, the reflected direction is:
+        dx = -2hs/R^2,  dy = 1 - 2h^2/R^2
+    where s = sqrt(R^2 - h^2).  The transverse position at each
+    candidate focal plane is evaluated exactly, and the plane of
+    least confusion (minimum RMS spread) is selected.
+
+    Args:
+        telescope: The telescope to analyze.
+        num_zones: Number of pupil sample points.
+
+    Returns:
+        Array of transverse offsets at the best focal plane (mm).
+    """
+    r_max = (telescope.primary_diameter / 2.0) * 0.95  # match 5% margin
+    h_values = np.linspace(-r_max, r_max, num_zones)
+
+    if telescope.primary_type == "parabolic":
+        return np.zeros(num_zones)
+
+    elif telescope.primary_type == "spherical":
+        R = 2.0 * telescope.focal_length
+        f0 = telescope.focal_length
+
+        # Exact geometry of ray reflection off a spherical mirror
+        # Mirror surface: x^2 + (y - R)^2 = R^2, vertex at origin
+        s = np.sqrt(R**2 - h_values**2)
+        y_mirror = R - s
+
+        # Reflected direction for incoming d = (0, -1):
+        dx_ref = -2.0 * h_values * s / R**2
+        dy_ref = 1.0 - 2.0 * h_values**2 / R**2
+
+        # Marginal focus (where the edge ray crosses the axis)
+        s_edge = np.sqrt(R**2 - r_max**2)
+        y_marginal = R - s_edge / 2.0 - r_max**2 / (2.0 * s_edge)
+
+        # Scan from marginal focus to just past paraxial for best focus
+        test_z = np.linspace(y_marginal - 0.5, f0 + 0.5, 500)
+
+        best_z = f0
+        best_rms = float("inf")
+
+        for z in test_z:
+            t = (z - y_mirror) / dy_ref
+            valid = (dy_ref > 1e-10) & (t > 0)
+            if valid.sum() < 3:
+                continue
+            x_at_z = h_values[valid] + t[valid] * dx_ref[valid]
+            rms = np.std(x_at_z)
+            if rms < best_rms:
+                best_rms = rms
+                best_z = z
+
+        # Transverse positions at the plane of least confusion
+        t = (best_z - y_mirror) / dy_ref
+        x_at_best = h_values + t * dx_ref
+        return x_at_best - np.mean(x_at_best)
+
+    else:
+        raise ValueError(
+            f"Analytical method not available for primary type "
+            f"'{telescope.primary_type}'. Use method='traced'."
+        )
+
+
+def _get_focal_offsets(telescope: NewtonianTelescope,
+                       method: str = "analytical",
+                       num_trace_rays: int = 501) -> np.ndarray | None:
+    """Get focal plane offsets using the specified method.
+
+    Args:
+        telescope: The telescope to analyze.
+        method: "analytical" for exact mirror formulas,
+                "traced" for numerical ray tracing.
+        num_trace_rays: Number of rays (only used when method="traced").
+
+    Returns:
+        Array of transverse offsets at the focal plane (mm).
+        Returns None if ray tracing produces no valid results.
+    """
+    if method == "analytical":
+        return _analytical_focal_offsets(telescope)
+    elif method == "traced":
+        rays = _trace_dense_rays(telescope, num_trace_rays)
+        return _find_focal_plane_positions(rays)
+    else:
+        raise ValueError(
+            f"Unknown method '{method}'. Use 'analytical' or 'traced'."
+        )
 
 
 def plot_spot_diagram(rays: list[Ray],
@@ -305,27 +440,26 @@ def _build_geometric_spot_2d(y_offsets: np.ndarray, half_size: float,
     return image
 
 
-def plot_focal_image(rays: list[Ray],
-                     aperture_diameter: float,
-                     focal_length: float,
+def plot_focal_image(telescope: NewtonianTelescope,
                      title: str = "Simulated Focal Plane Image",
                      figsize: tuple[float, float] = (7, 7),
                      wavelength_nm: float = 550.0,
                      image_size_mm: float | None = None,
                      num_pixels: int = 512,
+                     method: str = "analytical",
+                     num_trace_rays: int = 501,
                      seeing_arcsec: float | None = None,
                      colormap: str = "hot",
                      save_path: str | None = None) -> plt.Figure:
     """Render a physically-based simulated image at the focal plane.
 
     Combines two effects:
-    1. Geometric spot — where rays actually land (from ray tracing),
-       reconstructed as a rotationally symmetric 2D pattern
+    1. Geometric spot — where rays actually land, reconstructed as a
+       rotationally symmetric 2D pattern
     2. Diffraction PSF — Airy pattern from the circular aperture
 
-    Each ray's focal plane position is convolved with the Airy PSF
-    to produce the final image. This correctly captures both geometric
-    aberrations (e.g., spherical aberration) and the diffraction limit.
+    The geometric spot can be computed analytically from the mirror
+    equation (default) or via numerical ray tracing.
 
     Optionally adds atmospheric seeing as a Gaussian blur.
 
@@ -333,18 +467,19 @@ def plot_focal_image(rays: list[Ray],
     - Airy pattern assumes unobstructed circular aperture
     - Monochromatic light at the specified wavelength
     - No detector noise or pixel sampling effects
-    - 2D spot reconstructed from 1D cross-section (assumes rotational symmetry)
+    - 2D spot reconstructed assuming rotational symmetry
 
     Args:
-        rays: List of fully traced Ray objects.
-        aperture_diameter: Telescope aperture diameter in mm.
-        focal_length: Telescope focal length in mm.
+        telescope: The telescope to image through.
         title: Plot title.
         figsize: Figure size in inches.
         wavelength_nm: Wavelength of light in nanometers (default 550nm green).
         image_size_mm: Width/height of the image in mm.
                        If None, auto-scales to show the full PSF.
         num_pixels: Resolution of the image grid.
+        method: "analytical" (exact mirror formulas, default) or
+                "traced" (numerical ray tracing).
+        num_trace_rays: Number of rays (only used when method="traced").
         seeing_arcsec: Atmospheric seeing FWHM in arcseconds.
                        If None, no atmospheric blur is applied.
         colormap: Matplotlib colormap name.
@@ -355,7 +490,10 @@ def plot_focal_image(rays: list[Ray],
     """
     from scipy.signal import fftconvolve
 
-    y_offsets = _find_focal_plane_positions(rays)
+    aperture_diameter = telescope.primary_diameter
+    focal_length = telescope.focal_length
+
+    y_offsets = _get_focal_offsets(telescope, method, num_trace_rays)
     if y_offsets is None:
         fig, ax = plt.subplots(figsize=figsize)
         ax.set_title(title)
@@ -377,23 +515,34 @@ def plot_focal_image(rays: list[Ray],
 
     half_size = image_size_mm / 2.0
 
-    # Step 1: Build rotationally symmetric geometric spot
-    geometric_image = _build_geometric_spot_2d(y_offsets, half_size,
-                                               num_pixels)
-
-    # Step 2: Build Airy PSF kernel
+    is_perfect_focus = rms_spot < 1e-10
     pixel_size = image_size_mm / num_pixels
-    kernel_half_size = max(airy_radius * 5, pixel_size * 3)
-    kernel_n = min(num_pixels, 256)
-    kernel_coords = np.linspace(-kernel_half_size, kernel_half_size, kernel_n)
-    kxx, kyy = np.meshgrid(kernel_coords, kernel_coords)
-    kr = np.sqrt(kxx ** 2 + kyy ** 2)
-    airy_kernel = _airy_psf(kr, aperture_diameter, focal_length,
-                            wavelength_mm)
-    airy_kernel = airy_kernel / airy_kernel.sum()
 
-    # Step 3: Convolve geometric spot with Airy PSF
-    image = fftconvolve(geometric_image, airy_kernel, mode="same")
+    if is_perfect_focus:
+        # No geometric aberration — image is the pure Airy pattern
+        coords = np.linspace(-half_size, half_size, num_pixels)
+        xx, yy = np.meshgrid(coords, coords)
+        rr = np.sqrt(xx ** 2 + yy ** 2)
+        image = _airy_psf(rr, aperture_diameter, focal_length,
+                          wavelength_mm)
+    else:
+        # Step 1: Build rotationally symmetric geometric spot
+        geometric_image = _build_geometric_spot_2d(y_offsets, half_size,
+                                                   num_pixels)
+
+        # Step 2: Build Airy PSF kernel
+        kernel_half_size = max(airy_radius * 5, pixel_size * 3)
+        kernel_n = min(num_pixels, 256)
+        kernel_coords = np.linspace(-kernel_half_size, kernel_half_size,
+                                    kernel_n)
+        kxx, kyy = np.meshgrid(kernel_coords, kernel_coords)
+        kr = np.sqrt(kxx ** 2 + kyy ** 2)
+        airy_kernel = _airy_psf(kr, aperture_diameter, focal_length,
+                                wavelength_mm)
+        airy_kernel = airy_kernel / airy_kernel.sum()
+
+        # Step 3: Convolve geometric spot with Airy PSF
+        image = fftconvolve(geometric_image, airy_kernel, mode="same")
 
     # Step 4: Optionally apply atmospheric seeing
     if seeing_arcsec is not None and seeing_arcsec > 0:
@@ -421,11 +570,12 @@ def plot_focal_image(rays: list[Ray],
     ax.set_title(title)
 
     # Build info text with physics details
+    method_label = "Analytical" if method == "analytical" else f"Traced ({num_trace_rays} rays)"
     info_lines = [
         f"Airy disk radius: {airy_radius * 1000:.2f} \u00b5m",
         f"RMS geometric spot: {rms_spot * 1000:.2f} \u00b5m",
         f"\u03bb = {wavelength_nm:.0f} nm | f/{f_ratio:.1f}",
-        f"Rays: {len(y_offsets)}",
+        f"Method: {method_label}",
     ]
 
     approx_lines = []
@@ -456,29 +606,31 @@ def plot_focal_image(rays: list[Ray],
     return fig
 
 
-def plot_psf_profile(rays: list[Ray],
-                     aperture_diameter: float,
-                     focal_length: float,
+def plot_psf_profile(telescope: NewtonianTelescope,
                      title: str = "Point Spread Function",
-                     figsize: tuple[float, float] = (10, 6),
+                     figsize: tuple[float, float] = (14, 7),
                      wavelength_nm: float = 550.0,
+                     method: str = "analytical",
+                     num_trace_rays: int = 501,
                      save_path: str | None = None) -> plt.Figure:
     """Plot the radial PSF profile showing diffraction and aberration effects.
 
     Shows three curves:
     1. Ideal Airy PSF — diffraction-limited (perfect optics)
-    2. Geometric spot profile — from ray tracing only (no diffraction)
+    2. Geometric spot profile — from mirror geometry (no diffraction)
     3. Combined PSF — the actual telescope performance
 
-    Also shows the Rayleigh resolution limit and key metrics.
+    Also shows the Rayleigh resolution limit, key metrics, and the
+    relevant physics formulas used.
 
     Args:
-        rays: List of fully traced Ray objects.
-        aperture_diameter: Telescope aperture diameter in mm.
-        focal_length: Telescope focal length in mm.
+        telescope: The telescope to analyze.
         title: Plot title.
         figsize: Figure size in inches.
         wavelength_nm: Wavelength of light in nanometers.
+        method: "analytical" (exact mirror formulas, default) or
+                "traced" (numerical ray tracing).
+        num_trace_rays: Number of rays (only used when method="traced").
         save_path: If provided, save the figure to this path.
 
     Returns:
@@ -486,11 +638,14 @@ def plot_psf_profile(rays: list[Ray],
     """
     from scipy.signal import fftconvolve
 
-    y_offsets = _find_focal_plane_positions(rays)
+    aperture_diameter = telescope.primary_diameter
+    focal_length = telescope.focal_length
+
+    y_offsets = _get_focal_offsets(telescope, method, num_trace_rays)
     if y_offsets is None:
         fig, ax = plt.subplots(figsize=figsize)
         ax.set_title(title)
-        ax.text(0.5, 0.5, "No fully traced rays", ha="center",
+        ax.text(0.5, 0.5, "No valid results", ha="center",
                 va="center", transform=ax.transAxes)
         return fig
 
@@ -504,93 +659,164 @@ def plot_psf_profile(rays: list[Ray],
     r_max = max(airy_radius * 6, max_spot * 4, 0.001)
     r = np.linspace(0, r_max, 1000)
 
+    # Detect perfect focus (e.g. parabolic + analytical: all offsets zero)
+    is_perfect_focus = rms_spot < 1e-10
+
     # 1. Ideal Airy PSF (diffraction only)
     airy_profile = _airy_psf(r, aperture_diameter, focal_length,
                              wavelength_mm)
 
-    # 2. Geometric spot profile (ray tracing only)
-    # Build a histogram of radial ray positions
-    radial_offsets = np.abs(y_offsets)
-    bin_width = r_max / 200
-    geo_profile = np.zeros_like(r)
-    for r_off in radial_offsets:
-        geo_profile += np.exp(-(r - r_off) ** 2 / (2 * bin_width ** 2))
-    if geo_profile.max() > 0:
-        geo_profile = geo_profile / geo_profile.max()
+    if is_perfect_focus:
+        # No geometric aberration — combined PSF is exactly the Airy
+        geo_profile = None
+        combined_r = r
+        combined_radial = airy_profile
+    else:
+        # 2. Geometric spot profile (from aberration offsets)
+        radial_offsets = np.abs(y_offsets)
+        bin_width = r_max / 200
+        geo_profile = np.zeros_like(r)
+        for r_off in radial_offsets:
+            geo_profile += np.exp(-(r - r_off) ** 2 / (2 * bin_width ** 2))
+        if geo_profile.max() > 0:
+            geo_profile = geo_profile / geo_profile.max()
 
-    # 3. Combined PSF (convolve geometric with Airy in 1D radial approx)
-    # Build 2D images, convolve, then extract radial profile
-    n_px = 256
-    half = r_max
-    coords_1d = np.linspace(-half, half, n_px)
-    cxx, cyy = np.meshgrid(coords_1d, coords_1d)
-    crr = np.sqrt(cxx ** 2 + cyy ** 2)
+        # 3. Combined PSF (convolve geometric with Airy via 2D)
+        n_px = 256
+        half = r_max
+        coords_1d = np.linspace(-half, half, n_px)
+        cxx, cyy = np.meshgrid(coords_1d, coords_1d)
+        crr = np.sqrt(cxx ** 2 + cyy ** 2)
 
-    geo_2d = _build_geometric_spot_2d(y_offsets, half, n_px)
-    airy_2d = _airy_psf(crr, aperture_diameter, focal_length, wavelength_mm)
-    airy_2d = airy_2d / airy_2d.sum()
-    combined_2d = fftconvolve(geo_2d, airy_2d, mode="same")
+        geo_2d = _build_geometric_spot_2d(y_offsets, half, n_px)
+        airy_2d = _airy_psf(crr, aperture_diameter, focal_length,
+                            wavelength_mm)
+        airy_2d = airy_2d / airy_2d.sum()
+        combined_2d = fftconvolve(geo_2d, airy_2d, mode="same")
 
-    # Extract radial profile from center of combined image
-    center = n_px // 2
-    pixel_size = (2 * half) / n_px
-    combined_radial = combined_2d[center, center:]
-    combined_r = np.arange(len(combined_radial)) * pixel_size
-    if combined_radial.max() > 0:
-        combined_radial = combined_radial / combined_radial.max()
+        center = n_px // 2
+        pixel_size = (2 * half) / n_px
+        combined_radial = combined_2d[center, center:]
+        combined_r = np.arange(len(combined_radial)) * pixel_size
+        if combined_radial.max() > 0:
+            combined_radial = combined_radial / combined_radial.max()
 
-    # Plot
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=figsize)
+    # --- Layout: two plot panels + formula/metrics panel ---
+    fig = plt.figure(figsize=figsize)
+    gs = fig.add_gridspec(1, 3, width_ratios=[1, 1, 0.8], wspace=0.35)
+    ax1 = fig.add_subplot(gs[0])
+    ax2 = fig.add_subplot(gs[1])
+    ax3 = fig.add_subplot(gs[2])
 
     # Linear scale
-    ax1.plot(r * 1000, airy_profile, "b-", linewidth=1.5,
-             label="Ideal Airy (diffraction only)")
-    ax1.plot(r * 1000, geo_profile, "r--", linewidth=1.5,
-             label="Geometric spot (no diffraction)")
-    ax1.plot(combined_r * 1000, combined_radial, "k-", linewidth=2,
-             label="Combined PSF")
-    ax1.axvline(airy_radius * 1000, color="blue", linestyle=":",
-                alpha=0.5, label=f"Airy radius: {airy_radius * 1000:.2f} \u00b5m")
+    if is_perfect_focus:
+        # Only one meaningful curve — the Airy IS the combined PSF
+        ax1.plot(r * 1000, airy_profile, "b-", linewidth=2,
+                 label="PSF = Airy (diffraction-limited)")
+        ax1.plot([], [], "r--", linewidth=1.5,
+                 label="Geometric: \u03b4(r) \u2014 perfect focus")
+    else:
+        ax1.plot(r * 1000, airy_profile, "b-", linewidth=1.5,
+                 label="Ideal Airy (diffraction only)")
+        ax1.plot(r * 1000, geo_profile, "r--", linewidth=1.5,
+                 label="Geometric spot (no diffraction)")
+        ax1.plot(combined_r * 1000, combined_radial, "k-", linewidth=2,
+                 label="Combined PSF")
+    ax1.axvline(airy_radius * 1000, color="gray", linestyle=":",
+                alpha=0.6, label=f"Airy radius: {airy_radius * 1000:.2f} \u00b5m")
     ax1.set_xlabel("Radial distance (\u00b5m)")
     ax1.set_ylabel("Normalized intensity")
     ax1.set_title("Linear scale")
-    ax1.legend(fontsize=8)
+    ax1.legend(fontsize=7)
     ax1.grid(True, alpha=0.3)
+    ax1.set_ylim(-0.05, 1.05)
 
     # Log scale
-    ax2.semilogy(r * 1000, np.clip(airy_profile, 1e-6, None), "b-",
-                 linewidth=1.5, label="Ideal Airy")
-    ax2.semilogy(r * 1000, np.clip(geo_profile, 1e-6, None), "r--",
-                 linewidth=1.5, label="Geometric spot")
-    ax2.semilogy(combined_r * 1000, np.clip(combined_radial, 1e-6, None),
-                 "k-", linewidth=2, label="Combined PSF")
-    ax2.axvline(airy_radius * 1000, color="blue", linestyle=":",
-                alpha=0.5)
+    if is_perfect_focus:
+        ax2.semilogy(r * 1000, np.clip(airy_profile, 1e-6, None), "b-",
+                     linewidth=2, label="PSF = Airy")
+    else:
+        ax2.semilogy(r * 1000, np.clip(airy_profile, 1e-6, None), "b-",
+                     linewidth=1.5, label="Ideal Airy")
+        ax2.semilogy(r * 1000, np.clip(geo_profile, 1e-6, None), "r--",
+                     linewidth=1.5, label="Geometric spot")
+        ax2.semilogy(combined_r * 1000,
+                     np.clip(combined_radial, 1e-6, None),
+                     "k-", linewidth=2, label="Combined PSF")
+    ax2.axvline(airy_radius * 1000, color="gray", linestyle=":",
+                alpha=0.6)
     ax2.set_xlabel("Radial distance (\u00b5m)")
     ax2.set_ylabel("Normalized intensity (log)")
     ax2.set_title("Log scale")
-    ax2.legend(fontsize=8)
+    ax2.legend(fontsize=7)
     ax2.grid(True, alpha=0.3)
     ax2.set_ylim(1e-4, 1.5)
 
-    fig.suptitle(title, fontsize=13)
+    # --- Formula & metrics panel ---
+    ax3.axis("off")
 
-    # Add metrics text
-    rayleigh_arcsec = 1.22 * wavelength_nm * 1e-9 / (aperture_diameter * 1e-3)
-    rayleigh_arcsec *= 206265  # radians to arcsec
-    metrics = (
-        f"\u03bb = {wavelength_nm:.0f} nm | "
-        f"f/{f_ratio:.1f} | "
-        f"D = {aperture_diameter:.0f} mm\n"
-        f"Airy radius: {airy_radius * 1000:.2f} \u00b5m | "
+    method_label = ("Analytical" if method == "analytical"
+                    else f"Traced ({num_trace_rays} rays)")
+    rayleigh_arcsec = (1.22 * wavelength_nm * 1e-9
+                       / (aperture_diameter * 1e-3) * 206265)
+    strehl = _estimate_strehl(rms_spot, airy_radius)
+
+    # Metrics block
+    metrics_text = (
+        f"D = {aperture_diameter:.0f} mm,  f/{f_ratio:.1f}\n"
+        f"\u03bb = {wavelength_nm:.0f} nm\n"
+        f"Airy radius: {airy_radius * 1000:.2f} \u00b5m\n"
         f"Rayleigh limit: {rayleigh_arcsec:.2f}\"\n"
-        f"RMS geometric spot: {rms_spot * 1000:.2f} \u00b5m | "
-        f"Strehl approx: {_estimate_strehl(rms_spot, airy_radius):.3f}"
+        f"RMS geo spot: {rms_spot * 1000:.2f} \u00b5m\n"
+        f"Strehl \u2248 {strehl:.3f}\n"
+        f"Method: {method_label}"
     )
-    fig.text(0.5, -0.02, metrics, ha="center", fontsize=9,
+    ax3.text(0.05, 0.97, "Metrics", fontsize=10, fontweight="bold",
+             transform=ax3.transAxes, va="top")
+    ax3.text(0.05, 0.90, metrics_text, fontsize=9,
+             transform=ax3.transAxes, va="top", family="monospace",
              bbox=dict(boxstyle="round", facecolor="lightyellow", alpha=0.9))
 
-    plt.tight_layout()
+    # Formulas block — rendered line-by-line with a manual background
+    # (matplotlib bbox doesn't size correctly around multi-line mathtext)
+    from matplotlib.patches import FancyBboxPatch
+
+    formulas = [
+        (r"$I(r) = \left[\frac{2\,J_1(x)}{x}\right]^2$,"
+         r"  $x = \frac{\pi D r}{\lambda f}$"),
+        r"First zero:  $r_1 = 1.22\,\frac{\lambda f}{D}$",
+        r"Rayleigh:  $\theta = 1.22\,\frac{\lambda}{D}$",
+    ]
+    if telescope.primary_type == "spherical":
+        formulas.append(
+            r"TSA (3rd order):  $\varepsilon(h) \approx \frac{-h^3}{8f^2}$"
+        )
+    formulas.append(
+        r"Strehl $\approx \frac{1}{1+(\pi\sigma/2r_1)^2}$"
+    )
+
+    # Draw background box sized to content
+    line_step = 0.065
+    box_top = 0.37
+    box_bottom = box_top - line_step * len(formulas) - 0.03
+    formula_bg = FancyBboxPatch(
+        (0.01, box_bottom), 0.97, box_top - box_bottom,
+        boxstyle="round,pad=0.015",
+        facecolor="aliceblue", edgecolor="lightsteelblue",
+        alpha=0.9, transform=ax3.transAxes, zorder=0,
+    )
+    ax3.add_patch(formula_bg)
+
+    ax3.text(0.05, 0.42, "Formulas", fontsize=10, fontweight="bold",
+             transform=ax3.transAxes, va="top")
+
+    y = box_top - 0.02
+    for formula in formulas:
+        ax3.text(0.06, y, formula, fontsize=8.5,
+                 transform=ax3.transAxes, va="top", zorder=1)
+        y -= line_step
+
+    fig.suptitle(title, fontsize=13)
 
     if save_path:
         fig.savefig(save_path, dpi=150, bbox_inches="tight")
