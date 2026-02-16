@@ -14,6 +14,52 @@ if TYPE_CHECKING:
     from telescope_sim.geometry.telescope import NewtonianTelescope
 
 
+def _draw_ray_trace(ax: plt.Axes, rays: list[Ray], components: dict,
+                    title: str = "Newtonian Telescope Ray Trace",
+                    ray_color: str = "gold",
+                    ray_alpha: float = 0.7,
+                    mirror_color: str = "steelblue",
+                    mirror_linewidth: float = 3.0,
+                    show_tube: bool = True) -> None:
+    """Draw a ray trace diagram on the given axes.
+
+    This is the core drawing helper used by both plot_ray_trace and
+    the comparison functions.
+    """
+    if show_tube:
+        _draw_tube(ax, components)
+
+    primary_pts = components["primary_surface"]
+    ax.plot(primary_pts[:, 0], primary_pts[:, 1],
+            color=mirror_color, linewidth=mirror_linewidth,
+            solid_capstyle="round", label="Primary mirror")
+
+    secondary_pts = components["secondary_surface"]
+    ax.plot(secondary_pts[:, 0], secondary_pts[:, 1],
+            color="firebrick", linewidth=mirror_linewidth,
+            solid_capstyle="round", label="Secondary mirror")
+
+    for ray in rays:
+        if len(ray.history) < 2:
+            continue
+        path = np.array(ray.history)
+        ax.plot(path[:, 0], path[:, 1],
+                color=ray_color, alpha=ray_alpha, linewidth=1.0)
+
+    end_points = [ray.history[-1] for ray in rays if len(ray.history) >= 3]
+    if end_points:
+        focal_area = np.mean(end_points, axis=0)
+        ax.plot(focal_area[0], focal_area[1], "r*", markersize=12,
+                label="Focal point", zorder=5)
+
+    ax.set_aspect("equal")
+    ax.set_xlabel("x (mm)")
+    ax.set_ylabel("y (mm)")
+    ax.set_title(title)
+    ax.legend(loc="upper right")
+    ax.grid(True, alpha=0.3)
+
+
 def plot_ray_trace(rays: list[Ray], components: dict,
                    title: str = "Newtonian Telescope Ray Trace",
                    figsize: tuple[float, float] = (14, 8),
@@ -42,46 +88,11 @@ def plot_ray_trace(rays: list[Ray], components: dict,
         The matplotlib Figure object.
     """
     fig, ax = plt.subplots(1, 1, figsize=figsize)
-
-    # Draw telescope tube
-    if show_tube:
-        _draw_tube(ax, components)
-
-    # Draw primary mirror
-    primary_pts = components["primary_surface"]
-    ax.plot(primary_pts[:, 0], primary_pts[:, 1],
-            color=mirror_color, linewidth=mirror_linewidth,
-            solid_capstyle="round", label="Primary mirror")
-
-    # Draw secondary mirror
-    secondary_pts = components["secondary_surface"]
-    ax.plot(secondary_pts[:, 0], secondary_pts[:, 1],
-            color="firebrick", linewidth=mirror_linewidth,
-            solid_capstyle="round", label="Secondary mirror")
-
-    # Draw rays
-    for ray in rays:
-        if len(ray.history) < 2:
-            continue
-        path = np.array(ray.history)
-        ax.plot(path[:, 0], path[:, 1],
-                color=ray_color, alpha=ray_alpha, linewidth=1.0)
-
-    # Mark focal area (average end-point of fully traced rays)
-    end_points = [ray.history[-1] for ray in rays if len(ray.history) >= 3]
-    if end_points:
-        focal_area = np.mean(end_points, axis=0)
-        ax.plot(focal_area[0], focal_area[1], "r*", markersize=12,
-                label="Focal point", zorder=5)
-
-    # Formatting
-    ax.set_aspect("equal")
-    ax.set_xlabel("x (mm)")
-    ax.set_ylabel("y (mm)")
-    ax.set_title(title)
-    ax.legend(loc="upper right")
-    ax.grid(True, alpha=0.3)
-
+    _draw_ray_trace(ax, rays, components, title=title,
+                    ray_color=ray_color, ray_alpha=ray_alpha,
+                    mirror_color=mirror_color,
+                    mirror_linewidth=mirror_linewidth,
+                    show_tube=show_tube)
     plt.tight_layout()
 
     if save_path:
@@ -281,6 +292,60 @@ def _get_focal_offsets(telescope: NewtonianTelescope,
         )
 
 
+def _draw_spot_diagram(ax: plt.Axes, y_offsets: np.ndarray | None,
+                       title: str = "Spot Diagram at Focal Plane",
+                       show_rms: bool = True,
+                       show_max: bool = True) -> None:
+    """Draw a spot diagram on the given axes.
+
+    This is the core drawing helper used by both plot_spot_diagram and
+    the comparison functions.
+    """
+    if y_offsets is None:
+        ax.set_title(title)
+        ax.text(0.5, 0.5, "No fully traced rays", ha="center",
+                va="center", transform=ax.transAxes)
+        return
+
+    rms_spot = np.std(y_offsets)
+    max_spot = np.max(np.abs(y_offsets))
+
+    ax.scatter(y_offsets, np.zeros_like(y_offsets), c="gold",
+               edgecolors="darkorange", s=80, zorder=3, label="Ray positions")
+
+    margin = max(max_spot * 3, 0.5)
+    ax.axhline(0, color="gray", linewidth=0.5, alpha=0.5)
+    ax.axvline(0, color="gray", linewidth=0.5, alpha=0.5)
+
+    if show_rms and rms_spot > 1e-6:
+        rms_circle = plt.Circle((0, 0), rms_spot, fill=False,
+                                color="red", linestyle="--", linewidth=1.5,
+                                label=f"RMS spot: {rms_spot:.3f} mm")
+        ax.add_patch(rms_circle)
+
+    if show_max and max_spot > 1e-6:
+        max_circle = plt.Circle((0, 0), max_spot, fill=False,
+                                color="blue", linestyle=":", linewidth=1.5,
+                                label=f"Max extent: {max_spot:.3f} mm")
+        ax.add_patch(max_circle)
+
+    ax.set_xlim(-margin, margin)
+    ax.set_ylim(-margin, margin)
+    ax.set_aspect("equal")
+    ax.set_xlabel("Position on focal plane (mm)")
+    ax.set_ylabel("Position on focal plane (mm)")
+    ax.set_title(title)
+    ax.legend(loc="upper right")
+    ax.grid(True, alpha=0.3)
+
+    ax.text(0.02, 0.02,
+            f"RMS spot size: {rms_spot:.4f} mm\n"
+            f"Max spread: {max_spot * 2:.4f} mm",
+            transform=ax.transAxes, fontsize=10,
+            verticalalignment="bottom",
+            bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.8))
+
+
 def plot_spot_diagram(rays: list[Ray],
                       title: str = "Spot Diagram at Focal Plane",
                       figsize: tuple[float, float] = (7, 7),
@@ -305,59 +370,9 @@ def plot_spot_diagram(rays: list[Ray],
         The matplotlib Figure object.
     """
     y_offsets = _find_focal_plane_positions(rays)
-    if y_offsets is None:
-        fig, ax = plt.subplots(figsize=figsize)
-        ax.set_title(title)
-        ax.text(0.5, 0.5, "No fully traced rays", ha="center",
-                va="center", transform=ax.transAxes)
-        return fig
-
-    # Spot size metrics
-    rms_spot = np.std(y_offsets)
-    max_spot = np.max(np.abs(y_offsets))
-
-    # Plot
     fig, ax = plt.subplots(figsize=figsize)
-
-    # Plot ray crossing points
-    ax.scatter(y_offsets, np.zeros_like(y_offsets), c="gold",
-               edgecolors="darkorange", s=80, zorder=3, label="Ray positions")
-
-    # Draw the focal plane line
-    margin = max(max_spot * 3, 0.5)
-    ax.axhline(0, color="gray", linewidth=0.5, alpha=0.5)
-    ax.axvline(0, color="gray", linewidth=0.5, alpha=0.5)
-
-    # Draw spot size circles
-    if show_rms and rms_spot > 1e-6:
-        rms_circle = plt.Circle((0, 0), rms_spot, fill=False,
-                                color="red", linestyle="--", linewidth=1.5,
-                                label=f"RMS spot: {rms_spot:.3f} mm")
-        ax.add_patch(rms_circle)
-
-    if show_max and max_spot > 1e-6:
-        max_circle = plt.Circle((0, 0), max_spot, fill=False,
-                                color="blue", linestyle=":", linewidth=1.5,
-                                label=f"Max extent: {max_spot:.3f} mm")
-        ax.add_patch(max_circle)
-
-    ax.set_xlim(-margin, margin)
-    ax.set_ylim(-margin, margin)
-    ax.set_aspect("equal")
-    ax.set_xlabel("Position on focal plane (mm)")
-    ax.set_ylabel("Position on focal plane (mm)")
-    ax.set_title(title)
-    ax.legend(loc="upper right")
-    ax.grid(True, alpha=0.3)
-
-    # Add spot size text
-    ax.text(0.02, 0.02,
-            f"RMS spot size: {rms_spot:.4f} mm\n"
-            f"Max spread: {max_spot * 2:.4f} mm",
-            transform=ax.transAxes, fontsize=10,
-            verticalalignment="bottom",
-            bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.8))
-
+    _draw_spot_diagram(ax, y_offsets, title=title,
+                       show_rms=show_rms, show_max=show_max)
     plt.tight_layout()
 
     if save_path:
@@ -440,6 +455,147 @@ def _build_geometric_spot_2d(y_offsets: np.ndarray, half_size: float,
     return image
 
 
+def _compute_focal_image(telescope: NewtonianTelescope,
+                         wavelength_nm: float = 550.0,
+                         image_size_mm: float | None = None,
+                         num_pixels: int = 512,
+                         method: str = "analytical",
+                         num_trace_rays: int = 501,
+                         seeing_arcsec: float | None = None,
+                         ) -> tuple[np.ndarray | None, float, dict]:
+    """Compute the focal plane image and associated metadata.
+
+    Returns:
+        Tuple of (image_array_or_None, half_size, info_dict).
+        info_dict contains keys: wavelength_nm, f_ratio, airy_radius,
+        rms_spot, max_spot, method, num_trace_rays, seeing_arcsec.
+    """
+    from scipy.signal import fftconvolve
+
+    aperture_diameter = telescope.primary_diameter
+    focal_length = telescope.focal_length
+
+    y_offsets = _get_focal_offsets(telescope, method, num_trace_rays)
+    if y_offsets is None:
+        return None, 0.0, {}
+
+    wavelength_mm = wavelength_nm * 1e-6
+    f_ratio = focal_length / aperture_diameter
+    airy_radius = 1.22 * wavelength_mm * f_ratio
+    rms_spot = np.std(y_offsets)
+    max_spot = np.max(np.abs(y_offsets))
+
+    if image_size_mm is None:
+        image_size_mm = max(airy_radius * 10, max_spot * 6, 0.001)
+
+    half_size = image_size_mm / 2.0
+    is_perfect_focus = rms_spot < 1e-10
+    pixel_size = image_size_mm / num_pixels
+
+    if is_perfect_focus:
+        coords = np.linspace(-half_size, half_size, num_pixels)
+        xx, yy = np.meshgrid(coords, coords)
+        rr = np.sqrt(xx ** 2 + yy ** 2)
+        image = _airy_psf(rr, aperture_diameter, focal_length,
+                          wavelength_mm)
+    else:
+        geometric_image = _build_geometric_spot_2d(y_offsets, half_size,
+                                                   num_pixels)
+        kernel_half_size = max(airy_radius * 5, pixel_size * 3)
+        kernel_n = min(num_pixels, 256)
+        kernel_coords = np.linspace(-kernel_half_size, kernel_half_size,
+                                    kernel_n)
+        kxx, kyy = np.meshgrid(kernel_coords, kernel_coords)
+        kr = np.sqrt(kxx ** 2 + kyy ** 2)
+        airy_kernel = _airy_psf(kr, aperture_diameter, focal_length,
+                                wavelength_mm)
+        airy_kernel = airy_kernel / airy_kernel.sum()
+        image = fftconvolve(geometric_image, airy_kernel, mode="same")
+
+    if seeing_arcsec is not None and seeing_arcsec > 0:
+        plate_scale = 206265.0 / focal_length
+        seeing_sigma_mm = (seeing_arcsec / 2.355) / plate_scale
+        coords = np.linspace(-half_size, half_size, num_pixels)
+        sxx, syy = np.meshgrid(coords, coords)
+        seeing_kernel = np.exp(-(sxx ** 2 + syy ** 2) /
+                               (2 * seeing_sigma_mm ** 2))
+        seeing_kernel = seeing_kernel / seeing_kernel.sum()
+        image = fftconvolve(image, seeing_kernel, mode="same")
+
+    if image.max() > 0:
+        image = image / image.max()
+
+    info = dict(wavelength_nm=wavelength_nm, f_ratio=f_ratio,
+                airy_radius=airy_radius, rms_spot=rms_spot,
+                max_spot=max_spot, method=method,
+                num_trace_rays=num_trace_rays,
+                seeing_arcsec=seeing_arcsec)
+    return image, half_size, info
+
+
+def _draw_focal_image(ax: plt.Axes, telescope: NewtonianTelescope,
+                      title: str = "Simulated Focal Plane Image",
+                      wavelength_nm: float = 550.0,
+                      image_size_mm: float | None = None,
+                      num_pixels: int = 512,
+                      method: str = "analytical",
+                      num_trace_rays: int = 501,
+                      seeing_arcsec: float | None = None,
+                      colormap: str = "hot") -> None:
+    """Draw a focal plane image on the given axes.
+
+    This is the core drawing helper used by both plot_focal_image and
+    the comparison functions.
+    """
+    image, half_size, info = _compute_focal_image(
+        telescope, wavelength_nm=wavelength_nm,
+        image_size_mm=image_size_mm, num_pixels=num_pixels,
+        method=method, num_trace_rays=num_trace_rays,
+        seeing_arcsec=seeing_arcsec)
+
+    if image is None:
+        ax.set_title(title)
+        ax.text(0.5, 0.5, "No fully traced rays", ha="center",
+                va="center", transform=ax.transAxes)
+        return
+
+    ax.imshow(image, extent=[-half_size, half_size, -half_size, half_size],
+              origin="lower", cmap=colormap, vmin=0, vmax=1)
+
+    ax.set_xlabel("Position (mm)")
+    ax.set_ylabel("Position (mm)")
+    ax.set_title(title)
+
+    method_label = ("Analytical" if info["method"] == "analytical"
+                    else f"Traced ({info['num_trace_rays']} rays)")
+    info_lines = [
+        f"Airy disk radius: {info['airy_radius'] * 1000:.2f} \u00b5m",
+        f"RMS geometric spot: {info['rms_spot'] * 1000:.2f} \u00b5m",
+        f"\u03bb = {info['wavelength_nm']:.0f} nm | f/{info['f_ratio']:.1f}",
+        f"Method: {method_label}",
+    ]
+
+    approx_lines = []
+    if info["seeing_arcsec"] is None:
+        approx_lines.append("No atmospheric seeing")
+    else:
+        info_lines.append(f"Seeing: {info['seeing_arcsec']:.1f}\"")
+    approx_lines.append("Unobstructed aperture")
+    approx_lines.append("Monochromatic")
+
+    info_text = "\n".join(info_lines)
+    approx_text = "Approx: " + "; ".join(approx_lines)
+
+    ax.text(0.02, 0.02, info_text,
+            transform=ax.transAxes, fontsize=9,
+            verticalalignment="bottom", color="white",
+            bbox=dict(boxstyle="round", facecolor="black", alpha=0.6))
+
+    ax.text(0.02, 0.98, approx_text,
+            transform=ax.transAxes, fontsize=7,
+            verticalalignment="top", color="yellow", alpha=0.8)
+
+
 def plot_focal_image(telescope: NewtonianTelescope,
                      title: str = "Simulated Focal Plane Image",
                      figsize: tuple[float, float] = (7, 7),
@@ -488,116 +644,13 @@ def plot_focal_image(telescope: NewtonianTelescope,
     Returns:
         The matplotlib Figure object.
     """
-    from scipy.signal import fftconvolve
-
-    aperture_diameter = telescope.primary_diameter
-    focal_length = telescope.focal_length
-
-    y_offsets = _get_focal_offsets(telescope, method, num_trace_rays)
-    if y_offsets is None:
-        fig, ax = plt.subplots(figsize=figsize)
-        ax.set_title(title)
-        ax.text(0.5, 0.5, "No fully traced rays", ha="center",
-                va="center", transform=ax.transAxes)
-        return fig
-
-    wavelength_mm = wavelength_nm * 1e-6  # Convert nm to mm
-    f_ratio = focal_length / aperture_diameter
-
-    # Airy disk radius: first zero at r = 1.22 * lambda * f/D
-    airy_radius = 1.22 * wavelength_mm * f_ratio
-    rms_spot = np.std(y_offsets)
-    max_spot = np.max(np.abs(y_offsets))
-
-    # Auto-determine image extent to show the full structure
-    if image_size_mm is None:
-        image_size_mm = max(airy_radius * 10, max_spot * 6, 0.001)
-
-    half_size = image_size_mm / 2.0
-
-    is_perfect_focus = rms_spot < 1e-10
-    pixel_size = image_size_mm / num_pixels
-
-    if is_perfect_focus:
-        # No geometric aberration — image is the pure Airy pattern
-        coords = np.linspace(-half_size, half_size, num_pixels)
-        xx, yy = np.meshgrid(coords, coords)
-        rr = np.sqrt(xx ** 2 + yy ** 2)
-        image = _airy_psf(rr, aperture_diameter, focal_length,
-                          wavelength_mm)
-    else:
-        # Step 1: Build rotationally symmetric geometric spot
-        geometric_image = _build_geometric_spot_2d(y_offsets, half_size,
-                                                   num_pixels)
-
-        # Step 2: Build Airy PSF kernel
-        kernel_half_size = max(airy_radius * 5, pixel_size * 3)
-        kernel_n = min(num_pixels, 256)
-        kernel_coords = np.linspace(-kernel_half_size, kernel_half_size,
-                                    kernel_n)
-        kxx, kyy = np.meshgrid(kernel_coords, kernel_coords)
-        kr = np.sqrt(kxx ** 2 + kyy ** 2)
-        airy_kernel = _airy_psf(kr, aperture_diameter, focal_length,
-                                wavelength_mm)
-        airy_kernel = airy_kernel / airy_kernel.sum()
-
-        # Step 3: Convolve geometric spot with Airy PSF
-        image = fftconvolve(geometric_image, airy_kernel, mode="same")
-
-    # Step 4: Optionally apply atmospheric seeing
-    if seeing_arcsec is not None and seeing_arcsec > 0:
-        plate_scale = 206265.0 / focal_length
-        seeing_sigma_mm = (seeing_arcsec / 2.355) / plate_scale
-        coords = np.linspace(-half_size, half_size, num_pixels)
-        sxx, syy = np.meshgrid(coords, coords)
-        seeing_kernel = np.exp(-(sxx ** 2 + syy ** 2) /
-                               (2 * seeing_sigma_mm ** 2))
-        seeing_kernel = seeing_kernel / seeing_kernel.sum()
-        image = fftconvolve(image, seeing_kernel, mode="same")
-
-    # Normalize to [0, 1]
-    if image.max() > 0:
-        image = image / image.max()
-
-    # Plot
     fig, ax = plt.subplots(figsize=figsize)
-
-    ax.imshow(image, extent=[-half_size, half_size, -half_size, half_size],
-              origin="lower", cmap=colormap, vmin=0, vmax=1)
-
-    ax.set_xlabel("Position (mm)")
-    ax.set_ylabel("Position (mm)")
-    ax.set_title(title)
-
-    # Build info text with physics details
-    method_label = "Analytical" if method == "analytical" else f"Traced ({num_trace_rays} rays)"
-    info_lines = [
-        f"Airy disk radius: {airy_radius * 1000:.2f} \u00b5m",
-        f"RMS geometric spot: {rms_spot * 1000:.2f} \u00b5m",
-        f"\u03bb = {wavelength_nm:.0f} nm | f/{f_ratio:.1f}",
-        f"Method: {method_label}",
-    ]
-
-    approx_lines = []
-    if seeing_arcsec is None:
-        approx_lines.append("No atmospheric seeing")
-    else:
-        info_lines.append(f"Seeing: {seeing_arcsec:.1f}\"")
-    approx_lines.append("Unobstructed aperture")
-    approx_lines.append("Monochromatic")
-
-    info_text = "\n".join(info_lines)
-    approx_text = "Approx: " + "; ".join(approx_lines)
-
-    ax.text(0.02, 0.02, info_text,
-            transform=ax.transAxes, fontsize=9,
-            verticalalignment="bottom", color="white",
-            bbox=dict(boxstyle="round", facecolor="black", alpha=0.6))
-
-    ax.text(0.02, 0.98, approx_text,
-            transform=ax.transAxes, fontsize=7,
-            verticalalignment="top", color="yellow", alpha=0.8)
-
+    _draw_focal_image(ax, telescope, title=title,
+                      wavelength_nm=wavelength_nm,
+                      image_size_mm=image_size_mm,
+                      num_pixels=num_pixels, method=method,
+                      num_trace_rays=num_trace_rays,
+                      seeing_arcsec=seeing_arcsec, colormap=colormap)
     plt.tight_layout()
 
     if save_path:
@@ -840,6 +893,273 @@ def _estimate_strehl(rms_spot: float, airy_radius: float) -> float:
     # Approximate: Strehl ~ 1 / (1 + (pi * rms_spot / (2 * airy_radius))^2)
     ratio = np.pi * rms_spot / (2 * airy_radius)
     return 1.0 / (1.0 + ratio ** 2)
+
+
+# ── Comparison functions ─────────────────────────────────────────────
+
+
+def plot_ray_trace_comparison(
+    telescopes: list[NewtonianTelescope],
+    labels: list[str],
+    num_display_rays: int = 11,
+    figsize_per_panel: tuple[float, float] = (7, 8),
+    save_path: str | None = None,
+) -> plt.Figure:
+    """Plot ray trace diagrams side by side for multiple telescopes.
+
+    Args:
+        telescopes: List of telescope objects to compare.
+        labels: Display label for each telescope.
+        num_display_rays: Number of rays to trace per telescope.
+        figsize_per_panel: (width, height) per subplot panel.
+        save_path: If provided, save the figure to this path.
+
+    Returns:
+        The matplotlib Figure object.
+    """
+    from telescope_sim.source import create_parallel_rays
+
+    n = len(telescopes)
+    fig, axes = plt.subplots(
+        1, n,
+        figsize=(figsize_per_panel[0] * n, figsize_per_panel[1]),
+        squeeze=False,
+    )
+
+    for i, (telescope, label) in enumerate(zip(telescopes, labels)):
+        ax = axes[0, i]
+        rays = create_parallel_rays(
+            num_rays=num_display_rays,
+            aperture_diameter=telescope.primary_diameter,
+            entry_height=telescope.tube_length * 1.15,
+        )
+        telescope.trace_rays(rays)
+        components = telescope.get_components_for_plotting()
+        _draw_ray_trace(ax, rays, components, title=label)
+
+    fig.suptitle("Ray Trace Comparison", fontsize=14)
+    plt.tight_layout()
+
+    if save_path:
+        fig.savefig(save_path, dpi=150, bbox_inches="tight")
+
+    return fig
+
+
+def plot_spot_diagram_comparison(
+    telescopes: list[NewtonianTelescope],
+    labels: list[str],
+    num_display_rays: int = 11,
+    figsize_per_panel: tuple[float, float] = (7, 7),
+    save_path: str | None = None,
+) -> plt.Figure:
+    """Plot spot diagrams side by side for multiple telescopes.
+
+    Args:
+        telescopes: List of telescope objects to compare.
+        labels: Display label for each telescope.
+        num_display_rays: Number of rays to trace per telescope.
+        figsize_per_panel: (width, height) per subplot panel.
+        save_path: If provided, save the figure to this path.
+
+    Returns:
+        The matplotlib Figure object.
+    """
+    from telescope_sim.source import create_parallel_rays
+
+    n = len(telescopes)
+    fig, axes = plt.subplots(
+        1, n,
+        figsize=(figsize_per_panel[0] * n, figsize_per_panel[1]),
+        squeeze=False,
+    )
+
+    for i, (telescope, label) in enumerate(zip(telescopes, labels)):
+        ax = axes[0, i]
+        rays = create_parallel_rays(
+            num_rays=num_display_rays,
+            aperture_diameter=telescope.primary_diameter,
+            entry_height=telescope.tube_length * 1.15,
+        )
+        telescope.trace_rays(rays)
+        y_offsets = _find_focal_plane_positions(rays)
+        _draw_spot_diagram(ax, y_offsets, title=label)
+
+    fig.suptitle("Spot Diagram Comparison", fontsize=14)
+    plt.tight_layout()
+
+    if save_path:
+        fig.savefig(save_path, dpi=150, bbox_inches="tight")
+
+    return fig
+
+
+def plot_focal_image_comparison(
+    telescopes: list[NewtonianTelescope],
+    labels: list[str],
+    wavelength_nm: float = 550.0,
+    method: str = "analytical",
+    seeing_arcsec: float | None = None,
+    figsize_per_panel: tuple[float, float] = (7, 7),
+    save_path: str | None = None,
+) -> plt.Figure:
+    """Plot focal plane images side by side for multiple telescopes.
+
+    Args:
+        telescopes: List of telescope objects to compare.
+        labels: Display label for each telescope.
+        wavelength_nm: Wavelength of light in nanometers.
+        method: "analytical" or "traced".
+        seeing_arcsec: Atmospheric seeing FWHM in arcseconds.
+        figsize_per_panel: (width, height) per subplot panel.
+        save_path: If provided, save the figure to this path.
+
+    Returns:
+        The matplotlib Figure object.
+    """
+    n = len(telescopes)
+    fig, axes = plt.subplots(
+        1, n,
+        figsize=(figsize_per_panel[0] * n, figsize_per_panel[1]),
+        squeeze=False,
+    )
+
+    for i, (telescope, label) in enumerate(zip(telescopes, labels)):
+        ax = axes[0, i]
+        _draw_focal_image(
+            ax, telescope, title=label,
+            wavelength_nm=wavelength_nm, method=method,
+            seeing_arcsec=seeing_arcsec,
+        )
+
+    fig.suptitle("Focal Image Comparison", fontsize=14)
+    plt.tight_layout()
+
+    if save_path:
+        fig.savefig(save_path, dpi=150, bbox_inches="tight")
+
+    return fig
+
+
+def plot_psf_comparison(
+    telescopes: list[NewtonianTelescope],
+    labels: list[str],
+    wavelength_nm: float = 550.0,
+    method: str = "analytical",
+    figsize: tuple[float, float] = (14, 7),
+    save_path: str | None = None,
+) -> plt.Figure:
+    """Overlay PSF profiles from multiple telescopes on shared axes.
+
+    Creates a two-panel figure (linear + log scale). The ideal Airy PSF
+    is drawn once as a reference; each telescope's combined PSF is
+    overlaid in a distinct color with Strehl ratio in the legend.
+
+    Args:
+        telescopes: List of telescope objects to compare.
+        labels: Display label for each telescope.
+        wavelength_nm: Wavelength of light in nanometers.
+        method: "analytical" or "traced".
+        figsize: Figure size in inches.
+        save_path: If provided, save the figure to this path.
+
+    Returns:
+        The matplotlib Figure object.
+    """
+    from scipy.signal import fftconvolve
+
+    fig, (ax_lin, ax_log) = plt.subplots(1, 2, figsize=figsize)
+    colors = plt.cm.tab10.colors  # up to 10 distinct colors
+
+    # Use the first telescope's geometry for the common Airy reference
+    ref = telescopes[0]
+    wavelength_mm = wavelength_nm * 1e-6
+    f_ratio = ref.focal_length / ref.primary_diameter
+    airy_radius = 1.22 * wavelength_mm * f_ratio
+
+    # Determine a common radial extent
+    all_max_spots = []
+    for telescope in telescopes:
+        y_off = _get_focal_offsets(telescope, method)
+        if y_off is not None:
+            all_max_spots.append(np.max(np.abs(y_off)))
+    r_max = max(airy_radius * 6, max(all_max_spots) * 4 if all_max_spots else 0, 0.001)
+    r = np.linspace(0, r_max, 1000)
+
+    # Airy reference (shared across telescopes with same aperture)
+    airy_profile = _airy_psf(r, ref.primary_diameter, ref.focal_length,
+                             wavelength_mm)
+    ax_lin.plot(r * 1000, airy_profile, "b-", linewidth=1.5, alpha=0.5,
+                label="Ideal Airy (diffraction only)")
+    ax_log.semilogy(r * 1000, np.clip(airy_profile, 1e-6, None),
+                    "b-", linewidth=1.5, alpha=0.5, label="Ideal Airy")
+
+    ax_lin.axvline(airy_radius * 1000, color="gray", linestyle=":",
+                   alpha=0.4, label=f"Airy radius: {airy_radius * 1000:.2f} \u00b5m")
+    ax_log.axvline(airy_radius * 1000, color="gray", linestyle=":",
+                   alpha=0.4)
+
+    for idx, (telescope, label) in enumerate(zip(telescopes, labels)):
+        color = colors[idx % len(colors)]
+        y_offsets = _get_focal_offsets(telescope, method)
+        if y_offsets is None:
+            continue
+
+        rms_spot = np.std(y_offsets)
+        strehl = _estimate_strehl(rms_spot, airy_radius)
+        is_perfect = rms_spot < 1e-10
+
+        if is_perfect:
+            combined_r = r
+            combined_radial = airy_profile
+        else:
+            n_px = 256
+            half = r_max
+            coords_1d = np.linspace(-half, half, n_px)
+            cxx, cyy = np.meshgrid(coords_1d, coords_1d)
+            crr = np.sqrt(cxx ** 2 + cyy ** 2)
+
+            geo_2d = _build_geometric_spot_2d(y_offsets, half, n_px)
+            airy_2d = _airy_psf(crr, telescope.primary_diameter,
+                                telescope.focal_length, wavelength_mm)
+            airy_2d = airy_2d / airy_2d.sum()
+            combined_2d = fftconvolve(geo_2d, airy_2d, mode="same")
+
+            center = n_px // 2
+            pixel_size = (2 * half) / n_px
+            combined_radial = combined_2d[center, center:]
+            combined_r = np.arange(len(combined_radial)) * pixel_size
+            if combined_radial.max() > 0:
+                combined_radial = combined_radial / combined_radial.max()
+
+        curve_label = f"{label} (Strehl={strehl:.3f})"
+        ax_lin.plot(combined_r * 1000, combined_radial, color=color,
+                    linewidth=2, label=curve_label)
+        ax_log.semilogy(combined_r * 1000,
+                        np.clip(combined_radial, 1e-6, None),
+                        color=color, linewidth=2, label=curve_label)
+
+    ax_lin.set_xlabel("Radial distance (\u00b5m)")
+    ax_lin.set_ylabel("Normalized intensity")
+    ax_lin.set_title("Linear scale")
+    ax_lin.legend(fontsize=7)
+    ax_lin.grid(True, alpha=0.3)
+    ax_lin.set_ylim(-0.05, 1.05)
+
+    ax_log.set_xlabel("Radial distance (\u00b5m)")
+    ax_log.set_ylabel("Normalized intensity (log)")
+    ax_log.set_title("Log scale")
+    ax_log.legend(fontsize=7)
+    ax_log.grid(True, alpha=0.3)
+    ax_log.set_ylim(1e-4, 1.5)
+
+    fig.suptitle("PSF Comparison", fontsize=14)
+    plt.tight_layout()
+
+    if save_path:
+        fig.savefig(save_path, dpi=150, bbox_inches="tight")
+
+    return fig
 
 
 def _draw_tube(ax: plt.Axes, components: dict):

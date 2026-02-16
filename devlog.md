@@ -82,3 +82,39 @@
 - Spherical PSF shows geometric spot ~22μm RMS (Strehl ~0.01) — clear aberration
 - The geometric spot for parabolic should ideally be near-zero for a perfect parabola;
   the ~12μm is likely numerical precision from 2D simulation with only 21 rays
+
+---
+
+## Session 3 — 2026-02-16
+
+### What was done
+- Refactored `ray_trace_plot.py` to extract reusable drawing helpers:
+  - `_draw_ray_trace()` — draws mirrors, rays, focal point on a given axes
+  - `_draw_spot_diagram()` — draws scatter + circles on a given axes
+  - `_draw_focal_image()` / `_compute_focal_image()` — computes and draws image on given axes
+  - Existing public `plot_*` functions now thin wrappers around these helpers
+- Added 4 comparison functions (all reuse the `_draw_*` helpers, no duplicated drawing code):
+  - `plot_ray_trace_comparison()` — 1×N subplots, side-by-side ray traces
+  - `plot_spot_diagram_comparison()` — 1×N subplots, side-by-side spot diagrams
+  - `plot_focal_image_comparison()` — 1×N subplots, side-by-side focal images
+  - `plot_psf_comparison()` — overlay PSF curves on shared linear+log axes with Strehl in legend
+- Updated `telescope_sim/plotting/__init__.py` to export new comparison functions
+- Rewrote `main.py` as a discoverable control panel:
+  - All tunable parameters at the top with descriptive comments
+  - Commented-out alternatives for each option (mirror type, ray count, wavelength, seeing, method)
+  - `compare_mirrors` flag to toggle single vs comparison mode
+  - `run_single()` and `run_comparison()` dispatch functions
+- Updated `CLAUDE.md` with preference about exposing options in entry-point scripts
+
+### Decisions made
+- Extract `_draw_*` helpers with `ax` parameter to avoid code duplication between single and comparison plots
+- PSF comparison uses curve overlay (not side-by-side panels) since the original PSF plot is a complex 3-panel layout
+- `_compute_focal_image()` separated from `_draw_focal_image()` so image computation can be reused independently
+
+### Installed
+- pytest 9.0.2 (re-installed in new venv context)
+
+### Notes
+- All 35 tests pass
+- Single mode (spherical), single mode (parabolic), and comparison mode all verified working
+- No new dependencies added

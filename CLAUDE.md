@@ -50,3 +50,5 @@ too many tokens or things are not optimized), let me know so we can try to impro
 * Before beginning a long coding session, make a plan and summarize it with an estimated time it will take. When doing this coding session, continue on without asking for permission until done.
 * Track and tell me how my usage is going and if I am likely to run out of tokens or usage soon
 (or during a long coding session that is about to start)
+* Entry-point scripts (main.py) should expose options with descriptive comments and
+commented-out alternatives so users can discover and toggle features easily.
