@@ -9,7 +9,8 @@
 - **Flat mirror**: Ray-line-segment intersection, exact reflection. Used for Newtonian secondary diagonal.
 
 ### Wave Optics
-- **Airy diffraction pattern**: Point spread function from circular aperture diffraction. Uses `PSF(r) = [2 * J1(x) / x]^2` where `x = pi * D * r / (lambda * f)`. Physically determines the resolution limit of the telescope.
+- **Airy diffraction pattern**: Point spread function for circular aperture diffraction. Uses `PSF(r) = [2 * J1(x) / x]^2` where `x = pi * D * r / (lambda * f)`. Physically determines the resolution limit of the telescope.
+- **Central obstruction diffraction**: Annular aperture PSF accounting for secondary mirror obstruction. Uses `PSF(r) = [1/(1-ε²)]² × [2J₁(x)/x - ε²·2J₁(εx)/(εx)]²` where `ε = D_secondary / D_primary`. Reduces to the standard Airy pattern when ε=0. Produces stronger secondary rings and slightly lower peak intensity compared to an unobstructed aperture.
 
 ### Image Formation
 - **Focal plane imaging**: Geometric ray positions convolved with diffraction PSF to produce simulated images.
@@ -26,7 +27,6 @@
 
 ### Wave Optics
 - **Chromatic effects** — wavelength-dependent behavior (currently monochromatic at 550nm)
-- **Central obstruction diffraction** — the secondary mirror blocks the center of the aperture, modifying the Airy pattern to an annular aperture PSF
 - **Wavefront error** — phase errors from imperfect optics
 - **Interference and coherence effects**
 

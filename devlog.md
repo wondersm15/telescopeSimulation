@@ -118,3 +118,104 @@
 - All 35 tests pass
 - Single mode (spherical), single mode (parabolic), and comparison mode all verified working
 - No new dependencies added
+
+---
+
+## Session 4 — 2026-02-16
+
+### What was done
+- Added secondary mirror central obstruction to the PSF physics
+- Implemented annular aperture PSF formula: `PSF(r) = [1/(1-ε²)]² × [2J₁(x)/x - ε²·2J₁(εx)/(εx)]²`
+  - When ε=0, reduces exactly to the standard Airy pattern (no breaking changes)
+  - Default obstruction ratio is 20% (from existing secondary_minor_axis / primary_diameter)
+- Added `obstruction_ratio` property to `NewtonianTelescope`
+- Updated `_airy_psf()` to accept and use `obstruction_ratio` parameter
+- Passed obstruction ratio through all callers: `_compute_focal_image()`, `plot_psf_profile()`, `plot_psf_comparison()`
+- Masked out centrally-blocked rays in `_analytical_focal_offsets()` (rays at |h| < secondary_radius excluded)
+- Updated info/formula displays:
+  - `_draw_focal_image()`: shows obstruction ratio in info box, removed "Unobstructed aperture" approx label
+  - `plot_psf_profile()`: shows ε and obstruction % in metrics, shows annular PSF formula when ε > 0
+  - `plot_psf_comparison()`: shows obstruction ratio in Airy reference label
+- Updated PHYSICS.md: moved central obstruction diffraction from "Not Yet Implemented" to "Implemented"
+
+### Decisions made
+- Obstruction ratio computed from existing geometry (secondary_minor_axis / primary_diameter)
+- No new public API parameters needed — obstruction comes from the telescope object
+- Strehl estimation unchanged — it's relative to the diffraction-limited PSF for the same system
+
+### Installed
+- Nothing new
+
+### Notes
+- Physical effect: secondary rings become stronger, peak intensity slightly lower vs unobstructed
+- All existing tests should still pass (no API changes, ε=0 gives exact same results as before)
+
+---
+
+## Session 4 (continued) — 2026-02-16
+
+### What was done
+- Moved diffraction PSF computation from plotting module to physics module (separation of concerns)
+  - Created `telescope_sim/physics/diffraction.py` with public `compute_psf()` function
+  - Removed `_airy_psf()` from `ray_trace_plot.py`, replaced with import of `compute_psf`
+  - Updated `telescope_sim/physics/__init__.py` to export `compute_psf`
+- Added `include_obstruction` toggle throughout the PSF/imaging pipeline
+  - New parameter on public functions: `plot_focal_image()`, `plot_psf_profile()`,
+    `plot_psf_comparison()`, `plot_focal_image_comparison()`
+  - Threaded through internal helpers: `_draw_focal_image()`, `_compute_focal_image()`,
+    `_analytical_focal_offsets()`, `_get_focal_offsets()`
+  - When `include_obstruction=False`: passes `obstruction_ratio=0.0` to `compute_psf()`
+    and skips the secondary ray mask in `_analytical_focal_offsets()`
+  - Info/formula displays updated to show "Obstruction: disabled" when toggled off
+- Added `include_obstruction` config option in `main.py` with commented-out alternative
+  - Passed through to `run_single()` and `run_comparison()`
+
+### Decisions made
+- PSF computation belongs in physics module, not plotting — first step in separation of concerns
+- `include_obstruction` defaults to `True` (no change to existing behavior)
+- Other physics-computation functions (`_analytical_focal_offsets`, `_estimate_strehl`,
+  `_build_geometric_spot_2d`) remain in plotting for now (future refactor opportunity)
+
+### Installed
+- Nothing new
+
+### Notes
+- All 35 existing tests still pass (no API changes for default behavior)
+- `from telescope_sim.physics import compute_psf` now works
+- Toggle allows comparing obstructed vs unobstructed PSF for design evaluation
+
+---
+
+## Session 5 — 2026-02-16
+
+### What was done
+- Generalized comparison mode from rigid mirror-type comparison to flexible config-dict system
+- **`ray_trace_plot.py`**: added `_resolve_physics_params()` helper that normalizes per-panel
+  physics dicts (broadcast scalar defaults when `physics_params=None`, merge overrides when provided)
+- **`plot_focal_image_comparison()`**: new `physics_params` kwarg; passes per-panel wavelength,
+  method, seeing, and obstruction to `_draw_focal_image()`
+- **`plot_psf_comparison()`**: new `physics_params` kwarg; auto-detects whether all panels share
+  physics+geometry to decide between shared Airy reference (old behavior) vs per-curve
+  self-contained labels with richer annotations
+- **`main.py`**: replaced `compare_mirrors` / `compare_types` with `compare_mode` / `comparison_configs`
+  - Each config dict has a `"label"` plus any overrides (telescope geometry and/or physics keys)
+  - `_resolve_comparison_configs()` validates keys (catches typos), partitions into telescope vs
+    physics, builds `NewtonianTelescope` instances, returns `(telescopes, labels, physics_params)`
+  - `run_comparison()` rewritten to accept `(configs, defaults, num_display_rays)`
+  - 6 commented-out example configs: mirror types, obstruction toggle, wavelengths, apertures,
+    focal ratios, mixed geometry+physics
+
+### Decisions made
+- Config-dict approach: each panel can override any axis (geometry or physics) independently
+- Backward compatible: when `physics_params=None`, comparison functions behave identically to before
+- Key validation catches typos early with clear error messages
+- PSF comparison auto-selects shared vs per-panel Airy reference based on whether configs differ
+
+### Installed
+- Nothing new
+
+### Notes
+- All 35 existing tests pass
+- Smoke-tested: default mirror comparison, obstruction toggle, wavelength comparison all run cleanly
+- `run_single()` is completely untouched
+- `plot_ray_trace_comparison()` and `plot_spot_diagram_comparison()` unchanged (no physics params)

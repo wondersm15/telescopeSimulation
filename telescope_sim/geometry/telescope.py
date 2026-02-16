@@ -91,6 +91,11 @@ class NewtonianTelescope:
         """Approximate tube length (primary to secondary)."""
         return self.secondary_offset
 
+    @property
+    def obstruction_ratio(self) -> float:
+        """Central obstruction ratio (secondary diameter / primary diameter)."""
+        return self.secondary_minor_axis / self.primary_diameter
+
     def trace_ray(self, ray: Ray) -> Ray:
         """Trace a single ray through the full optical system.
 
