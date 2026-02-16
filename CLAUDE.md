@@ -28,6 +28,13 @@ Implemented modules can change but envisioned modules include:
 Primary language is python
 
 
+## Physics Policy
+* Use real physics everywhere possible so the simulation can inform real design decisions.
+* Where real physics is not used (e.g., approximations or placeholders), flag it clearly
+  in code comments and in plot/output text so the user knows the limitation.
+* See PHYSICS.md for a detailed inventory of what physics is and isn't yet implemented.
+
+
 ## Coding Conventions & Style
 * Follow PEP 8 conventions: snake_case for functions, methods, and variables; PascalCase for class names; UPPER_SNAKE_CASE for constants.
 * Where possible, reduce duplication of code so that specific logic only needs to be implemented
