@@ -7,6 +7,13 @@
 - **Parabolic mirror**: Ray-parabola intersection via quadratic solve, exact surface normals. Correctly focuses all on-axis parallel rays to a single focal point.
 - **Spherical mirror**: Ray-circle intersection, exact surface normals. Correctly exhibits spherical aberration (edge rays focus at different point than center rays).
 - **Flat mirror**: Ray-line-segment intersection, exact reflection. Used for Newtonian secondary diagonal.
+- **Hyperbolic mirror**: Ray-hyperbola intersection via quadratic solve, exact surface normals on the convex branch. Used for Cassegrain secondary. Surface equation: `(y+a)²/a² - x²/b²= 1` with `b² = a²(e²-1)`.
+- **Cassegrain two-mirror system**: Parabolic primary + convex hyperbolic secondary. The secondary magnifies the focal length by factor M: `f_eff = f_primary × M`. Hyperbola foci placed at primary focus (F1) and system back focus (F2). Standard Cassegrain geometry formulas derive secondary position, size, eccentricity, and semi-major axis from primary focal length, magnification, and back focal distance.
+- **Refraction (Snell's law)**: `n1 * sin(θ1) = n2 * sin(θ2)` — exact 2D vector form. Handles total internal reflection (returns None when sin(θ2) > 1). Used for lens surfaces.
+- **Spherical lens surfaces**: Two-surface lens model with independent front and back radii of curvature. Supports biconvex, planoconvex, and meniscus configurations. Ray traced through front (air→glass) and back (glass→air) refractions.
+- **Cauchy dispersion model**: `n(λ) = B + C/λ²` — wavelength-dependent refractive index for optical glasses. Preset coefficients for BK7 crown and F2 flint glass. Enables chromatic analysis (blue light refracts more than red).
+- **Refracting telescope**: Objective lens focuses light directly to focal plane. Zero central obstruction. Lens geometry auto-computed from lensmaker's equation for symmetric biconvex singlet. *Approximation: thin-lens formula R = 2f(n-1) used for initial geometry; thick-lens effects shift focus slightly.*
+- **Maksutov-Cassegrain**: Meniscus corrector (refraction through front and back surfaces) + spherical primary (reflection) + aluminized spot on meniscus back surface acting as convex secondary (reflection). The corrector compensates spherical aberration from the spherical primary. Reuses Cassegrain geometry formulas for secondary placement and magnification. *Approximation: near-concentric meniscus formula used for auto-computed front radius; exact aberration correction depends on precise radius matching in real designs.*
 - **Vignetting**: Circle-overlap computation for off-axis illumination fraction at the secondary mirror. Beam diameter and shift at the secondary plane computed from geometry. *Approximation: tube wall vignetting not modeled.*
 
 ### Wave Optics
@@ -32,8 +39,9 @@
 ## Not Yet Implemented
 
 ### Geometric Optics
-- **Refraction** (Snell's law) — needed for lenses, eyepieces, corrector plates
-- **Conic sections beyond parabola/sphere** — hyperbolic, elliptical mirrors (for Cassegrain, Ritchey-Chretien designs)
+- **Chromatic aberration visualization** — multi-wavelength tracing through lenses to show color fringing
+- **Achromatic doublet** — crown + flint glass combination to cancel chromatic aberration
+- **Conic sections beyond implemented** — elliptical mirrors (for Ritchey-Chrétien designs and other advanced configurations)
 - **Surface errors** — real mirrors have manufacturing imperfections (wavefront error from surface figure)
 
 ### Wave Optics

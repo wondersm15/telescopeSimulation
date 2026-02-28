@@ -219,3 +219,395 @@
 - Smoke-tested: default mirror comparison, obstruction toggle, wavelength comparison all run cleanly
 - `run_single()` is completely untouched
 - `plot_ray_trace_comparison()` and `plot_spot_diagram_comparison()` unchanged (no physics params)
+
+---
+
+## Session 6 — 2026-02-17
+
+### What was done
+- Added three major physics features: **vignetting**, **spider vane diffraction**, and **off-axis coma**
+- **New physics modules**:
+  - `telescope_sim/physics/vignetting.py` — circle-overlap illumination fraction computation, fully-illuminated field calculation. Tube wall vignetting flagged as not modeled.
+  - `telescope_sim/physics/fft_psf.py` — 2D FFT-based PSF with pupil mask (circular aperture + central obstruction + spider vanes). Fraunhofer diffraction via `PSF = |FFT(pupil)|²`. Validated against analytical Airy.
+  - `telescope_sim/physics/aberrations.py` — Seidel 3rd-order coma formulas: spot diagram, RMS computation, coma-free field. Flagged as 3rd-order approximation.
+- **Telescope geometry** (`telescope.py`):
+  - Added `spider_vanes` and `spider_vane_width` parameters to `NewtonianTelescope.__init__()`
+  - Added `compute_vignetting()` and `fully_illuminated_field()` methods (delegate to physics module)
+  - Added spider vane info to `get_components_for_plotting()`
+- **Light source** (`light_source.py`):
+  - Added `field_angle_arcsec` parameter to `create_parallel_rays()` for off-axis beams
+- **New plot functions** (in `ray_trace_plot.py`):
+  - `plot_vignetting_curve()` — illumination vs field angle with fully-illuminated boundary marker
+  - `plot_vignetting_comparison()` — overlay curves for multiple telescopes
+  - `plot_psf_2d()` — 2D PSF on log scale showing diffraction spikes
+  - `plot_coma_spot()` — 2D coma spot diagram convolved with diffraction PSF
+  - `plot_coma_field_analysis()` — two-panel: RMS coma vs field angle + spot diagram grid
+  - `_build_coma_spot_2d()` — direct 2D Gaussian-splat binning (no rotational symmetry assumption)
+  - `_resample_fft_psf()` — resamples FFT PSF onto target image grid
+- **FFT PSF integration** in `_compute_focal_image()`:
+  - When `spider_vanes > 0`, uses FFT-based PSF instead of analytical Airy
+  - When `spider_vanes == 0`, behavior identical to before (no changes to existing pipeline)
+- **Spider vane drawing** in `_draw_ray_trace()`: thin lines at secondary height
+- **main.py** updates:
+  - New config options: `spider_vanes`, `spider_vane_width`, `field_angle_arcsec`, `show_coma_analysis`, `show_vignetting`
+  - `_TELESCOPE_KEYS` extended with spider vane keys
+  - `run_single()` conditionally calls vignetting/coma/PSF-2D plots
+  - `run_comparison()` conditionally calls `plot_vignetting_comparison()`
+  - New commented-out comparison examples: spider vane comparison, apertures with vignetting
+- **New tests** (3 test files):
+  - `tests/test_vignetting.py` — 11 tests: concentric, no-overlap, monotonic, array input, telescope delegation
+  - `tests/test_fft_psf.py` — 10 tests: mask shape/binary/area, FFT vs analytical Airy, spike directions
+  - `tests/test_aberrations.py` — 9 tests: on-axis zero, linear scaling, tangential/sagittal ratio, coma-free field
+- Updated `PHYSICS.md`: moved vignetting/spider vanes/coma to Implemented; added chromatic PSF and surface errors to Not Yet Implemented
+- Updated `telescope_sim/physics/__init__.py` and `telescope_sim/plotting/__init__.py` with new exports
+
+### Decisions made
+- **Coma is a separate analysis pathway**, not integrated into `_compute_focal_image()`. Rationale: coma needs 2D positions (not 1D offsets), answers different questions than on-axis analysis, keeps existing pipeline clean.
+- Spider vane drawing in ray trace is additive (no changes to existing `_draw_ray_trace` logic)
+- FFT PSF only used when `spider_vanes > 0`, preserving exact existing behavior otherwise
+- Vignetting uses geometry-based circle overlap (real physics), flags tube wall as not modeled
+- Coma uses real Seidel 3rd-order formulas, flags as approximation valid for small angles
+
+### Installed
+- Nothing new
+
+### Notes
+- All 35 existing tests should still pass (no breaking changes)
+- 30 new tests across 3 test files
+- Default main.py config unchanged (parabolic vs spherical comparison, no spider vanes)
+
+---
+
+## Session 7 — 2026-02-17
+
+### What was done
+- Added astronomical source imaging: **PointSource**, **StarField**, and **Jupiter** classes
+- **New file**: `telescope_sim/source/sources.py`
+  - `AstronomicalSource` ABC with `render_ideal()` and `field_extent_arcsec` interface
+  - `PointSource` — single star at configurable field angle/PA/magnitude
+  - `StarField` — random field of stars with uniform-in-area placement, configurable magnitudes, seeded RNG
+  - `Jupiter` — parametric disk with limb darkening (u=0.5), sinusoidal equatorial bands, Great Red Spot. Flagged as parametric/artistic model.
+- **New rendering pipeline** in `ray_trace_plot.py`:
+  - `_compute_psf_at_field_angle()` — computes PSF including off-axis coma, reuses existing `compute_psf`, `compute_fft_psf`, `compute_coma_spot`
+  - `_render_source_through_telescope()` — full pipeline: ideal image → per-star PSF placement (with coma + vignetting) for point sources, or on-axis PSF convolution for Jupiter → optional seeing blur
+  - `plot_source_image()` — displays result with angular axes (arcsec), annotation box, auto colormap selection
+- **main.py** updates:
+  - New config options: `source_type` ("star", "star_field", "jupiter", or None), `num_stars`, `star_field_radius_arcsec`, `jupiter_diameter_arcsec`
+  - `run_single()` accepts optional `source` parameter, calls `plot_source_image()` when set
+  - Star field uses log scale by default for dynamic range
+- **New test file**: `tests/test_sources.py` — 30 tests covering all source classes and rendering pipeline
+- Updated `telescope_sim/source/__init__.py` and `telescope_sim/plotting/__init__.py` with new exports
+
+### Decisions made
+- Per-star PSF rendering for PointSource/StarField (field-dependent coma + vignetting per star)
+- On-axis PSF convolution for Jupiter (disk is small enough that PSF variation is negligible)
+- Source imaging is single-telescope only (not in comparison mode)
+- Jupiter model is parametric — flagged as approximation, not radiative transfer
+
+### Installed
+- Nothing new
+
+### Notes
+- All 104 tests pass (74 existing + 30 new)
+- To try: set `compare_mode = False` and `source_type = "jupiter"` (or "star_field") in main.py
+
+---
+
+## Session 7 (continued) — 2026-02-18
+
+### What was done
+- Switched to realistic colors for source images:
+  - Stars (PointSource, StarField): white on black sky ("gray" colormap)
+  - Jupiter: true RGB rendering with cream zones, brown belts, reddish-orange GRS
+  - Per-channel PSF convolution preserves color fidelity through blurring
+- Renamed focal image title from "Simulated Image" to "Point Spread Function" (it shows the telescope's response to a point source, not an astronomical image)
+- Added **Saturn** source with:
+  - Oblate disk (~10% oblateness), subtle equatorial bands, limb darkening
+  - A, B, C rings with radially varying brightness and Cassini division
+  - Ring tilt parameter (0 = edge-on, 27 = max opening)
+  - Realistic RGB: pale gold disk, cream/tan rings with per-section colors
+- Added **Moon** source with:
+  - Highland disk with mild limb darkening
+  - 10 named maria as dark elliptical patches at approximate selenographic positions
+  - Phase parameter (0 = new, 0.5 = quarter, 1.0 = full) with curved terminator
+  - Realistic RGB: warm gray highlands, cool dark gray maria
+- Generalized rendering pipeline to use `hasattr(source, 'render_ideal_rgb')` instead of Jupiter-specific type checks — any source with an RGB renderer now gets per-channel PSF convolution automatically
+- New config options in main.py: `source_type = "saturn"` / `"moon"`, `saturn_ring_tilt_deg`, `moon_phase`
+- 24 new tests for Saturn and Moon (render shape, ring presence, Cassini division, maria darker than highlands, phase shadow, RGB output, edge-on rings)
+
+### Decisions made
+- All extended sources (Jupiter, Saturn, Moon) share the same rendering path via duck typing
+- Saturn ring shadow on planet not modeled (flagged in docstring)
+- Moon maria are parametric ellipses, not real selenographic data (flagged)
+- Moon is very large (~31') — may need large FOV or reduced resolution to render practically
+
+### Installed
+- Nothing new
+
+### Notes
+- All 128 tests pass (74 existing + 54 source tests)
+- Saturn at default 18" with 20° ring tilt shows clearly separated A/B rings and Cassini division
+- Moon phase=0.5 correctly shows first-quarter illumination
+
+---
+
+## Session 8 — 2026-02-21
+
+### What was done
+- Completely rebuilt the Moon model from simple ellipses to a detailed procedural surface:
+  - **26 overlapping maria components** with noise-modulated irregular boundaries
+    and smoothstep transitions for natural blending
+  - **15 named craters** (Tycho, Copernicus, Aristarchus, Plato, etc.) with
+    bright rims and darker floors
+  - **400 random small craters** for surface texture, rendered with local
+    pixel-patch slicing for performance
+  - **Bright ray systems** from Tycho (12 rays), Copernicus (8 rays), and
+    Aristarchus (6 rays) with distance falloff
+  - **Multi-scale surface noise** at 4 octaves for highland texture
+  - **Gaussian smoothing** pass to blend all features naturally
+  - RGB colors: warm highlands vs cool dark maria, with albedo-dependent
+    color shifts
+- Performance optimization: reduced Moon full-pipeline render from ~387s to ~6s
+  by replacing full-image Python loops with local pixel-patch operations and
+  capping auto-scale resolution at 1024 pixels
+- Fixed Saturn front/back ring rendering: near-side rings now properly cross
+  over the planet face with 85% opacity
+
+### Decisions made
+- Procedural noise approach for Moon texture (no external image dependencies)
+- Auto-scale resolution capped at 1024px (good detail at ~2.4"/pixel for Moon)
+- Small craters use local pixel-patch slicing instead of full-image distance arrays
+
+### Installed
+- Nothing new
+
+### Notes
+- All 128 tests pass
+- Moon renders in ~6 seconds including PSF convolution at 1024px
+
+## Session 9 — 2026-02-21
+
+### What was done
+- Replaced procedural Moon model with NASA LRO texture-mapped approach
+  - Downloaded `lroc_color_2k.jpg` (2048x1024 equirectangular, 447KB) from
+    NASA SVS CGI Moon Kit (https://svs.gsfc.nasa.gov/4720)
+  - Stored in `telescope_sim/source/data/moon_albedo.jpg`
+  - Rewrote `Moon` class to use orthographic projection of the texture onto
+    the visible disk, with bilinear interpolation for smooth sampling
+  - Kept limb darkening (u=0.15) and curved phase terminator
+  - Added `sub_observer_lon_deg` parameter for libration/rotation
+  - Removed procedural code (~300 lines of maria, craters, rays, noise)
+  - Removed scipy dependency (was only needed for procedural gaussian_filter)
+  - Texture cached at class level (loaded once, shared by all instances)
+- Result: photorealistic Moon with real maria, craters, ray systems, and
+  color directly from LRO LROC WAC data
+
+### Decisions made
+- Use real NASA texture data instead of procedural generation — vastly more
+  realistic and actually simpler code
+- Replaced `seed` parameter with `sub_observer_lon_deg` (seed was only needed
+  for procedural random craters)
+- Texture file committed to repo (447KB, small enough for version control)
+
+### Installed
+- Nothing new (PIL/Pillow already available)
+
+### Notes
+- All 128 tests pass
+- Credit: NASA/GSFC/Arizona State University, LRO LROC WAC mosaic
+
+---
+
+## Session 10 — 2026-02-22
+
+### What was done
+- Added **atmospheric seeing presets** to main.py:
+  - `SEEING_PRESETS` dict: "excellent" (0.8"), "good" (1.5"), "average" (2.5"), "poor" (4.0")
+  - Default seeing changed from `None` to `"good"` — ground-based observers always have atmosphere
+  - String presets resolved to float in `main()` before passing downstream
+- **Adaptive resolution cap** in `plot_source_image()`:
+  - Resolution now scales to ~3 pixels per resolution element (Airy radius or seeing sigma, whichever larger)
+  - Moon capped at 2048 (texture resolution limit); other sources at 4096
+  - Replaces fixed 1024 cap that was coarser than the diffraction limit
+- **Eyepiece model** (`telescope_sim/geometry/eyepiece.py`):
+  - `Eyepiece` dataclass with magnification, true FOV, and exit pupil calculations
+  - 6 presets: Plössl 25mm/10mm, wide 20mm/13mm, ultra-wide 9mm/5mm
+  - `from_preset()` class method for named presets
+- **Eyepiece integration** in plotting:
+  - `plot_source_image()` accepts optional `eyepiece` parameter
+  - When set, crops/pads rendered image to eyepiece's true FOV
+  - Produces **two figures**: "enhanced view" (analysis-friendly) + "true angular size" (scaled to match apparent size at 50cm viewing distance)
+  - Circular field stop, eyepiece annotations (mag, TFOV, exit pupil)
+- **New helper functions** in `ray_trace_plot.py`:
+  - `_draw_source_on_axes()` — shared image drawing logic
+  - `_crop_or_pad_to_fov()` — FOV adjustment for eyepiece
+- Updated `main.py` with eyepiece configuration section
+- Updated `PHYSICS.md`: moved atmospheric seeing to Implemented, added eyepiece model and adaptive resolution entries
+- 10 new tests in `test_eyepiece.py`, 4 new integration tests in `test_sources.py`
+
+### Decisions made
+- Eyepiece is a **geometric model**, not a ray-traced optical element — it affects FOV and magnification but not the PSF (image is formed at the focal plane before the eyepiece)
+- True-size figure assumes 50cm viewing distance and 96 DPI (documented on plot)
+- Figure size capped at 20" max / 3" min for practicality
+- Seeing default is "good" (1.5") — most realistic for typical ground-based observing
+
+### Installed
+- Nothing new
+
+### Notes
+- All existing + new tests should pass
+- Backward compatible: `eyepiece=None` gives single figure (same as before)
+- `seeing_arcsec=None` still works as space telescope mode
+
+---
+
+## Session 11 — 2026-02-22
+
+### What was done
+- Added **exit pupil brightness / washout** perceptual effect
+  - New `_apply_exit_pupil_washout()` helper in `ray_trace_plot.py`
+  - Sigmoid model: washout ≈ 0 at exit pupil ≤ 1.5mm, ~0.5 at 3mm, ~0.95 at 5mm
+  - Reduces contrast (blend toward mean brightness) and desaturates RGB
+    (blend toward luminance) for bright extended objects
+  - Applied automatically in `plot_source_image()` when eyepiece is configured
+    and source is extended (Jupiter, Saturn, Moon — not PointSource/StarField)
+  - Washout strength shown in plot annotations when > 1%
+- Added 5 unit tests in `test_eyepiece.py` (sigmoid values, contrast, desaturation)
+- Added 3 integration tests in `test_sources.py` (large vs small exit pupil, no
+  eyepiece, shape preservation)
+- Updated PHYSICS.md: moved "Exit pupil brightness / washout" to Implemented
+
+### Decisions made
+- Washout is perceptual, applied post-rendering (does not modify PSF or physics)
+- Only extended sources affected (point sources/star fields have different
+  brightness behavior)
+- Empirical sigmoid — flagged as approximation in code and PHYSICS.md
+- No new config options needed: automatic based on exit pupil from eyepiece
+
+### Installed
+- Nothing new
+
+### Notes
+- Real-world context: observing Jupiter through a large telescope at low
+  magnification (large exit pupil) produces a washed-out, overly bright image
+  with reduced contrast and color saturation — this effect now modeled
+- Fix in real observing: higher magnification (smaller exit pupil) or ND filter
+
+---
+
+## Session 12 — 2026-02-22
+
+### What was done
+- Added **Classical Cassegrain telescope** model (parabolic primary + convex hyperbolic secondary)
+- **New class**: `HyperbolicMirror` in `telescope_sim/geometry/mirrors.py`
+  - Implements `Mirror` ABC: `intersect()`, `normal_at()`, `get_surface_points()`
+  - Ray-hyperbola intersection via quadratic solve on `(y+a)²/a² - x²/b² = 1`
+  - Convex surface normals point toward primary (downward at vertex)
+- **New class**: `CassegrainTelescope` in `telescope_sim/geometry/telescope.py`
+  - Parameters: `primary_diameter`, `primary_focal_length`, `secondary_magnification`, `back_focal_distance`
+  - Computes: effective focal length (`f_primary × M`), secondary position, size, hyperbola parameters
+  - Standard Cassegrain geometry: `a = c - d`, `e = (M+1)/(M-1)`, `d = (f+B)/(M+1)`
+  - Full interface matching `NewtonianTelescope` (duck typing): `focal_ratio`, `tube_length`, `obstruction_ratio`, `trace_ray`, `trace_rays`, `get_components_for_plotting`, `compute_vignetting`, `fully_illuminated_field`
+  - Ray trace sequence: primary → hyperbolic secondary → back through hole → focal plane behind primary
+- **Made `_find_focal_plane_positions()` direction-agnostic** in `ray_trace_plot.py`
+  - Detects dominant travel direction of final ray segments (x for Newtonian, y for Cassegrain)
+  - Scans along dominant axis, measures spread in perpendicular axis
+  - Works for both telescope types without type-checking
+- **Updated `main.py`**:
+  - New `telescope_type` option ("newtonian" or "cassegrain")
+  - Cassegrain-specific parameters: `primary_focal_length`, `secondary_magnification`, `back_focal_distance`
+  - `_resolve_comparison_configs()` builds correct telescope class based on `telescope_type`
+  - Commented-out Newtonian vs Cassegrain comparison example
+- **9 new tests** in `tests/test_geometry.py`:
+  - `HyperbolicMirror`: surface points shape/bounds, convex normal direction
+  - `CassegrainTelescope`: focal ratio, effective FL, ray convergence behind primary, multi-ray convergence, plotting components, obstruction ratio
+- Updated `PHYSICS.md`: added hyperbolic mirror and Cassegrain two-mirror system to Implemented
+- Updated `telescope_sim/geometry/__init__.py` with new exports
+
+### Decisions made
+- Classical Cassegrain uses parabolic primary (same as Newtonian) + hyperbolic secondary
+- `CassegrainTelescope` uses duck typing (same interface) rather than shared ABC — all existing plotting code works unchanged
+- Vignetting delegates to same physics module using primary_focal_length (not effective FL)
+- Back focal distance defaults to 15% of primary diameter if not specified
+
+### Installed
+- Nothing new
+
+### Notes
+- All 163 tests pass (154 existing + 9 new)
+- Key physics: effective FL = primary FL × magnification, giving long focal length in short tube
+- Example: 200mm f/20 Cassegrain (4000mm effective FL) using 800mm primary FL with M=5
+
+## Session 8 — 2026-02-22
+
+### What was done
+- Added refraction physics (Snell's law) in `telescope_sim/physics/refraction.py`
+  - `refract_direction()`: 2D vector Snell's law with total internal reflection detection
+  - `refractive_index_cauchy()`: Cauchy dispersion equation n(λ) = B + C/λ²
+  - `GLASS_CATALOG`: preset coefficients for BK7 crown and F2 flint glass
+- Created lens geometry in `telescope_sim/geometry/lenses.py`
+  - `Lens` ABC parallel to `Mirror` ABC — two-surface model (front + back)
+  - `SphericalLens`: biconvex, planoconvex, meniscus configurations via R_front/R_back
+  - Standard optics sign convention: R > 0 = convex toward incoming light
+- Added `RefractingTelescope` in `telescope_sim/geometry/telescope.py`
+  - Singlet objective lens with auto-computed geometry from lensmaker's equation
+  - Zero central obstruction, clean Airy pattern
+  - Same interface as Newtonian/Cassegrain (trace_ray, get_components_for_plotting, etc.)
+- Updated ray trace plotting for lens visualization
+  - Draws objective as filled shape (light blue) between front/back surface curves
+  - Added `primary_type == "lens"` case in `_analytical_focal_offsets` (diffraction-limited)
+- Updated `main.py` with `"refracting"` telescope type option
+- Added `_REFRACTING_KEYS` config set, comparison support, Refractor display name
+- Updated module exports (`__init__.py` for physics and geometry)
+- Updated `PHYSICS.md`: moved refraction to Implemented, added chromatic/achromat to Not Yet Implemented
+- Added 8 new refraction tests and 6 new lens/refractor geometry tests
+
+### Decisions made
+- Standard optics sign convention for R: positive = center of curvature on transmission side
+- Lens uses `point - sphere_center` for normals (auto-corrected by refract_direction)
+- Monochromatic singlet treated as diffraction-limited for analytical focal offsets
+- Refractor vignetting returns 1.0 everywhere (no tube wall model yet)
+
+### Installed
+- Nothing new
+
+### Notes
+- All 182 tests pass (163 existing + 19 new)
+- Tricky part: getting sphere center placement right for correct lens convergence/divergence
+- Future extensions enabled: achromatic doublet, Maksutov-Cassegrain, chromatic aberration viz
+
+---
+
+## Session — 2026-02-27: Maksutov-Cassegrain Telescope
+
+### What was done
+- Added `MaksutovCassegrainTelescope` class to `telescope_sim/geometry/telescope.py`
+  - Catadioptric design: meniscus corrector (refraction) + spherical primary (reflection) + aluminized spot secondary (reflection)
+  - Reuses Cassegrain geometry formulas for secondary placement, magnification, back focus
+  - `_reflect_off_spot()` private method for aluminized spot reflection (no new Mirror subclass needed)
+  - Near-concentric meniscus formula for auto-computing front radius from back radius and thickness
+  - `corrected_optics = True` flag distinguishes corrected spherical primary from bare spherical
+  - Full interface: trace_ray, trace_rays, compute_vignetting, fully_illuminated_field, get_components_for_plotting
+- Updated ray trace plotting (`ray_trace_plot.py`)
+  - Added `"maksutov"` drawing branch: meniscus as filled shape, aluminized spot highlighted in silver, spherical primary
+  - `_analytical_focal_offsets` checks `corrected_optics` flag — returns zeros for corrected systems
+- Updated `telescope_sim/geometry/__init__.py` with new export
+- Updated `main.py`
+  - Added `"maksutov"` telescope type option with descriptive comment
+  - Added `_MAKSUTOV_KEYS` config set, comparison support, Maksutov builder branch
+  - Added commented-out Cassegrain vs Maksutov comparison example
+- Added 7 new tests in `tests/test_geometry.py::TestMaksutovCassegrainTelescope`
+- Updated `PHYSICS.md` with Maksutov-Cassegrain entry
+
+### Decisions made
+- Aluminized spot handled as private method using meniscus back surface geometry (no new class)
+- SphericalLens reused for meniscus (both radii negative = meniscus configuration)
+- SphericalMirror reused for primary (R = 2f)
+- `corrected_optics` attribute avoids conflating bare vs corrected spherical primaries in analytical offsets
+
+### Installed
+- Nothing new
+
+### Notes
+- All 189 tests pass (182 existing + 7 new)
+- Ray path exercises both refraction AND reflection: refract through meniscus → reflect off primary → reflect off spot → back focus

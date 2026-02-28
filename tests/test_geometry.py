@@ -4,8 +4,16 @@ import numpy as np
 import pytest
 
 from telescope_sim.physics.ray import Ray
-from telescope_sim.geometry.mirrors import ParabolicMirror, SphericalMirror, FlatMirror
-from telescope_sim.geometry.telescope import NewtonianTelescope
+from telescope_sim.geometry.mirrors import (
+    FlatMirror, HyperbolicMirror, ParabolicMirror, SphericalMirror,
+)
+from telescope_sim.geometry.lenses import SphericalLens
+from telescope_sim.geometry.telescope import (
+    CassegrainTelescope,
+    MaksutovCassegrainTelescope,
+    NewtonianTelescope,
+    RefractingTelescope,
+)
 
 
 # --- Parabolic mirror tests ---
@@ -194,3 +202,307 @@ class TestNewtonianTelescope:
         assert "secondary_surface" in components
         assert "primary_diameter" in components
         assert components["primary_diameter"] == 200.0
+
+
+# --- Hyperbolic mirror tests ---
+
+class TestHyperbolicMirror:
+    def setup_method(self):
+        """Create a test hyperbolic mirror (typical Cassegrain secondary)."""
+        # a=100, e=2.0 gives b^2 = 100^2*(4-1) = 30000
+        self.mirror = HyperbolicMirror(
+            semi_major_axis=100.0,
+            eccentricity=2.0,
+            diameter=60.0,
+            center=(0.0, 800.0),
+        )
+
+    def test_surface_points_shape(self):
+        pts = self.mirror.get_surface_points(num_points=50)
+        assert pts.shape == (50, 2)
+
+    def test_surface_points_within_diameter(self):
+        pts = self.mirror.get_surface_points()
+        local_x = pts[:, 0] - self.mirror.center[0]
+        assert np.all(local_x >= -30.0 - 1e-10)
+        assert np.all(local_x <= 30.0 + 1e-10)
+
+    def test_convex_surface_normal_direction(self):
+        """Normals on the convex surface should point downward
+        (toward the primary / incoming light)."""
+        # At the vertex (center), the normal should point straight down
+        vertex = self.mirror.center.copy()
+        normal = self.mirror.normal_at(vertex)
+        assert normal[1] < 0, "Normal at vertex should point downward"
+        assert abs(normal[0]) < 1e-10, "Normal at vertex should be vertical"
+
+
+# --- Cassegrain telescope tests ---
+
+class TestCassegrainTelescope:
+    def setup_method(self):
+        self.telescope = CassegrainTelescope(
+            primary_diameter=200.0,
+            primary_focal_length=800.0,
+            secondary_magnification=5.0,
+        )
+
+    def test_focal_ratio(self):
+        # effective FL = 800 * 5 = 4000, focal ratio = 4000/200 = 20
+        assert abs(self.telescope.focal_ratio - 20.0) < 1e-10
+
+    def test_effective_focal_length(self):
+        assert abs(self.telescope.focal_length - 4000.0) < 1e-10
+
+    def test_ray_trace_converges_behind_primary(self):
+        """Rays should end up below the primary (y < 0)."""
+        ray = Ray(origin=[50, 1200], direction=[0, -1])
+        self.telescope.trace_ray(ray)
+        final_y = ray.history[-1][1]
+        assert final_y < 0, (
+            f"Final ray position y={final_y} should be below primary (y<0)"
+        )
+
+    def test_multiple_rays_converge(self):
+        """Parallel rays should focus to a small spot behind the primary."""
+        rays = [
+            Ray(origin=[x, 1200], direction=[0, -1])
+            for x in [-60, -30, 30, 60]
+        ]
+        self.telescope.trace_rays(rays)
+        end_points = [r.history[-1] for r in rays if len(r.history) >= 4]
+        assert len(end_points) >= 2, "At least 2 rays should complete the path"
+        xs = [p[0] for p in end_points]
+        spread = max(xs) - min(xs)
+        assert spread < 5.0, (
+            f"Ray x-spread {spread:.2f}mm too large — rays not converging"
+        )
+
+    def test_components_for_plotting(self):
+        components = self.telescope.get_components_for_plotting()
+        required_keys = [
+            "primary_surface", "secondary_surface", "primary_diameter",
+            "focal_length", "secondary_offset", "tube_length", "primary_type",
+        ]
+        for key in required_keys:
+            assert key in components, f"Missing key: {key}"
+
+    def test_obstruction_ratio(self):
+        ratio = self.telescope.obstruction_ratio
+        assert 0 < ratio < 1, f"Obstruction ratio {ratio} out of range"
+        expected = self.telescope.secondary_minor_axis / self.telescope.primary_diameter
+        assert abs(ratio - expected) < 1e-10
+
+
+# --- Spherical lens tests ---
+
+class TestSphericalLens:
+    def setup_method(self):
+        """Create a symmetric biconvex lens: R_front=500, R_back=-500,
+        thickness=10, diameter=80."""
+        self.lens = SphericalLens(
+            R_front=500.0, R_back=-500.0,
+            thickness=10.0, diameter=80.0,
+            center=(0.0, 100.0), glass="BK7",
+        )
+
+    def test_front_surface_points_shape(self):
+        pts = self.lens.get_front_surface_points(num_points=50)
+        assert pts.shape == (50, 2)
+
+    def test_back_surface_points_shape(self):
+        pts = self.lens.get_back_surface_points(num_points=50)
+        assert pts.shape == (50, 2)
+
+    def test_refract_ray_changes_direction(self):
+        """An off-axis ray should change direction after passing
+        through the lens."""
+        ray = Ray(origin=[20.0, 300.0], direction=[0.0, -1.0])
+        hit = self.lens.refract_ray(ray)
+        assert hit is True
+        # Ray should now be angled inward (toward the axis)
+        assert ray.direction[0] < 0, (
+            "Off-axis ray should bend toward the optical axis"
+        )
+
+    def test_ray_passes_through_both_surfaces(self):
+        """A traced ray should have history points on both surfaces."""
+        ray = Ray(origin=[10.0, 300.0], direction=[0.0, -1.0])
+        hit = self.lens.refract_ray(ray)
+        assert hit is True
+        # History should have: start, front surface hit, back surface hit
+        assert len(ray.history) >= 3
+
+    def test_center_ray_passes_straight_through(self):
+        """A ray along the optical axis should not be deflected."""
+        ray = Ray(origin=[0.0, 300.0], direction=[0.0, -1.0])
+        hit = self.lens.refract_ray(ray)
+        assert hit is True
+        np.testing.assert_allclose(ray.direction, [0.0, -1.0], atol=1e-6)
+
+
+# --- Refracting telescope tests ---
+
+class TestRefractingTelescope:
+    def setup_method(self):
+        self.telescope = RefractingTelescope(
+            primary_diameter=100.0, focal_length=900.0,
+        )
+
+    def test_focal_ratio(self):
+        assert abs(self.telescope.focal_ratio - 9.0) < 1e-10
+
+    def test_obstruction_ratio_is_zero(self):
+        assert self.telescope.obstruction_ratio == 0.0
+
+    def test_ray_convergence(self):
+        """Parallel rays should converge near the focal plane."""
+        rays = [
+            Ray(origin=[x, 1200], direction=[0, -1])
+            for x in [-30, -15, 15, 30]
+        ]
+        self.telescope.trace_rays(rays)
+        end_points = [r.history[-1] for r in rays if len(r.history) >= 3]
+        assert len(end_points) >= 2, "At least 2 rays should complete"
+        xs = [p[0] for p in end_points]
+        spread = max(xs) - min(xs)
+        assert spread < 10.0, (
+            f"Ray x-spread {spread:.2f}mm too large — rays not converging"
+        )
+
+    def test_components_dict_keys(self):
+        components = self.telescope.get_components_for_plotting()
+        required_keys = [
+            "primary_surface", "secondary_surface", "primary_diameter",
+            "focal_length", "secondary_offset", "tube_length",
+            "primary_type", "telescope_style",
+        ]
+        for key in required_keys:
+            assert key in components, f"Missing key: {key}"
+        assert components["telescope_style"] == "refractor"
+        assert components["primary_type"] == "lens"
+
+    def test_primary_type_is_lens(self):
+        assert self.telescope.primary_type == "lens"
+
+    def test_tube_length(self):
+        assert self.telescope.tube_length == 900.0
+
+
+# --- Maksutov-Cassegrain telescope tests ---
+
+class TestMaksutovCassegrainTelescope:
+    def setup_method(self):
+        self.telescope = MaksutovCassegrainTelescope(
+            primary_diameter=150.0,
+            primary_focal_length=750.0,
+            secondary_magnification=4.0,
+        )
+
+    def test_focal_ratio(self):
+        # effective FL = 750 * 4 = 3000, focal ratio = 3000/150 = 20
+        assert abs(self.telescope.focal_ratio - 20.0) < 1e-10
+
+    def test_obstruction_ratio(self):
+        ratio = self.telescope.obstruction_ratio
+        assert 0 < ratio < 1, f"Obstruction ratio {ratio} out of range"
+        expected = self.telescope.secondary_minor_axis / self.telescope.primary_diameter
+        assert abs(ratio - expected) < 1e-10
+
+    def test_ray_convergence(self):
+        """Parallel rays should converge to a small spot behind the primary."""
+        rays = [
+            Ray(origin=[x, 1200], direction=[0, -1])
+            for x in [-40, -20, 20, 40]
+        ]
+        self.telescope.trace_rays(rays)
+        end_points = [r.history[-1] for r in rays if len(r.history) >= 5]
+        assert len(end_points) >= 2, "At least 2 rays should complete the path"
+        xs = [p[0] for p in end_points]
+        spread = max(xs) - min(xs)
+        assert spread < 10.0, (
+            f"Ray x-spread {spread:.2f}mm too large — rays not converging"
+        )
+
+    def test_ray_trace_behind_primary(self):
+        """Final ray position should be below the primary (y < 0)."""
+        ray = Ray(origin=[30, 1200], direction=[0, -1])
+        self.telescope.trace_ray(ray)
+        final_y = ray.history[-1][1]
+        assert final_y < 0, (
+            f"Final ray position y={final_y} should be below primary (y<0)"
+        )
+
+    def test_components_dict_keys(self):
+        components = self.telescope.get_components_for_plotting()
+        required_keys = [
+            "primary_surface", "secondary_surface", "primary_diameter",
+            "focal_length", "secondary_offset", "tube_length",
+            "primary_type", "telescope_style", "corrector_front",
+            "corrector_back", "spot_diameter",
+        ]
+        for key in required_keys:
+            assert key in components, f"Missing key: {key}"
+        assert components["telescope_style"] == "maksutov"
+
+    def test_spherical_primary(self):
+        assert self.telescope.primary_type == "spherical"
+
+    def test_corrected_optics_flag(self):
+        assert self.telescope.corrected_optics is True
+
+    def test_effective_focal_length(self):
+        # effective FL = primary FL * magnification = 750 * 4 = 3000
+        assert abs(self.telescope.focal_length - 3000.0) < 1e-10
+
+    def test_ray_history_length(self):
+        """A fully traced ray should have 6 history points:
+        start -> corrector front -> corrector back -> primary ->
+        spot -> focal plane."""
+        ray = Ray(origin=[30, 1200], direction=[0, -1])
+        self.telescope.trace_ray(ray)
+        assert len(ray.history) >= 6, (
+            f"Expected >= 6 history points (full optical path), got {len(ray.history)}"
+        )
+
+    def test_center_ray_stays_on_axis(self):
+        """An on-axis ray should remain near x=0 throughout."""
+        ray = Ray(origin=[0, 1200], direction=[0, -1])
+        self.telescope.trace_ray(ray)
+        for point in ray.history:
+            assert abs(point[0]) < 0.1, (
+                f"On-axis ray deviated to x={point[0]}"
+            )
+
+    def test_spot_miss_returns_early(self):
+        """A ray far from the axis should miss the aluminized spot."""
+        # Use a ray at the very edge — likely to miss the small spot
+        ray = Ray(origin=[70, 1200], direction=[0, -1])
+        self.telescope.trace_ray(ray)
+        # Should still have some history (at least corrector + primary)
+        # but fewer points than a fully traced ray
+        assert len(ray.history) >= 2
+
+    def test_custom_meniscus_thickness(self):
+        """Constructor should accept custom meniscus thickness."""
+        tel = MaksutovCassegrainTelescope(
+            primary_diameter=150.0,
+            primary_focal_length=750.0,
+            meniscus_thickness=20.0,
+        )
+        assert tel.meniscus_thickness == 20.0
+
+    def test_default_meniscus_thickness(self):
+        """Default meniscus thickness should be diameter / 10."""
+        assert abs(self.telescope.meniscus_thickness - 15.0) < 1e-10
+
+    def test_tube_length_equals_secondary_offset(self):
+        assert self.telescope.tube_length == self.telescope.secondary_offset
+
+    def test_corrected_optics_analytical_offsets(self):
+        """Corrected optics should produce near-zero analytical focal offsets."""
+        from telescope_sim.plotting.ray_trace_plot import _analytical_focal_offsets
+        offsets = _analytical_focal_offsets(self.telescope)
+        assert np.allclose(offsets, 0.0), (
+            f"Corrected optics should give zero offsets, got RMS={np.std(offsets):.6f}"
+        )

@@ -36,14 +36,68 @@ def _draw_ray_trace(ax: plt.Axes, rays: list[Ray], components: dict,
         _draw_tube(ax, components)
 
     primary_pts = components["primary_surface"]
-    ax.plot(primary_pts[:, 0], primary_pts[:, 1],
-            color=mirror_color, linewidth=mirror_linewidth,
-            solid_capstyle="round", label="Primary mirror")
-
     secondary_pts = components["secondary_surface"]
-    ax.plot(secondary_pts[:, 0], secondary_pts[:, 1],
-            color="firebrick", linewidth=mirror_linewidth,
-            solid_capstyle="round", label="Secondary mirror")
+    primary_type = components.get("primary_type", "")
+    secondary_type = components.get("secondary_type", "")
+
+    if components.get("telescope_style") == "maksutov":
+        # Draw the meniscus corrector as a filled shape between
+        # front and back surface curves (light blue fill).
+        corr_front = components["corrector_front"]
+        corr_back = components["corrector_back"]
+        lens_x = np.concatenate([corr_front[:, 0], corr_back[::-1, 0]])
+        lens_y = np.concatenate([corr_front[:, 1], corr_back[::-1, 1]])
+        ax.fill(lens_x, lens_y, color="lightblue", alpha=0.4,
+                label="Meniscus corrector")
+        ax.plot(corr_front[:, 0], corr_front[:, 1],
+                color="steelblue", linewidth=mirror_linewidth,
+                solid_capstyle="round")
+        ax.plot(corr_back[:, 0], corr_back[:, 1],
+                color="steelblue", linewidth=mirror_linewidth,
+                solid_capstyle="round")
+
+        # Highlight the aluminized spot on the back surface center
+        spot_d = components["spot_diameter"]
+        spot_half = spot_d / 2.0
+        # Extract the portion of the back surface within the spot
+        spot_mask = np.abs(corr_back[:, 0]) <= spot_half
+        if np.any(spot_mask):
+            spot_pts = corr_back[spot_mask]
+            ax.plot(spot_pts[:, 0], spot_pts[:, 1],
+                    color="silver", linewidth=mirror_linewidth + 2,
+                    solid_capstyle="round", label="Aluminized spot",
+                    zorder=3)
+
+        # Draw the spherical primary mirror
+        ax.plot(primary_pts[:, 0], primary_pts[:, 1],
+                color=mirror_color, linewidth=mirror_linewidth,
+                solid_capstyle="round", label="Primary (spherical)")
+
+    elif components.get("telescope_style") == "refractor":
+        # Draw the objective as a filled shape between front and back
+        # surface curves (light blue fill, darker outline).
+        glass_label = components.get("objective_glass", "")
+        obj_label = f"Objective lens ({glass_label})" if glass_label else "Objective lens"
+        lens_x = np.concatenate([primary_pts[:, 0], secondary_pts[::-1, 0]])
+        lens_y = np.concatenate([primary_pts[:, 1], secondary_pts[::-1, 1]])
+        ax.fill(lens_x, lens_y, color="lightblue", alpha=0.5,
+                label=obj_label)
+        ax.plot(primary_pts[:, 0], primary_pts[:, 1],
+                color="steelblue", linewidth=mirror_linewidth,
+                solid_capstyle="round")
+        ax.plot(secondary_pts[:, 0], secondary_pts[:, 1],
+                color="steelblue", linewidth=mirror_linewidth,
+                solid_capstyle="round")
+    else:
+        primary_label = f"Primary ({primary_type})" if primary_type else "Primary mirror"
+        secondary_label = (f"Secondary ({secondary_type})"
+                           if secondary_type else "Secondary mirror")
+        ax.plot(primary_pts[:, 0], primary_pts[:, 1],
+                color=mirror_color, linewidth=mirror_linewidth,
+                solid_capstyle="round", label=primary_label)
+        ax.plot(secondary_pts[:, 0], secondary_pts[:, 1],
+                color="firebrick", linewidth=mirror_linewidth,
+                solid_capstyle="round", label=secondary_label)
 
     # Draw spider vane cross-sections as thin lines at secondary height
     if "spider_vanes" in components:
@@ -77,11 +131,15 @@ def _draw_ray_trace(ax: plt.Axes, rays: list[Ray], components: dict,
         ax.plot(focal_area[0], focal_area[1], "r*", markersize=12,
                 label="Focal point", zorder=5)
 
+        # Draw an eyepiece icon at the focal point.
+        # Detect dominant ray direction to orient the eyepiece barrel.
+        _draw_eyepiece_icon(ax, rays, focal_area, components)
+
     ax.set_aspect("equal")
     ax.set_xlabel("x (mm)")
     ax.set_ylabel("y (mm)")
     ax.set_title(title)
-    ax.legend(loc="upper right")
+    ax.legend(loc="upper right", fontsize="small")
     ax.grid(True, alpha=0.3)
 
 
@@ -129,15 +187,16 @@ def plot_ray_trace(rays: list[Ray], components: dict,
 def _find_focal_plane_positions(rays: list[Ray]) -> np.ndarray | None:
     """Find where traced rays cross the best focal plane.
 
-    Extracts the final segment of each ray (post-secondary), scans
-    for the x-position where ray spread is minimized, and returns
-    the y-offsets (centered on zero) at that plane.
+    Detects the dominant travel direction of the final ray segments
+    (x for Newtonian, y for Cassegrain), scans along that axis for
+    the position where perpendicular spread is minimized, and returns
+    the perpendicular offsets centered on zero.
 
     Args:
         rays: List of fully traced Ray objects.
 
     Returns:
-        Array of y-offsets at the focal plane, centered on zero.
+        Array of transverse offsets at the focal plane, centered on zero.
         Returns None if no valid rays are found.
     """
     traced_rays = [r for r in rays if len(r.history) >= 4]
@@ -150,43 +209,54 @@ def _find_focal_plane_positions(rays: list[Ray]) -> np.ndarray | None:
         p_end = np.array(ray.history[-1])
         segments.append((p_start, p_end))
 
-    # Scan x-positions to find best focus
-    x_min = min(s[0][0] for s in segments)
-    x_max = max(s[1][0] for s in segments)
-    test_x_positions = np.linspace(x_min, x_max, 200)
+    # Detect dominant travel direction: compare total |dx| vs |dy|
+    total_dx = sum(abs(s[1][0] - s[0][0]) for s in segments)
+    total_dy = sum(abs(s[1][1] - s[0][1]) for s in segments)
 
-    best_x = x_min
+    # scan_axis=0 means scan along x, measure spread in y (Newtonian)
+    # scan_axis=1 means scan along y, measure spread in x (Cassegrain)
+    scan_axis = 0 if total_dx >= total_dy else 1
+    perp_axis = 1 - scan_axis
+
+    # Scan positions along the dominant axis to find best focus
+    scan_min = min(min(s[0][scan_axis], s[1][scan_axis]) for s in segments)
+    scan_max = max(max(s[0][scan_axis], s[1][scan_axis]) for s in segments)
+    test_positions = np.linspace(scan_min, scan_max, 200)
+
+    best_pos = scan_min
     best_spread = float("inf")
 
-    for test_x in test_x_positions:
-        y_crossings = []
+    for test_pos in test_positions:
+        crossings = []
         for p_start, p_end in segments:
-            dx = p_end[0] - p_start[0]
-            if abs(dx) < 1e-12:
+            d_scan = p_end[scan_axis] - p_start[scan_axis]
+            if abs(d_scan) < 1e-12:
                 continue
-            t = (test_x - p_start[0]) / dx
+            t = (test_pos - p_start[scan_axis]) / d_scan
             if 0 <= t <= 1.5:
-                y_at_x = p_start[1] + t * (p_end[1] - p_start[1])
-                y_crossings.append(y_at_x)
-        if len(y_crossings) >= 2:
-            spread = np.std(y_crossings)
+                perp_val = (p_start[perp_axis]
+                            + t * (p_end[perp_axis] - p_start[perp_axis]))
+                crossings.append(perp_val)
+        if len(crossings) >= 2:
+            spread = np.std(crossings)
             if spread < best_spread:
                 best_spread = spread
-                best_x = test_x
+                best_pos = test_pos
 
     # Compute ray positions at the best focal plane
-    y_positions = []
+    perp_positions = []
     for p_start, p_end in segments:
-        dx = p_end[0] - p_start[0]
-        if abs(dx) < 1e-12:
+        d_scan = p_end[scan_axis] - p_start[scan_axis]
+        if abs(d_scan) < 1e-12:
             continue
-        t = (best_x - p_start[0]) / dx
-        y_at_x = p_start[1] + t * (p_end[1] - p_start[1])
-        y_positions.append(y_at_x)
+        t = (best_pos - p_start[scan_axis]) / d_scan
+        perp_val = (p_start[perp_axis]
+                    + t * (p_end[perp_axis] - p_start[perp_axis]))
+        perp_positions.append(perp_val)
 
-    y_positions = np.array(y_positions)
-    y_center = np.mean(y_positions)
-    return y_positions - y_center
+    perp_positions = np.array(perp_positions)
+    center = np.mean(perp_positions)
+    return perp_positions - center
 
 
 def _trace_dense_rays(telescope: NewtonianTelescope,
@@ -250,7 +320,17 @@ def _analytical_focal_offsets(telescope: NewtonianTelescope,
         h_values = h_values[unblocked]
         num_zones = len(h_values)
 
+    if getattr(telescope, 'corrected_optics', False):
+        # Corrected systems (e.g., Maksutov-Cassegrain with meniscus
+        # corrector) are diffraction-limited on-axis.
+        return np.zeros(num_zones)
+
     if telescope.primary_type == "parabolic":
+        return np.zeros(num_zones)
+
+    elif telescope.primary_type == "lens":
+        # Monochromatic singlet on-axis: diffraction-limited.
+        # NOTE: Chromatic aberration (multi-wavelength) not yet modeled.
         return np.zeros(num_zones)
 
     elif telescope.primary_type == "spherical":
@@ -1404,6 +1484,88 @@ def plot_psf_comparison(
         fig.savefig(save_path, dpi=150, bbox_inches="tight")
 
     return fig
+
+
+def _draw_eyepiece_icon(ax: plt.Axes, rays: list[Ray],
+                        focal_area: np.ndarray,
+                        components: dict) -> None:
+    """Draw a small eyepiece barrel icon at the focal point.
+
+    Detects the dominant travel direction of the final ray segments
+    to orient the barrel correctly:
+      - Newtonian: rays exit horizontally (+x), eyepiece points right
+      - Cassegrain / Refractor: rays converge downward (-y), eyepiece
+        points down
+    """
+    import matplotlib.patches as mpatches
+
+    # Determine eyepiece orientation from final ray segments
+    traced = [r for r in rays if len(r.history) >= 3]
+    if not traced:
+        return
+
+    dx_total = sum(r.history[-1][0] - r.history[-2][0] for r in traced)
+    dy_total = sum(r.history[-1][1] - r.history[-2][1] for r in traced)
+
+    # Scale barrel size to ~3% of primary diameter
+    d = components["primary_diameter"]
+    barrel_length = d * 0.12
+    barrel_width = d * 0.06
+    flare_width = d * 0.09
+
+    fx, fy = focal_area
+
+    if abs(dx_total) > abs(dy_total):
+        # Horizontal exit (Newtonian) — barrel extends in +x
+        sign = 1.0 if dx_total > 0 else -1.0
+        # Narrow barrel
+        barrel = mpatches.FancyBboxPatch(
+            (fx + sign * 2, fy - barrel_width / 2),
+            sign * barrel_length, barrel_width,
+            boxstyle="round,pad=1",
+            facecolor="silver", edgecolor="dimgray",
+            linewidth=1.2, alpha=0.8, zorder=4,
+        )
+        ax.add_patch(barrel)
+        # Eye lens flare (wider end)
+        flare_x = fx + sign * (2 + barrel_length)
+        ax.plot([flare_x, flare_x],
+                [fy - flare_width / 2, fy + flare_width / 2],
+                color="dimgray", linewidth=2.0, solid_capstyle="round",
+                alpha=0.8, zorder=4)
+    else:
+        # Vertical exit (Cassegrain / Refractor) — barrel extends in -y
+        sign = -1.0 if dy_total < 0 else 1.0
+        barrel = mpatches.FancyBboxPatch(
+            (fx - barrel_width / 2, fy + sign * 2),
+            barrel_width, sign * barrel_length,
+            boxstyle="round,pad=1",
+            facecolor="silver", edgecolor="dimgray",
+            linewidth=1.2, alpha=0.8, zorder=4,
+        )
+        ax.add_patch(barrel)
+        # Eye lens flare (wider end)
+        flare_y = fy + sign * (2 + barrel_length)
+        ax.plot([fx - flare_width / 2, fx + flare_width / 2],
+                [flare_y, flare_y],
+                color="dimgray", linewidth=2.0, solid_capstyle="round",
+                alpha=0.8, zorder=4)
+
+    # Add "Eyepiece" text label near the icon
+    text_offset = barrel_length * 0.8
+    if abs(dx_total) > abs(dy_total):
+        ax.annotate("Eyepiece", (fx + sign * (2 + barrel_length / 2), fy),
+                    textcoords="offset points",
+                    xytext=(0, -barrel_width * 1.5),
+                    fontsize=7, color="dimgray", ha="center", va="top",
+                    zorder=4)
+    else:
+        ax.annotate("Eyepiece",
+                    (fx, fy + sign * (2 + barrel_length / 2)),
+                    textcoords="offset points",
+                    xytext=(text_offset * 2.5, 0),
+                    fontsize=7, color="dimgray", ha="left", va="center",
+                    zorder=4)
 
 
 def _draw_tube(ax: plt.Axes, components: dict):
