@@ -215,6 +215,142 @@ class SphericalMirror(Mirror):
         ])
 
 
+class HyperbolicMirror(Mirror):
+    """A convex hyperbolic mirror for Cassegrain secondary.
+
+    The mirror surface is the vertex region of a hyperbola defined by:
+        x^2 / b^2 - (y - y_center)^2 / a^2 = -1
+    (using the convention where the transverse axis is along y).
+
+    The two foci of the hyperbola are placed at the primary's focal point
+    (F1, above) and the system's back focal point (F2, below the primary).
+    The convex surface faces downward (toward the primary mirror).
+
+    Attributes:
+        semi_major_axis: Semi-major axis 'a' of the hyperbola (along y).
+        eccentricity: Eccentricity e > 1 for a hyperbola.
+        diameter: Physical diameter of the mirror in mm.
+        center: (x, y) position of the mirror vertex.
+    """
+
+    def __init__(self, semi_major_axis: float, eccentricity: float,
+                 diameter: float,
+                 center: tuple[float, float] = (0.0, 0.0)):
+        self.semi_major_axis = semi_major_axis  # a
+        self.eccentricity = eccentricity        # e
+        self.diameter = diameter
+        self.center = np.asarray(center, dtype=float)
+        self.radius = diameter / 2.0
+        # b^2 = a^2 * (e^2 - 1)
+        self.semi_minor_axis_sq = (
+            semi_major_axis**2 * (eccentricity**2 - 1)
+        )
+
+    def intersect(self, ray: Ray) -> float | None:
+        # Shift ray to mirror-local coordinates (vertex at origin).
+        # The hyperbola in local coords: x^2/b^2 - y^2/a^2 = -1
+        # which is y^2/a^2 - x^2/b^2 = 1 (vertex at y=0 on the
+        # branch closest to origin, but we need to shift since the
+        # vertex of the near branch is at y = -a for the standard form).
+        #
+        # Actually, use the form: the hyperbola has vertices at y = ±a
+        # (along the y-axis). We want the branch at y = +a (the one
+        # closest to the primary). The vertex of this branch is at
+        # local y = 0 (we've placed center at the vertex).
+        #
+        # Surface equation near vertex: y = (x^2) / (2*R_curv) + ...
+        # where R_curv = b^2/a is the radius of curvature at vertex.
+        #
+        # Full equation with vertex at origin:
+        # (y + a)^2 / a^2 - x^2 / b^2 = 1
+        # => (y + a)^2 / a^2 = 1 + x^2 / b^2
+        # => y = a * sqrt(1 + x^2/b^2) - a
+        #
+        # For intersection, substitute ray: P = O + t*D
+        # x = ox + t*dx, y = oy + t*dy
+        # (oy + t*dy + a)^2 / a^2 - (ox + t*dx)^2 / b^2 = 1
+
+        ox = ray.origin[0] - self.center[0]
+        oy = ray.origin[1] - self.center[1]
+        dx, dy = ray.direction[0], ray.direction[1]
+        a = self.semi_major_axis
+        b2 = self.semi_minor_axis_sq  # b^2
+        a2 = a * a
+
+        # Let u = oy + a (shifted so hyperbola center is at origin)
+        u = oy + a
+
+        # (u + t*dy)^2/a^2 - (ox + t*dx)^2/b^2 = 1
+        # Expand:
+        # (dy^2/a^2 - dx^2/b^2)*t^2 + 2*(u*dy/a^2 - ox*dx/b^2)*t
+        #   + (u^2/a^2 - ox^2/b^2 - 1) = 0
+
+        A = dy * dy / a2 - dx * dx / b2
+        B = 2.0 * (u * dy / a2 - ox * dx / b2)
+        C = u * u / a2 - ox * ox / b2 - 1.0
+
+        discriminant = B * B - 4.0 * A * C
+        if discriminant < 0:
+            return None
+
+        sqrt_disc = np.sqrt(discriminant)
+
+        if abs(A) < 1e-12:
+            if abs(B) < 1e-12:
+                return None
+            t = -C / B
+            candidates = [t] if t > 1e-6 else []
+        else:
+            t1 = (-B - sqrt_disc) / (2.0 * A)
+            t2 = (-B + sqrt_disc) / (2.0 * A)
+            candidates = [t for t in [t1, t2] if t > 1e-6]
+
+        if not candidates:
+            return None
+
+        # Pick the nearest valid intersection on the correct branch
+        # (y >= 0 in local coords, i.e., the branch near the vertex)
+        best_t = None
+        for t in sorted(candidates):
+            hit_x = ox + t * dx
+            hit_y = oy + t * dy
+            # Must be on the near branch (y >= 0 locally) and within diameter
+            if hit_y >= -1e-6 and abs(hit_x) <= self.radius:
+                best_t = t
+                break
+
+        return best_t
+
+    def normal_at(self, point: np.ndarray) -> np.ndarray:
+        # For the hyperbola (y+a)^2/a^2 - x^2/b^2 = 1,
+        # the gradient is: (∂F/∂x, ∂F/∂y) = (-2x/b^2, 2(y+a)/a^2)
+        # where F = (y+a)^2/a^2 - x^2/b^2 - 1
+        local_x = point[0] - self.center[0]
+        local_y = point[1] - self.center[1]
+        a = self.semi_major_axis
+        b2 = self.semi_minor_axis_sq
+
+        grad_x = -2.0 * local_x / b2
+        grad_y = 2.0 * (local_y + a) / (a * a)
+
+        # The gradient points "outward" from the hyperbola (away from
+        # the center between branches). For a convex secondary facing
+        # downward, we want the normal pointing downward (toward the
+        # primary), which is the -y direction at the vertex.
+        # The gradient at the vertex (x=0, y=0) is (0, 2/a), pointing up.
+        # So we negate it to get the outward normal of the convex surface.
+        normal = np.array([-grad_x, -grad_y])
+        return normal / np.linalg.norm(normal)
+
+    def get_surface_points(self, num_points: int = 100) -> np.ndarray:
+        x = np.linspace(-self.radius, self.radius, num_points)
+        a = self.semi_major_axis
+        b2 = self.semi_minor_axis_sq
+        # y = a * sqrt(1 + x^2/b^2) - a
+        y = a * np.sqrt(1.0 + x * x / b2) - a
+        return np.column_stack([x + self.center[0], y + self.center[1]])
+
+
 class FlatMirror(Mirror):
     """A flat mirror defined by two endpoints (a line segment in 2D).
 

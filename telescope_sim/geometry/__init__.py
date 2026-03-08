@@ -14,6 +14,7 @@ from telescope_sim.geometry.telescope import (
     MaksutovCassegrainTelescope,
     NewtonianTelescope,
     RefractingTelescope,
+    SchmidtCassegrainTelescope,
 )
 
 __all__ = [
@@ -29,4 +30,5 @@ __all__ = [
     "CassegrainTelescope",
     "MaksutovCassegrainTelescope",
     "RefractingTelescope",
+    "SchmidtCassegrainTelescope",
 ]

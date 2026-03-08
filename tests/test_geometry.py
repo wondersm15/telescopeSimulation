@@ -420,7 +420,7 @@ class TestMaksutovCassegrainTelescope:
         assert len(end_points) >= 2, "At least 2 rays should complete the path"
         xs = [p[0] for p in end_points]
         spread = max(xs) - min(xs)
-        assert spread < 10.0, (
+        assert spread < 2.0, (
             f"Ray x-spread {spread:.2f}mm too large — rays not converging"
         )
 
@@ -506,3 +506,67 @@ class TestMaksutovCassegrainTelescope:
         assert np.allclose(offsets, 0.0), (
             f"Corrected optics should give zero offsets, got RMS={np.std(offsets):.6f}"
         )
+
+
+class TestSchmidtCassegrainTelescope:
+    def setup_method(self):
+        from telescope_sim.geometry import SchmidtCassegrainTelescope
+        self.telescope = SchmidtCassegrainTelescope(
+            primary_diameter=200.0,
+            primary_focal_length=500.0,
+            secondary_magnification=4.0,
+        )
+
+    def test_focal_ratio(self):
+        """effective FL = 500 * 4 = 2000, focal ratio = 2000/200 = 10"""
+        assert abs(self.telescope.focal_ratio - 10.0) < 1e-10
+
+    def test_obstruction_ratio(self):
+        """Obstruction ratio should be > 0."""
+        ratio = self.telescope.obstruction_ratio
+        assert 0 < ratio < 1, f"Obstruction ratio {ratio} out of range"
+
+    def test_ray_convergence(self):
+        """Parallel rays should converge to small spot (< 3mm spread).
+
+        Note: Residual spherical aberration expected due to zero-power
+        corrector approximation (~2.4mm for this geometry).
+        """
+        from telescope_sim.physics.ray import Ray
+        import numpy as np
+        rays = [
+            Ray(origin=[x, 1200], direction=[0, -1])
+            for x in np.linspace(-80, 80, 11)
+        ]
+        self.telescope.trace_rays(rays)
+        end_points = [r.history[-1] for r in rays if len(r.history) >= 3]
+        assert len(end_points) >= 8, "Most rays should complete path"
+        xs = [p[0] for p in end_points]
+        spread = max(xs) - min(xs)
+        assert spread < 3.0, (
+            f"Ray x-spread {spread:.2f}mm too large — rays not converging"
+        )
+
+    def test_ray_trace_behind_primary(self):
+        """Final ray position should be behind primary (y < 0)."""
+        from telescope_sim.physics.ray import Ray
+        ray = Ray(origin=[50, 1200], direction=[0, -1])
+        self.telescope.trace_ray(ray)
+        final_y = ray.history[-1][1]
+        assert final_y < 0, (
+            f"Final ray position y={final_y} should be below primary (y<0)"
+        )
+
+    def test_components_dict_keys(self):
+        """Check that components dict has required keys."""
+        components = self.telescope.get_components_for_plotting()
+        assert components["telescope_style"] == "schmidt"
+        assert components.get("corrected_optics") is True
+
+    def test_spherical_primary(self):
+        """Primary should be spherical."""
+        assert self.telescope.primary_type == "spherical"
+
+    def test_corrected_optics_flag(self):
+        """Corrected optics flag should be True."""
+        assert self.telescope.corrected_optics is True

@@ -8,7 +8,8 @@ from telescope_sim.physics.ray import Ray
 def create_parallel_rays(num_rays: int, aperture_diameter: float,
                          entry_height: float,
                          direction: tuple[float, float] = (0.0, -1.0),
-                         margin_fraction: float = 0.05) -> list[Ray]:
+                         margin_fraction: float = 0.05,
+                         field_angle_arcsec: float = 0.0) -> list[Ray]:
     """Create parallel rays simulating a point source at infinity.
 
     Rays are evenly spaced across the aperture diameter and enter
@@ -25,11 +26,19 @@ def create_parallel_rays(num_rays: int, aperture_diameter: float,
                    (0, -1) for straight down (on-axis).
         margin_fraction: Fraction of the aperture to leave as
                          margin at edges to avoid edge effects.
+        field_angle_arcsec: Off-axis angle in arcseconds. When non-zero,
+                            overrides *direction* with a tilted beam at
+                            the specified angle from the optical axis.
+                            Default 0.0 preserves existing on-axis behavior.
 
     Returns:
         List of Ray objects.
     """
-    direction = np.asarray(direction, dtype=float)
+    if field_angle_arcsec != 0.0:
+        theta_rad = field_angle_arcsec / 206265.0
+        direction = np.array([np.sin(theta_rad), -np.cos(theta_rad)])
+    else:
+        direction = np.asarray(direction, dtype=float)
     direction = direction / np.linalg.norm(direction)
 
     usable_radius = (aperture_diameter / 2.0) * (1.0 - margin_fraction)

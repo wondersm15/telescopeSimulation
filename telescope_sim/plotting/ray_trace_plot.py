@@ -17,7 +17,17 @@ from telescope_sim.physics.aberrations import (
 )
 
 if TYPE_CHECKING:
-    from telescope_sim.geometry.telescope import NewtonianTelescope
+    from telescope_sim.geometry.telescope import (
+        NewtonianTelescope,
+        CassegrainTelescope,
+        RefractingTelescope,
+        MaksutovCassegrainTelescope,
+        SchmidtCassegrainTelescope,
+    )
+    # Union of all telescope types (duck-typed, no common base class)
+    Telescope = (NewtonianTelescope | CassegrainTelescope
+                 | RefractingTelescope | MaksutovCassegrainTelescope
+                 | SchmidtCassegrainTelescope)
 
 
 def _draw_ray_trace(ax: plt.Axes, rays: list[Ray], components: dict,
@@ -72,6 +82,26 @@ def _draw_ray_trace(ax: plt.Axes, rays: list[Ray], components: dict,
         ax.plot(primary_pts[:, 0], primary_pts[:, 1],
                 color=mirror_color, linewidth=mirror_linewidth,
                 solid_capstyle="round", label="Primary (spherical)")
+
+    elif components.get("telescope_style") == "schmidt":
+        # Schmidt-Cassegrain: corrector plate + spherical primary + convex secondary
+        # Draw corrector plate as a thin vertical line across the aperture
+        corrector_y = components.get("corrector_position", 0)
+        corrector_half = components["primary_diameter"] / 2.0
+        ax.plot([-corrector_half, corrector_half],
+                [corrector_y, corrector_y],
+                color="gray", linestyle="--", linewidth=1.5, alpha=0.7,
+                label="Schmidt corrector (approx.)")
+
+        # Draw spherical primary
+        ax.plot(primary_pts[:, 0], primary_pts[:, 1],
+                color=mirror_color, linewidth=mirror_linewidth,
+                solid_capstyle="round", label="Primary (spherical)")
+
+        # Draw convex spherical secondary
+        ax.plot(secondary_pts[:, 0], secondary_pts[:, 1],
+                color="firebrick", linewidth=mirror_linewidth,
+                solid_capstyle="round", label="Secondary (spherical)")
 
     elif components.get("telescope_style") == "refractor":
         # Draw the objective as a filled shape between front and back
@@ -213,8 +243,8 @@ def _find_focal_plane_positions(rays: list[Ray]) -> np.ndarray | None:
     total_dx = sum(abs(s[1][0] - s[0][0]) for s in segments)
     total_dy = sum(abs(s[1][1] - s[0][1]) for s in segments)
 
-    # scan_axis=0 means scan along x, measure spread in y (Newtonian)
-    # scan_axis=1 means scan along y, measure spread in x (Cassegrain)
+    # scan_axis=0 means scan along x, measure spread in y
+    # scan_axis=1 means scan along y, measure spread in x
     scan_axis = 0 if total_dx >= total_dy else 1
     perp_axis = 1 - scan_axis
 
@@ -259,7 +289,7 @@ def _find_focal_plane_positions(rays: list[Ray]) -> np.ndarray | None:
     return perp_positions - center
 
 
-def _trace_dense_rays(telescope: NewtonianTelescope,
+def _trace_dense_rays(telescope: Telescope,
                       num_rays: int = 501) -> list[Ray]:
     """Create and trace a dense set of rays through the telescope.
 
@@ -284,7 +314,7 @@ def _trace_dense_rays(telescope: NewtonianTelescope,
     return rays
 
 
-def _analytical_focal_offsets(telescope: NewtonianTelescope,
+def _analytical_focal_offsets(telescope: Telescope,
                               num_zones: int = 1001,
                               include_obstruction: bool = True) -> np.ndarray:
     """Compute focal plane offsets from exact mirror geometry formulas.
@@ -379,7 +409,7 @@ def _analytical_focal_offsets(telescope: NewtonianTelescope,
         )
 
 
-def _get_focal_offsets(telescope: NewtonianTelescope,
+def _get_focal_offsets(telescope: Telescope,
                        method: str = "analytical",
                        num_trace_rays: int = 501,
                        include_obstruction: bool = True) -> np.ndarray | None:
@@ -572,7 +602,7 @@ def _resample_fft_psf(fft_psf: np.ndarray, fft_half: float,
     return result
 
 
-def _compute_focal_image(telescope: NewtonianTelescope,
+def _compute_focal_image(telescope: Telescope,
                          wavelength_nm: float = 550.0,
                          image_size_mm: float | None = None,
                          num_pixels: int = 512,
@@ -696,7 +726,7 @@ def _compute_focal_image(telescope: NewtonianTelescope,
     return image, half_size, info
 
 
-def _draw_focal_image(ax: plt.Axes, telescope: NewtonianTelescope,
+def _draw_focal_image(ax: plt.Axes, telescope: Telescope,
                       title: str = "Point Spread Function",
                       wavelength_nm: float = 550.0,
                       image_size_mm: float | None = None,
@@ -769,7 +799,7 @@ def _draw_focal_image(ax: plt.Axes, telescope: NewtonianTelescope,
             verticalalignment="top", color="yellow", alpha=0.8)
 
 
-def plot_focal_image(telescope: NewtonianTelescope,
+def plot_focal_image(telescope: Telescope,
                      title: str = "Point Spread Function",
                      figsize: tuple[float, float] = (7, 7),
                      wavelength_nm: float = 550.0,
@@ -835,7 +865,7 @@ def plot_focal_image(telescope: NewtonianTelescope,
     return fig
 
 
-def plot_psf_profile(telescope: NewtonianTelescope,
+def plot_psf_profile(telescope: Telescope,
                      title: str = "Point Spread Function",
                      figsize: tuple[float, float] = (14, 7),
                      wavelength_nm: float = 550.0,
@@ -1145,7 +1175,7 @@ def _resolve_physics_params(
 
 
 def plot_ray_trace_comparison(
-    telescopes: list[NewtonianTelescope],
+    telescopes: list[Telescope],
     labels: list[str],
     num_display_rays: int = 11,
     figsize_per_panel: tuple[float, float] = (7, 8),
@@ -1183,6 +1213,15 @@ def plot_ray_trace_comparison(
         components = telescope.get_components_for_plotting()
         _draw_ray_trace(ax, rays, components, title=label)
 
+    # Shared axis limits so telescope sizes are visually comparable
+    all_xlims = [axes[0, i].get_xlim() for i in range(n)]
+    all_ylims = [axes[0, i].get_ylim() for i in range(n)]
+    shared_xlim = (min(lo for lo, _ in all_xlims), max(hi for _, hi in all_xlims))
+    shared_ylim = (min(lo for lo, _ in all_ylims), max(hi for _, hi in all_ylims))
+    for i in range(n):
+        axes[0, i].set_xlim(shared_xlim)
+        axes[0, i].set_ylim(shared_ylim)
+
     fig.suptitle("Ray Trace Comparison", fontsize=14)
     plt.tight_layout()
 
@@ -1193,9 +1232,12 @@ def plot_ray_trace_comparison(
 
 
 def plot_spot_diagram_comparison(
-    telescopes: list[NewtonianTelescope],
+    telescopes: list[Telescope],
     labels: list[str],
     num_display_rays: int = 11,
+    method: str = "analytical",
+    include_obstruction: bool = True,
+    physics_params: list[dict] | None = None,
     figsize_per_panel: tuple[float, float] = (7, 7),
     save_path: str | None = None,
 ) -> plt.Figure:
@@ -1222,14 +1264,26 @@ def plot_spot_diagram_comparison(
 
     for i, (telescope, label) in enumerate(zip(telescopes, labels)):
         ax = axes[0, i]
-        rays = create_parallel_rays(
-            num_rays=num_display_rays,
-            aperture_diameter=telescope.primary_diameter,
-            entry_height=telescope.tube_length * 1.15,
+        # Resolve per-panel physics params
+        pp = physics_params[i] if physics_params else {}
+        panel_method = pp.get("method", method)
+        panel_obstruction = pp.get("include_obstruction", include_obstruction)
+
+        offsets = _get_focal_offsets(
+            telescope, method=panel_method, num_trace_rays=num_display_rays,
+            include_obstruction=panel_obstruction,
         )
-        telescope.trace_rays(rays)
-        y_offsets = _find_focal_plane_positions(rays)
-        _draw_spot_diagram(ax, y_offsets, title=label)
+        if offsets is None:
+            # Fallback: ray-trace as before
+            rays = create_parallel_rays(
+                num_rays=num_display_rays,
+                aperture_diameter=telescope.primary_diameter,
+                entry_height=telescope.tube_length * 1.15,
+            )
+            telescope.trace_rays(rays)
+            offsets = _find_focal_plane_positions(rays)
+
+        _draw_spot_diagram(ax, offsets, title=label)
 
     fig.suptitle("Spot Diagram Comparison", fontsize=14)
     plt.tight_layout()
@@ -1241,7 +1295,7 @@ def plot_spot_diagram_comparison(
 
 
 def plot_focal_image_comparison(
-    telescopes: list[NewtonianTelescope],
+    telescopes: list[Telescope],
     labels: list[str],
     wavelength_nm: float = 550.0,
     method: str = "analytical",
@@ -1304,7 +1358,7 @@ def plot_focal_image_comparison(
 
 
 def plot_psf_comparison(
-    telescopes: list[NewtonianTelescope],
+    telescopes: list[Telescope],
     labels: list[str],
     wavelength_nm: float = 550.0,
     method: str = "analytical",
@@ -1516,7 +1570,7 @@ def _draw_eyepiece_icon(ax: plt.Axes, rays: list[Ray],
     fx, fy = focal_area
 
     if abs(dx_total) > abs(dy_total):
-        # Horizontal exit (Newtonian) — barrel extends in +x
+        # Horizontal exit — barrel extends in +x
         sign = 1.0 if dx_total > 0 else -1.0
         # Narrow barrel
         barrel = mpatches.FancyBboxPatch(
@@ -1620,7 +1674,7 @@ def _build_coma_spot_2d(x_offsets: np.ndarray, y_offsets: np.ndarray,
 
 
 def plot_vignetting_curve(
-    telescope: NewtonianTelescope,
+    telescope: Telescope,
     max_field_arcsec: float | None = None,
     num_points: int = 200,
     figsize: tuple[float, float] = (9, 6),
@@ -1680,7 +1734,7 @@ def plot_vignetting_curve(
 
 
 def plot_vignetting_comparison(
-    telescopes: list[NewtonianTelescope],
+    telescopes: list[Telescope],
     labels: list[str],
     max_field_arcsec: float | None = None,
     num_points: int = 200,
@@ -1740,7 +1794,7 @@ def plot_vignetting_comparison(
 
 
 def plot_psf_2d(
-    telescope: NewtonianTelescope,
+    telescope: Telescope,
     wavelength_nm: float = 550.0,
     grid_size: int = 512,
     image_scale: float | None = None,
@@ -1832,7 +1886,7 @@ def plot_psf_2d(
 
 
 def plot_psf_2d_comparison(
-    telescopes: list[NewtonianTelescope],
+    telescopes: list[Telescope],
     labels: list[str],
     wavelength_nm: float = 550.0,
     grid_size: int = 512,
@@ -1920,7 +1974,7 @@ def plot_psf_2d_comparison(
 
 
 def plot_coma_spot(
-    telescope: NewtonianTelescope,
+    telescope: Telescope,
     field_angle_arcsec: float,
     wavelength_nm: float = 550.0,
     num_pixels: int = 256,
@@ -2027,7 +2081,7 @@ def plot_coma_spot(
 
 
 def plot_coma_field_analysis(
-    telescope: NewtonianTelescope,
+    telescope: Telescope,
     wavelength_nm: float = 550.0,
     max_field_arcsec: float | None = None,
     num_field_points: int = 100,
@@ -2145,7 +2199,15 @@ def plot_coma_field_analysis(
         ax_spot.set_title(f"{angle:.0f}\"", fontsize=9)
         ax_spot.tick_params(labelsize=6)
         if r == rows - 1:
-            ax_spot.set_xlabel("\u00b5m", fontsize=7)
+            ax_spot.set_xlabel("µm", fontsize=7)
+        if c == 0:
+            ax_spot.set_ylabel("µm", fontsize=7)
+
+    fig.text(0.72, 0.02,
+             "Gold dots: ray intersections from a grid of pupil zones and azimuths.\n"
+             "Denser clusters = brighter. Cyan circle = Airy disk (diffraction limit).\n"
+             "On-axis (0\") shows only the Airy circle; off-axis shows comet-shaped coma.",
+             fontsize=7, ha="center", va="bottom", style="italic", color="gray")
 
     fig.suptitle(f"Coma Field Analysis — {telescope.primary_diameter:.0f}mm "
                  f"f/{f_ratio:.1f}", fontsize=13)
@@ -2155,10 +2217,73 @@ def plot_coma_field_analysis(
     return fig
 
 
+def plot_coma_field_analysis_comparison(
+    telescopes: list[Telescope],
+    labels: list[str],
+    wavelength_nm: float = 550.0,
+    max_field_arcsec: float | None = None,
+    num_field_points: int = 100,
+    include_obstruction: bool = True,
+    figsize: tuple[float, float] = (10, 7),
+    save_path: str | None = None,
+) -> plt.Figure:
+    """Overlay RMS coma curves for multiple telescopes."""
+    wavelength_mm = wavelength_nm * 1e-6
+    fig, ax = plt.subplots(figsize=figsize)
+
+    colors = plt.cm.tab10.colors
+
+    # Determine shared max field angle
+    if max_field_arcsec is None:
+        max_field_arcsec = max(
+            max(coma_free_field(t.focal_length, t.primary_diameter,
+                                wavelength_mm) * 5, 120.0)
+            for t in telescopes
+        )
+
+    angles = np.linspace(0, max_field_arcsec, num_field_points)
+
+    for i, (telescope, label) in enumerate(zip(telescopes, labels)):
+        obs_ratio = telescope.obstruction_ratio if include_obstruction else 0.0
+        rms_values = np.array([
+            compute_coma_rms(a, telescope.focal_length,
+                             telescope.primary_diameter, obs_ratio)
+            for a in angles
+        ])
+        ax.plot(angles, rms_values * 1000, color=colors[i % len(colors)],
+                linewidth=2, label=label)
+
+        # Mark coma-free field for each
+        cff = coma_free_field(telescope.focal_length,
+                              telescope.primary_diameter, wavelength_mm)
+        if 0 < cff <= max_field_arcsec:
+            ax.axvline(cff, color=colors[i % len(colors)], linestyle=":",
+                       alpha=0.5)
+
+    # Airy radius reference (use first telescope)
+    airy_radius = 1.22 * wavelength_mm * telescopes[0].focal_ratio
+    ax.axhline(airy_radius * 1000, color="red", linestyle="--", alpha=0.5,
+               label="Airy radius")
+
+    ax.set_xlabel("Off-axis angle (arcsec)")
+    ax.set_ylabel("RMS coma (µm)")
+    ax.set_title("Coma Field Comparison")
+    ax.legend(fontsize=8)
+    ax.grid(True, alpha=0.3)
+    ax.text(0.02, 0.98, "Approx: Seidel 3rd-order",
+            transform=ax.transAxes, fontsize=7,
+            verticalalignment="top", color="orange", alpha=0.8)
+
+    plt.tight_layout()
+    if save_path:
+        fig.savefig(save_path, dpi=150, bbox_inches="tight")
+    return fig
+
+
 # ── Source imaging ──────────────────────────────────────────────────────
 
 
-def _compute_psf_at_field_angle(telescope: NewtonianTelescope,
+def _compute_psf_at_field_angle(telescope: Telescope,
                                 field_angle_arcsec: float,
                                 wavelength_nm: float,
                                 num_pixels: int,
@@ -2260,7 +2385,7 @@ def _compute_psf_at_field_angle(telescope: NewtonianTelescope,
 
 
 def _render_source_through_telescope(
-        source, telescope: NewtonianTelescope,
+        source, telescope: Telescope,
         wavelength_nm: float = 550.0,
         num_pixels: int = 512,
         seeing_arcsec: float | None = None,
@@ -2593,7 +2718,7 @@ def _apply_exit_pupil_washout(image, image_rgb, exit_pupil_mm):
     return image, image_rgb, washout
 
 
-def plot_source_image(telescope: NewtonianTelescope,
+def plot_source_image(telescope: Telescope,
                       source,
                       wavelength_nm: float = 550.0,
                       num_pixels: int = 512,

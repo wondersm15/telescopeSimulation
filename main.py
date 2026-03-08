@@ -18,6 +18,7 @@ from telescope_sim.geometry import (
     MaksutovCassegrainTelescope,
     NewtonianTelescope,
     RefractingTelescope,
+    SchmidtCassegrainTelescope,
 )
 from telescope_sim.source import create_parallel_rays
 from telescope_sim.source import PointSource, StarField, Jupiter, Saturn, Moon
@@ -68,8 +69,12 @@ _MAKSUTOV_KEYS = {
     "back_focal_distance", "meniscus_thickness",
     "spider_vanes", "spider_vane_width",
 }
+_SCHMIDT_KEYS = {
+    "primary_diameter", "primary_focal_length", "secondary_magnification",
+    "back_focal_distance", "spider_vanes", "spider_vane_width",
+}
 _TELESCOPE_KEYS = (_NEWTONIAN_KEYS | _CASSEGRAIN_KEYS | _REFRACTING_KEYS
-                   | _MAKSUTOV_KEYS)
+                   | _MAKSUTOV_KEYS | _SCHMIDT_KEYS)
 
 # Keys that control per-panel physics in comparison mode
 _PHYSICS_KEYS = {
@@ -129,6 +134,9 @@ def _resolve_comparison_configs(configs, defaults):
         elif tel_type == "maksutov":
             valid_keys = _MAKSUTOV_KEYS
             tel_cls = MaksutovCassegrainTelescope
+        elif tel_type == "schmidt":
+            valid_keys = _SCHMIDT_KEYS
+            tel_cls = SchmidtCassegrainTelescope
         elif tel_type == "refracting":
             valid_keys = _REFRACTING_KEYS
             tel_cls = RefractingTelescope
@@ -157,10 +165,15 @@ def _resolve_comparison_configs(configs, defaults):
 def run_single(telescope, num_display_rays, wavelength_nm, method,
                seeing_arcsec, include_obstruction=True,
                show_vignetting=False, show_coma_analysis=False,
-               field_angle_arcsec=0.0, source=None, eyepiece=None):
+               field_angle_arcsec=0.0, source=None, eyepiece=None,
+               show_ray_trace=True, show_spot_diagram=True,
+               show_focal_image=True, show_psf_profile=True,
+               show_psf_2d=True, show_source_image=True):
     """Run all plots for a single telescope configuration."""
     if isinstance(telescope, MaksutovCassegrainTelescope):
         tel_name = "Maksutov-Cass"
+    elif isinstance(telescope, SchmidtCassegrainTelescope):
+        tel_name = "Schmidt-Cass"
     elif isinstance(telescope, CassegrainTelescope):
         tel_name = "Cassegrain"
     elif isinstance(telescope, RefractingTelescope):
@@ -176,6 +189,9 @@ def run_single(telescope, num_display_rays, wavelength_nm, method,
         print(f"Spider vanes: {telescope.spider_vanes} "
               f"({telescope.spider_vane_width:.1f}mm wide)")
 
+    if eyepiece is not None:
+        print(eyepiece.summary(telescope.focal_length, telescope.primary_diameter))
+
     rays = create_parallel_rays(
         num_rays=num_display_rays,
         aperture_diameter=telescope.primary_diameter,
@@ -184,33 +200,37 @@ def run_single(telescope, num_display_rays, wavelength_nm, method,
     telescope.trace_rays(rays)
 
     components = telescope.get_components_for_plotting()
-    plot_ray_trace(
-        rays, components,
-        title=(f"{telescope.primary_diameter:.0f}mm f/{telescope.focal_ratio:.1f} "
-               f"{tel_name} — Ray Trace"),
-    )
-    plot_spot_diagram(
-        rays,
-        title=f"Spot Diagram — {telescope.primary_type.title()} Primary",
-    )
-    plot_focal_image(
-        telescope,
-        title=f"Simulated Image — {telescope.primary_type.title()} Primary",
-        wavelength_nm=wavelength_nm,
-        method=method,
-        seeing_arcsec=seeing_arcsec,
-        include_obstruction=include_obstruction,
-    )
-    plot_psf_profile(
-        telescope,
-        title=f"PSF — {telescope.primary_type.title()} Primary",
-        wavelength_nm=wavelength_nm,
-        method=method,
-        include_obstruction=include_obstruction,
-    )
+    if show_ray_trace:
+        plot_ray_trace(
+            rays, components,
+            title=(f"{telescope.primary_diameter:.0f}mm f/{telescope.focal_ratio:.1f} "
+                   f"{tel_name} — Ray Trace"),
+        )
+    if show_spot_diagram:
+        plot_spot_diagram(
+            rays,
+            title=f"Spot Diagram — {telescope.primary_type.title()} Primary",
+        )
+    if show_focal_image:
+        plot_focal_image(
+            telescope,
+            title=f"Simulated Image — {telescope.primary_type.title()} Primary",
+            wavelength_nm=wavelength_nm,
+            method=method,
+            seeing_arcsec=seeing_arcsec,
+            include_obstruction=include_obstruction,
+        )
+    if show_psf_profile:
+        plot_psf_profile(
+            telescope,
+            title=f"PSF — {telescope.primary_type.title()} Primary",
+            wavelength_nm=wavelength_nm,
+            method=method,
+            include_obstruction=include_obstruction,
+        )
 
     # 2D PSF with diffraction spikes (most useful with spider vanes)
-    if telescope.spider_vanes > 0:
+    if show_psf_2d and telescope.spider_vanes > 0:
         plot_psf_2d(
             telescope,
             wavelength_nm=wavelength_nm,
@@ -237,7 +257,7 @@ def run_single(telescope, num_display_rays, wavelength_nm, method,
         )
 
     # Source imaging
-    if source is not None:
+    if show_source_image and source is not None:
         #log_scale = isinstance(source, StarField)
         log_scale = False
         plot_source_image(
@@ -252,7 +272,13 @@ def run_single(telescope, num_display_rays, wavelength_nm, method,
 
 
 def run_comparison(configs, defaults, num_display_rays,
-                   show_vignetting=False):
+                   show_vignetting=False,
+                   show_ray_trace_comparison=True,
+                   show_spot_comparison=True,
+                   show_focal_image_comparison=True,
+                   show_psf_comparison=True,
+                   show_psf_2d_comparison=True,
+                   show_coma_comparison=False):
     """Build multiple telescopes from config dicts and produce comparison plots.
 
     Args:
@@ -260,6 +286,11 @@ def run_comparison(configs, defaults, num_display_rays,
         defaults: Dict of shared default values (geometry + physics).
         num_display_rays: Number of rays for ray trace / spot diagrams.
         show_vignetting: Show vignetting comparison curve.
+        show_ray_trace_comparison: Show ray trace comparison plot.
+        show_spot_comparison: Show spot diagram comparison plot.
+        show_focal_image_comparison: Show focal image comparison plot.
+        show_psf_comparison: Show PSF comparison plot.
+        show_psf_2d_comparison: Show 2D PSF comparison plot.
     """
     telescopes, labels, physics_params = _resolve_comparison_configs(
         configs, defaults)
@@ -270,25 +301,32 @@ def run_comparison(configs, defaults, num_display_rays,
         print(f"  {lbl}: {tel.primary_diameter:.0f}mm "
               f"f/{tel.focal_ratio:.1f} {tel.primary_type}")
 
-    plot_ray_trace_comparison(telescopes, labels,
-                              num_display_rays=num_display_rays)
-    plot_spot_diagram_comparison(telescopes, labels,
-                                 num_display_rays=num_display_rays)
-    plot_focal_image_comparison(telescopes, labels,
-                                wavelength_nm=defaults.get("wavelength_nm", 550.0),
-                                method=defaults.get("method", "analytical"),
-                                seeing_arcsec=defaults.get("seeing_arcsec"),
-                                include_obstruction=defaults.get("include_obstruction", True),
-                                physics_params=physics_params)
-    plot_psf_comparison(telescopes, labels,
-                        wavelength_nm=defaults.get("wavelength_nm", 550.0),
-                        method=defaults.get("method", "analytical"),
-                        include_obstruction=defaults.get("include_obstruction", True),
-                        physics_params=physics_params)
+    if show_ray_trace_comparison:
+        plot_ray_trace_comparison(telescopes, labels,
+                                  num_display_rays=num_display_rays)
+    if show_spot_comparison:
+        plot_spot_diagram_comparison(telescopes, labels,
+                                     num_display_rays=num_display_rays,
+                                     method=defaults.get("method", "analytical"),
+                                     include_obstruction=defaults.get("include_obstruction", True),
+                                     physics_params=physics_params)
+    if show_focal_image_comparison:
+        plot_focal_image_comparison(telescopes, labels,
+                                    wavelength_nm=defaults.get("wavelength_nm", 550.0),
+                                    method=defaults.get("method", "analytical"),
+                                    seeing_arcsec=defaults.get("seeing_arcsec"),
+                                    include_obstruction=defaults.get("include_obstruction", True),
+                                    physics_params=physics_params)
+    if show_psf_comparison:
+        plot_psf_comparison(telescopes, labels,
+                            wavelength_nm=defaults.get("wavelength_nm", 550.0),
+                            method=defaults.get("method", "analytical"),
+                            include_obstruction=defaults.get("include_obstruction", True),
+                            physics_params=physics_params)
 
     # 2D PSF comparison — shown when any telescope has spider vanes,
     # since diffraction spikes are only visible in 2D log-scale images
-    if any(t.spider_vanes > 0 for t in telescopes):
+    if show_psf_2d_comparison and any(t.spider_vanes > 0 for t in telescopes):
         plot_psf_2d_comparison(
             telescopes, labels,
             wavelength_nm=defaults.get("wavelength_nm", 550.0),
@@ -297,6 +335,13 @@ def run_comparison(configs, defaults, num_display_rays,
 
     if show_vignetting:
         plot_vignetting_comparison(telescopes, labels)
+
+    if show_coma_comparison:
+        plot_coma_field_analysis_comparison(
+            telescopes, labels,
+            wavelength_nm=defaults.get("wavelength_nm", 550.0),
+            include_obstruction=defaults.get("include_obstruction", True),
+        )
 
 
 def main():
@@ -309,19 +354,21 @@ def main():
     # "cassegrain"  — convex hyperbolic secondary, focus behind primary
     # "refracting"  — objective lens, no secondary, focus at back of tube
     # "maksutov"    — meniscus corrector + spherical primary + aluminized spot
+    # "schmidt"     — Schmidt corrector + spherical primary + convex secondary
     telescope_type = "newtonian"
     # telescope_type = "cassegrain"
     # telescope_type = "refracting"
     # telescope_type = "maksutov"
+    # telescope_type = "schmidt"
 
     # ── Telescope geometry ───────────────────────────────────────────
-    primary_diameter = 200.0    # mm — aperture of the primary mirror
-    focal_length = 1000.0       # mm — gives f/5 for 200mm aperture
+    primary_diameter = 254.0    # mm — 10" aperture
+    focal_length = 1270.0       # mm — gives f/5 for 254mm aperture
 
     # Primary mirror type (Newtonian only):
     #   "parabolic" (diffraction-limited) or "spherical" (shows aberration)
-    primary_type = "spherical"
-    # primary_type = "parabolic"
+    primary_type = "parabolic"
+    # primary_type = "spherical"
 
     # ── Cassegrain-specific parameters ────────────────────────────────
     # (only used when telescope_type = "cassegrain")
@@ -345,8 +392,8 @@ def main():
     # ── Spider vanes ─────────────────────────────────────────────────
     # Number of vanes holding the secondary mirror (0=none, 4=standard).
     # Vanes produce characteristic diffraction spikes in the PSF.
-    spider_vanes = 0           # no spider vanes
-    # spider_vanes = 4         # standard 4-vane spider
+    # spider_vanes = 0           # no spider vanes
+    spider_vanes = 4         # standard 4-vane spider
     # spider_vanes = 3         # 3-vane (6 spikes due to symmetry)
     spider_vane_width = 1.0    # mm — width of each vane
 
@@ -393,8 +440,29 @@ def main():
     # field_angle_arcsec = 120.0    # 2 arcminutes off-axis
 
     # Show coma field analysis (RMS coma vs field angle + spot grid)
-    show_coma_analysis = False
-    # show_coma_analysis = True
+    # show_coma_analysis = False
+    show_coma_analysis = True
+
+    # ── Plot toggles ─────────────────────────────────────────────
+    # Toggle individual plots on/off. All default to True.
+    # Single-mode plots:
+    show_ray_trace = True
+    show_spot_diagram = True
+    show_focal_image = True
+    show_psf_profile = True
+    show_psf_2d = True            # only renders if spider_vanes > 0
+    # show_vignetting = False     # (already exists below)
+    # show_coma_analysis = False  # (already exists above)
+    show_source_image = True      # only renders if source is configured
+
+    # Comparison-mode plots:
+    show_ray_trace_comparison = True
+    show_spot_comparison = True
+    show_focal_image_comparison = True
+    show_psf_comparison = True
+    show_psf_2d_comparison = True  # only renders if any telescope has spider vanes
+    show_coma_comparison = False   # RMS coma vs field angle overlay
+    # show_vignetting is shared between modes (already exists below)
 
     # ── Source imaging ────────────────────────────────────────────────
     # Astronomical source for simulated imaging.
@@ -404,7 +472,7 @@ def main():
     # source_type = "star"          # single on-axis star (shows PSF)
     # source_type = "star_field"    # random field showing coma + vignetting
     source_type = "jupiter"       # Jupiter disk with bands
-    #source_type = "saturn"        # Saturn with rings
+    # source_type = "saturn"        # Saturn with rings
     # source_type = "moon"          # Moon with maria
 
     # Star field options (only used when source_type = "star_field")
@@ -446,7 +514,7 @@ def main():
     # Set to True to show side-by-side comparison plots.
     # When False, shows single-telescope plots using the settings above.
     # compare_mode = False
-    compare_mode = False
+    compare_mode = True
 
     # Each entry is a config dict with a "label" and any overrides.
     # Keys not specified fall back to the shared defaults above.
@@ -459,13 +527,23 @@ def main():
     # Physics keys you can override per-panel:
     #   wavelength_nm, method, seeing_arcsec, include_obstruction
 
-    # --- Mirror type comparison (default) ---
-    comparison_configs = [
-        {"label": "Parabolic Primary", "primary_type": "parabolic"},
-        {"label": "Spherical Primary", "primary_type": "spherical"},
-    ]
+    # --- 10" Newtonian f/5 vs f/6 comparison ---
+    #comparison_configs = [
+    #    {"label": "10\" f/5 (1270mm)", "focal_length": 1270.0},
+    #    {"label": "10\" f/6 (1524mm)", "focal_length": 1524.0},
+    #]
 
-    # --- Obstruction toggle ---
+    # --- Mirror type comparison ---
+    # comparison_configs = [
+    #     {"label": "Parabolic Primary", "primary_type": "parabolic"},
+    #     {"label": "Spherical Primary", "primary_type": "spherical"},
+    # ]
+
+    # --- Annular vs circular aperture (obstruction effects on PSF) ---
+    # Shows how the secondary mirror obstruction affects diffraction:
+    # stronger secondary rings, slightly lower peak intensity, reduced
+    # contrast on planets.  The underlying physics is the annular aperture
+    # PSF formula (see PHYSICS.md).
     # comparison_configs = [
     #     {"label": "With Obstruction", "include_obstruction": True},
     #     {"label": "No Obstruction", "include_obstruction": False},
@@ -478,11 +556,11 @@ def main():
     #     {"label": "Red (650nm)", "wavelength_nm": 650.0},
     # ]
 
-    # --- Different apertures ---
+    # --- Different apertures (all at f/5 for fair comparison) ---
     # comparison_configs = [
-    #     {"label": "150mm f/6.7", "primary_diameter": 150.0},
-    #     {"label": "200mm f/5.0", "primary_diameter": 200.0},
-    #     {"label": "250mm f/4.0", "primary_diameter": 250.0},
+    #     {"label": "150mm f/5", "primary_diameter": 150.0, "focal_length": 750.0},
+    #     {"label": "200mm f/5", "primary_diameter": 200.0, "focal_length": 1000.0},
+    #     {"label": "250mm f/5", "primary_diameter": 250.0, "focal_length": 1250.0},
     # ]
 
     # --- Different focal ratios ---
@@ -527,18 +605,26 @@ def main():
     # ]
 
     # --- Cassegrain vs Maksutov-Cassegrain ---
+    comparison_configs = [
+        {"label": "200mm f/20 Cassegrain", "telescope_type": "cassegrain",
+         "primary_focal_length": 800.0, "secondary_magnification": 5.0},
+        {"label": "200mm f/20 Maksutov", "telescope_type": "maksutov",
+        "primary_focal_length": 800.0, "secondary_magnification": 5.0},
+    ]
+
+    # --- Schmidt-Cassegrain vs Cassegrain ---
     # comparison_configs = [
-    #     {"label": "200mm f/20 Cassegrain", "telescope_type": "cassegrain",
-    #      "primary_focal_length": 800.0, "secondary_magnification": 5.0},
-    #     {"label": "200mm f/20 Maksutov", "telescope_type": "maksutov",
-    #      "primary_focal_length": 800.0, "secondary_magnification": 5.0},
+    #     {"label": "200mm f/10 SCT", "telescope_type": "schmidt",
+    #      "primary_focal_length": 500.0, "secondary_magnification": 4.0},
+    #     {"label": "200mm f/10 Cassegrain", "telescope_type": "cassegrain",
+    #      "primary_focal_length": 500.0, "secondary_magnification": 4.0},
     # ]
 
-    # --- Different apertures with vignetting ---
+    # --- Different apertures with vignetting (all at f/5 for fair comparison) ---
     # comparison_configs = [
-    #     {"label": "150mm f/6.7", "primary_diameter": 150.0},
-    #     {"label": "200mm f/5.0", "primary_diameter": 200.0},
-    #     {"label": "250mm f/4.0", "primary_diameter": 250.0},
+    #     {"label": "150mm f/5", "primary_diameter": 150.0, "focal_length": 750.0},
+    #     {"label": "200mm f/5", "primary_diameter": 200.0, "focal_length": 1000.0},
+    #     {"label": "250mm f/5", "primary_diameter": 250.0, "focal_length": 1250.0},
     # ]
     # show_vignetting = True  # uncomment with above to see vignetting overlay
 
@@ -578,7 +664,13 @@ def main():
         if meniscus_thickness is not None:
             defaults["meniscus_thickness"] = meniscus_thickness
         run_comparison(comparison_configs, defaults, num_display_rays,
-                       show_vignetting=show_vignetting)
+                       show_vignetting=show_vignetting,
+                       show_ray_trace_comparison=show_ray_trace_comparison,
+                       show_spot_comparison=show_spot_comparison,
+                       show_focal_image_comparison=show_focal_image_comparison,
+                       show_psf_comparison=show_psf_comparison,
+                       show_psf_2d_comparison=show_psf_2d_comparison,
+                       show_coma_comparison=show_coma_comparison)
     else:
         if telescope_type == "cassegrain":
             tel_kwargs = dict(
@@ -604,6 +696,17 @@ def main():
             if meniscus_thickness is not None:
                 tel_kwargs["meniscus_thickness"] = meniscus_thickness
             telescope = MaksutovCassegrainTelescope(**tel_kwargs)
+        elif telescope_type == "schmidt":
+            tel_kwargs = dict(
+                primary_diameter=primary_diameter,
+                primary_focal_length=primary_focal_length,
+                secondary_magnification=secondary_magnification,
+                spider_vanes=spider_vanes,
+                spider_vane_width=spider_vane_width,
+            )
+            if back_focal_distance is not None:
+                tel_kwargs["back_focal_distance"] = back_focal_distance
+            telescope = SchmidtCassegrainTelescope(**tel_kwargs)
         elif telescope_type == "refracting":
             telescope = RefractingTelescope(
                 primary_diameter=primary_diameter,
@@ -618,6 +721,19 @@ def main():
                 spider_vanes=spider_vanes,
                 spider_vane_width=spider_vane_width,
             )
+
+        # ── Multi-telescope single-mode comparison ────────────────────
+        # To compare source images (Moon, Jupiter, etc.) through multiple
+        # telescopes side by side, list additional telescopes here.
+        # Each entry is (telescope, label).  Leave empty for single scope.
+        single_compare = [
+            # --- 10" f/5 vs f/6 Moon comparison ---
+            (NewtonianTelescope(primary_diameter=254.0, focal_length=1270.0,
+                                primary_type="parabolic"), '10" f/5 Newtonian'),
+            (NewtonianTelescope(primary_diameter=254.0, focal_length=1524.0,
+                                primary_type="parabolic"), '10" f/6 Newtonian'),
+        ]
+        # single_compare = []  # uncomment to use single telescope above
 
         # Build astronomical source (if requested)
         source = None
@@ -635,12 +751,21 @@ def main():
             source = Moon(angular_diameter_arcsec=moon_diameter_arcsec,
                           phase=moon_phase)
 
-        run_single(telescope, num_display_rays, wavelength_nm, method,
-                    seeing_arcsec, include_obstruction,
-                    show_vignetting=show_vignetting,
-                    show_coma_analysis=show_coma_analysis,
-                    field_angle_arcsec=field_angle_arcsec,
-                    source=source, eyepiece=eyepiece)
+        # Run for each telescope in single_compare, or just the one above
+        telescopes_to_run = single_compare if single_compare else [(telescope, None)]
+        for tel, label in telescopes_to_run:
+            run_single(tel, num_display_rays, wavelength_nm, method,
+                        seeing_arcsec, include_obstruction,
+                        show_vignetting=show_vignetting,
+                        show_coma_analysis=show_coma_analysis,
+                        field_angle_arcsec=field_angle_arcsec,
+                        source=source, eyepiece=eyepiece,
+                        show_ray_trace=show_ray_trace,
+                        show_spot_diagram=show_spot_diagram,
+                        show_focal_image=show_focal_image,
+                        show_psf_profile=show_psf_profile,
+                        show_psf_2d=show_psf_2d,
+                        show_source_image=show_source_image)
 
     plt.show()
 

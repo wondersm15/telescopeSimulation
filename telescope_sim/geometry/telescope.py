@@ -662,32 +662,15 @@ class MaksutovCassegrainTelescope:
             meniscus_thickness = primary_diameter / 10.0
         self.meniscus_thickness = meniscus_thickness
 
-        # --- Cassegrain geometry (identical formulas) ---
-        m = secondary_magnification
-        f = primary_focal_length
-        b = back_focal_distance
-
-        # Distance from secondary to primary focal point
-        d = (b + f) / (m + 1.0)
-        self.secondary_offset = f - d
-
-        # Aluminized spot diameter (same as Cassegrain secondary sizing)
-        self.secondary_minor_axis = primary_diameter * d / f
-
-        # Spot radius of curvature (convex secondary)
-        # R_secondary = 2(f+B)M / (M^2 - 1)
-        r_secondary = 2.0 * (f + b) * m / (m * m - 1.0)
-
-        # The meniscus back surface has the same radius as the spot
-        # (aluminized spot is on the back surface).
-        # Convention: negative R means concave toward incoming light
-        # in our lens sign convention.
-        r_back = -r_secondary
-
-        # Near-concentric meniscus: front radius from
-        # 1/R_front ≈ 1/R_back + t / (n * R_back^2)
-        # Approximation: assumes near-concentric design for
-        # auto-computed radii.
+        # --- Cassegrain geometry with meniscus correction ---
+        #
+        # The meniscus shifts the effective primary focal point. We use
+        # iterative ray tracing to find the self-consistent geometry:
+        # 1. Guess f_eff = bare primary focal length
+        # 2. Compute Cassegrain geometry → meniscus radii
+        # 3. Build temporary meniscus + primary
+        # 4. Trace a paraxial ray to find actual f_eff
+        # 5. Repeat until converged
         from telescope_sim.physics.refraction import (
             GLASS_CATALOG,
             refractive_index_cauchy,
@@ -695,23 +678,79 @@ class MaksutovCassegrainTelescope:
         glass = "BK7"
         coeffs = GLASS_CATALOG[glass]
         n_glass = refractive_index_cauchy(550.0, coeffs["B"], coeffs["C"])
-        r_front = 1.0 / (1.0 / r_back
-                         + meniscus_thickness / (n_glass * r_back ** 2))
+
+        m = secondary_magnification
+        b = back_focal_distance
+        t = meniscus_thickness
+        f_eff = primary_focal_length  # initial guess
+
+        for _iteration in range(20):
+            f_prev = f_eff
+
+            # Cassegrain geometry using current f_eff
+            d = (b + f_eff) / (m + 1.0)
+            sec_off = f_eff - d
+            r_secondary = 2.0 * (f_eff + b) * m / (m * m - 1.0)
+
+            # Meniscus radii
+            r_back = -r_secondary
+            r_front = 1.0 / (
+                1.0 / r_back + t / (n_glass * r_back ** 2)
+            )
+
+            # Build temporary optics to trace a paraxial ray
+            temp_primary = SphericalMirror(
+                radius_of_curvature=2.0 * primary_focal_length,
+                diameter=primary_diameter,
+                center=(0.0, 0.0),
+            )
+            # Place meniscus so back vertex = sec_off
+            corrector_front_y = sec_off + t
+            temp_corrector = SphericalLens(
+                R_front=r_front, R_back=r_back, thickness=t,
+                diameter=primary_diameter,
+                center=(0.0, corrector_front_y), glass=glass,
+            )
+
+            # Trace a paraxial ray (small h) through meniscus + primary
+            paraxial_h = primary_diameter * 0.02  # 2% of aperture
+            test_ray = Ray(
+                origin=[paraxial_h, corrector_front_y + 100.0],
+                direction=[0.0, -1.0],
+            )
+            temp_corrector.refract_ray(test_ray)
+            temp_primary.reflect_ray(test_ray)
+
+            # Find where this ray crosses the optical axis
+            if abs(test_ray.direction[0]) > 1e-15:
+                t_axis = -test_ray.origin[0] / test_ray.direction[0]
+                f_eff = test_ray.origin[1] + t_axis * test_ray.direction[1]
+            else:
+                break  # Ray is parallel to axis — can't converge
+
+            if abs(f_eff - f_prev) < 0.01:  # converge to 10 µm
+                break
+
+        # Store final geometry
+        self.secondary_offset = sec_off
+        self.secondary_minor_axis = primary_diameter * d / f_eff
 
         # Build the spherical primary mirror
         self.primary: Mirror = SphericalMirror(
-            radius_of_curvature=2.0 * f,
+            radius_of_curvature=2.0 * primary_focal_length,
             diameter=primary_diameter,
             center=(0.0, 0.0),
         )
 
-        # Build the meniscus corrector lens at the secondary offset
+        # Build the meniscus corrector lens with final geometry
+        # Place corrector so back vertex = sec_off
+        corrector_front_y = sec_off + t
         self.corrector = SphericalLens(
             R_front=r_front,
             R_back=r_back,
-            thickness=meniscus_thickness,
+            thickness=t,
             diameter=primary_diameter,
-            center=(0.0, self.secondary_offset),
+            center=(0.0, corrector_front_y),
             glass=glass,
         )
 
@@ -882,6 +921,207 @@ class MaksutovCassegrainTelescope:
             "primary_type": self.primary_type,
             "secondary_type": "aluminized spot",
             "telescope_style": "maksutov",
+        }
+        if self.spider_vanes > 0:
+            components["spider_vanes"] = self.spider_vanes
+            components["spider_vane_width"] = self.spider_vane_width
+            components["secondary_minor_axis"] = self.secondary_minor_axis
+        return components
+
+
+class SchmidtCassegrainTelescope:
+    """A Schmidt-Cassegrain catadioptric telescope.
+
+    Uses a spherical primary mirror and a convex spherical secondary,
+    with a Schmidt corrector plate at the tube opening.  The corrector
+    plate corrects the spherical aberration of the primary.
+
+    The corrector plate is modeled as a non-refracting element (its
+    aberration correction is assumed, not ray-traced).  Rays pass
+    through the corrector position without bending, reflect off the
+    spherical primary, reflect off the convex spherical secondary,
+    and converge at a back focus behind the primary.
+
+    Approximation: The Schmidt corrector is aspheric (4th-order profile).
+    Modeling its exact shape requires aspheric surface math not yet
+    implemented.  The corrector is treated as a zero-power plate that
+    perfectly corrects spherical aberration.
+
+    Coordinate system:
+        Same as CassegrainTelescope — primary at (0,0), focus at
+        (0, -back_focal_distance).
+
+    Attributes:
+        [same as CassegrainTelescope plus corrected_optics=True]
+    """
+
+    def __init__(self, primary_diameter: float,
+                 primary_focal_length: float,
+                 secondary_magnification: float = 4.0,
+                 back_focal_distance: float | None = None,
+                 spider_vanes: int = 0,
+                 spider_vane_width: float = 1.0):
+        self.primary_diameter = primary_diameter
+        self.primary_focal_length = primary_focal_length
+        self.secondary_magnification = secondary_magnification
+        self.primary_type = "spherical"
+        self.corrected_optics = True
+        self.spider_vanes = spider_vanes
+        self.spider_vane_width = spider_vane_width
+
+        self.focal_length = primary_focal_length * secondary_magnification
+
+        if back_focal_distance is None:
+            back_focal_distance = primary_diameter * 0.15
+        self.back_focal_distance = back_focal_distance
+
+        # Cassegrain geometry (same formulas as CassegrainTelescope)
+        m = secondary_magnification
+        f = primary_focal_length
+        b = back_focal_distance
+
+        d = (b + f) / (m + 1.0)
+        self.secondary_offset = f - d
+        self.secondary_minor_axis = primary_diameter * d / f
+
+        # Convex spherical secondary
+        r_secondary = 2.0 * (f + b) * m / (m * m - 1.0)
+
+        # Build spherical primary
+        self.primary: Mirror = SphericalMirror(
+            radius_of_curvature=2.0 * f,
+            diameter=primary_diameter,
+            center=(0.0, 0.0),
+        )
+
+        # Build convex spherical secondary
+        # Store geometry for ray-sphere intersection
+        self._secondary_diameter = self.secondary_minor_axis
+        self._secondary_radius = r_secondary
+        # Sphere center for convex secondary: center above the vertex
+        self._secondary_center = np.array([
+            0.0,
+            self.secondary_offset + r_secondary
+        ])
+
+    def _reflect_off_secondary(self, ray: Ray) -> bool:
+        """Reflect a ray off the convex spherical secondary."""
+        sphere_center = self._secondary_center
+        r = self._secondary_radius
+
+        oc = ray.origin - sphere_center
+        a_coeff = np.dot(ray.direction, ray.direction)
+        b_coeff = 2.0 * np.dot(oc, ray.direction)
+        c_coeff = np.dot(oc, oc) - r * r
+
+        discriminant = b_coeff ** 2 - 4 * a_coeff * c_coeff
+        if discriminant < 0:
+            return False
+
+        sqrt_disc = np.sqrt(discriminant)
+        t1 = (-b_coeff - sqrt_disc) / (2 * a_coeff)
+        t2 = (-b_coeff + sqrt_disc) / (2 * a_coeff)
+
+        candidates = sorted(t for t in [t1, t2] if t > 1e-6)
+        if not candidates:
+            return False
+
+        for t_val in candidates:
+            hit_point = ray.origin + t_val * ray.direction
+            local_x = hit_point[0]
+            if abs(local_x) <= self._secondary_diameter / 2.0:
+                normal = hit_point - sphere_center
+                normal = normal / np.linalg.norm(normal)
+                new_direction = reflect_direction(ray.direction, normal)
+                ray.propagate_to(hit_point)
+                ray.set_direction(new_direction)
+                return True
+
+        return False
+
+    def trace_ray(self, ray: Ray) -> Ray:
+        """Trace a ray: primary → secondary → back focus."""
+        hit_primary = self.primary.reflect_ray(ray)
+        if not hit_primary:
+            return ray
+
+        hit_secondary = self._reflect_off_secondary(ray)
+        if not hit_secondary:
+            end = ray.origin + ray.direction * self.primary_focal_length * 0.3
+            ray.propagate_to(end)
+            return ray
+
+        target_y = -self.back_focal_distance - self.primary_diameter * 0.05
+        if abs(ray.direction[1]) > 1e-12:
+            t = (target_y - ray.origin[1]) / ray.direction[1]
+            if t > 0:
+                ray.propagate_to(ray.origin + ray.direction * t)
+            else:
+                ray.propagate_to(
+                    ray.origin + ray.direction * self.primary_focal_length * 0.5)
+        else:
+            ray.propagate_to(
+                ray.origin + ray.direction * self.primary_focal_length * 0.5)
+
+        return ray
+
+    def trace_rays(self, rays: list[Ray]) -> list[Ray]:
+        """Trace multiple rays through the telescope."""
+        for ray in rays:
+            self.trace_ray(ray)
+        return rays
+
+    @property
+    def focal_ratio(self) -> float:
+        """Effective focal ratio f/# = focal length / aperture."""
+        return self.focal_length / self.primary_diameter
+
+    @property
+    def tube_length(self) -> float:
+        """Approximate physical tube length (mm)."""
+        return self.primary_focal_length * 1.15
+
+    @property
+    def obstruction_ratio(self) -> float:
+        """Secondary obstruction diameter / primary diameter."""
+        return self.secondary_minor_axis / self.primary_diameter
+
+    def compute_vignetting(self, field_angle_arcsec: float) -> float:
+        """Compute vignetting factor at given field angle."""
+        from telescope_sim.physics.vignetting import compute_vignetting
+        return compute_vignetting(
+            field_angle_arcsec, self.primary_diameter,
+            self.primary_focal_length,
+            self.secondary_offset, self.secondary_minor_axis,
+        )
+
+    def fully_illuminated_field(self) -> float:
+        """Field angle (arcsec) where vignetting begins."""
+        from telescope_sim.physics.vignetting import fully_illuminated_field
+        return fully_illuminated_field(
+            self.primary_diameter, self.primary_focal_length,
+            self.secondary_offset, self.secondary_minor_axis,
+        )
+
+    def get_components_for_plotting(self) -> dict:
+        """Return geometric data for plotting."""
+        # Generate secondary surface (convex sphere arc)
+        x = np.linspace(-self._secondary_diameter / 2, self._secondary_diameter / 2, 100)
+        y_local = self._secondary_radius - np.sqrt(self._secondary_radius**2 - x**2)
+        secondary_pts = np.column_stack([x, y_local + self.secondary_offset])
+
+        components = {
+            "primary_surface": self.primary.get_surface_points(),
+            "secondary_surface": secondary_pts,
+            "primary_diameter": self.primary_diameter,
+            "focal_length": self.focal_length,
+            "secondary_offset": self.secondary_offset,
+            "tube_length": self.tube_length,
+            "primary_type": "spherical",
+            "secondary_type": "convex spherical",
+            "telescope_style": "schmidt",
+            "corrected_optics": True,
+            "corrector_position": self.secondary_offset,
         }
         if self.spider_vanes > 0:
             components["spider_vanes"] = self.spider_vanes

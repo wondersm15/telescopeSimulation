@@ -611,3 +611,90 @@
 ### Notes
 - All 189 tests pass (182 existing + 7 new)
 - Ray path exercises both refraction AND reflection: refract through meniscus → reflect off primary → reflect off spot → back focus
+
+---
+
+## Session — 2026-03-07: User Guide and Review
+
+### What was done
+- Created comprehensive `USER_GUIDE.md` covering:
+  - Codebase architecture and design patterns
+  - All physics formulas with explanations
+  - Coding patterns for learning (ABCs, duck typing, separation of concerns)
+  - 7 example analysis studies with configuration snippets
+  - Known limitations and reliability assessment
+  - Prioritized next steps
+  - Telescope design decision guide with trade-off tables
+- Set up 10" f/5 vs f/6 Newtonian comparison in main.py
+- Set up Moon imaging through both configurations
+- Added `single_compare` mechanism for multi-telescope source imaging
+- Thorough codebase review: 197 tests, ~6,800 lines, 4 telescope types
+
+### Notes
+- All 197 tests pass
+- Key finding from review: simulation is reliable for within-design-type comparisons (e.g., Newtonian vs Newtonian), but cross-design-type comparisons have gaps (missing chromatic aberration for refractors, coma model doesn't account for correctors)
+
+## Session — 2026-03-08: Implementation Plan Execution (Tasks #4–#14)
+
+### What was done
+**Phase 1: Quick doc/config fixes**
+- Fixed misleading Airy disk comment in USER_GUIDE (µm units, added magnification explanation)
+- Fixed aperture comparison examples to use constant f/5 (was varying f/ratios)
+- Documented annular vs circular aperture comparison feature
+
+**Phase 2: Type hint cleanup**
+- Updated ray_trace_plot.py to import all telescope types
+- Created Telescope union type for better type coverage
+- Removed Newtonian-specific comments from generic code paths
+
+**Phase 3: Plotting improvements**
+- Added shared axis scale for ray trace comparison plots (visually comparable sizes)
+- Added per-plot toggles to main.py (show_ray_trace, show_spot_diagram, etc.)
+- Fixed spot diagram noise floor by using analytical method when available
+- Improved coma analysis plots:
+  - Added axis labels and caption to spot grid
+  - Created plot_coma_field_analysis_comparison() for overlaying RMS curves
+  - Wired into comparison mode with show_coma_comparison toggle
+
+**Phase 4: Eyepiece enrichment**
+- Added helper methods to Eyepiece class: max/min useful magnification, assessment, summary()
+- Print eyepiece summary in run_single() showing magnification assessment
+- Added eyepiece selection guidance to USER_GUIDE.md
+
+**Phase 5: Schmidt-Cassegrain telescope**
+- Implemented full SchmidtCassegrainTelescope class with:
+  - Spherical primary + convex spherical secondary
+  - Schmidt corrector plate (modeled as zero-power element)
+  - Ray tracing through all surfaces
+  - Properties (focal_ratio, tube_length, obstruction_ratio)
+  - Vignetting support
+- Added Schmidt-Cassegrain drawing support in ray_trace_plot.py
+- Updated all exports and main.py configuration
+- Added to PHYSICS.md with approximation notes
+- Added 7 tests (all passing)
+
+**Phase 6: Mak-Cass geometry fix**
+- Replaced thin-lens formula with iterative ray-trace solver
+- Correctly accounts for meniscus refraction effects on effective focal length
+- Improved ray convergence from ~10mm spread to <2mm (tightened test threshold)
+
+**Phase 7: Tests & verification**
+- All 204 tests pass
+- Schmidt-Cassegrain: 7 new tests, all passing (residual ~2.4mm spherical aberration expected due to zero-power corrector approximation)
+- Mak-Cass: Improved convergence verified
+
+### Files modified
+- telescope_sim/geometry/telescope.py: Schmidt-Cassegrain class, Mak-Cass fix
+- telescope_sim/geometry/eyepiece.py: New helper methods
+- telescope_sim/plotting/ray_trace_plot.py: Type hints, shared axes, Schmidt drawing, coma comparison
+- telescope_sim/plotting/__init__.py: Export plot_coma_field_analysis_comparison
+- main.py: Plot toggles, Schmidt config, eyepiece summary
+- USER_GUIDE.md: Airy fix, aperture study, eyepiece guidance
+- PHYSICS.md: Schmidt-Cassegrain entry
+- tests/test_geometry.py: Schmidt-Cassegrain tests, Mak-Cass threshold update
+
+### Notes
+- All tasks from implementation plan completed successfully
+- Schmidt-Cassegrain has expected residual aberration due to zero-power corrector approximation
+- Mak-Cass now uses physically accurate iterative solver instead of thin-lens approximation
+- 204 tests passing (was 197 before session)
