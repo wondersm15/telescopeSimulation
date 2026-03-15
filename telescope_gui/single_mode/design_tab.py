@@ -16,6 +16,7 @@ from telescope_sim.geometry import NewtonianTelescope, CassegrainTelescope, Refr
 from telescope_sim.plotting import plot_ray_trace
 from telescope_sim.plotting.ray_trace_plot import _render_source_through_telescope
 from telescope_sim.source.sources import Jupiter, Moon
+from telescope_sim.source.light_source import create_parallel_rays
 
 
 class DesignTab(QWidget):
@@ -194,7 +195,19 @@ class DesignTab(QWidget):
             seeing = self.get_seeing_value()
 
             # Update ray trace
-            fig_ray_trace = plot_ray_trace(telescope, num_display_rays=11)
+            # Create and trace rays
+            rays = create_parallel_rays(
+                num_rays=11,
+                aperture_diameter=telescope.primary_diameter,
+                entry_height=telescope.tube_length * 1.15,
+            )
+            telescope.trace_rays(rays)
+            components = telescope.get_components_for_plotting()
+
+            # Plot
+            telescope_type = self.telescope_combo.currentText()
+            title = f"{telescope.primary_diameter:.0f}mm f/{telescope.focal_ratio:.1f} {telescope_type} — Ray Trace"
+            fig_ray_trace = plot_ray_trace(rays, components, title=title)
             self.ray_trace_canvas.set_figure(fig_ray_trace)
             plt.close(fig_ray_trace)  # Close to free memory
 
