@@ -6,7 +6,7 @@ Shows PSF analysis, spot diagram, and performance metrics.
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
-    QPushButton, QLabel, QComboBox, QDoubleSpinBox, QGroupBox
+    QPushButton, QLabel, QComboBox, QDoubleSpinBox, QGroupBox, QCheckBox, QRadioButton, QButtonGroup
 )
 from PyQt6.QtCore import Qt
 import matplotlib.pyplot as plt
@@ -14,7 +14,7 @@ import numpy as np
 
 from telescope_gui.widgets.matplotlib_canvas import MatplotlibCanvas
 from telescope_sim.geometry import NewtonianTelescope, CassegrainTelescope, RefractingTelescope, MaksutovCassegrainTelescope
-from telescope_sim.plotting import plot_psf_2d, plot_spot_diagram
+from telescope_sim.plotting import plot_psf_2d, plot_psf_profile, plot_spot_diagram
 
 
 class PerformanceTab(QWidget):
@@ -28,6 +28,13 @@ class PerformanceTab(QWidget):
         self.primary_diameter = 200.0
         self.focal_length = 1000.0
         self.wavelength = 550.0  # nm
+
+        # PSF display options
+        self.psf_mode = "2d"  # "1d" or "2d"
+        self.psf_scale = "log"  # "log" or "linear"
+        self.lock_psf_axes = False
+        self.locked_psf_xlim = None
+        self.locked_psf_ylim = None
 
         self.init_ui()
 
@@ -67,6 +74,49 @@ class PerformanceTab(QWidget):
         self.metrics_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.metrics_label.setStyleSheet("font-size: 11pt; padding: 10px; background-color: #f0f0f0;")
         main_layout.addWidget(self.metrics_label)
+
+        # PSF Display Options
+        psf_options_group = QGroupBox("PSF Display Options")
+        psf_options_layout = QHBoxLayout()
+
+        # PSF Mode (1D vs 2D)
+        psf_options_layout.addWidget(QLabel("PSF Type:"))
+        self.psf_1d_radio = QRadioButton("1D Profile")
+        self.psf_2d_radio = QRadioButton("2D Image")
+        self.psf_2d_radio.setChecked(True)
+
+        self.psf_mode_group = QButtonGroup()
+        self.psf_mode_group.addButton(self.psf_1d_radio)
+        self.psf_mode_group.addButton(self.psf_2d_radio)
+
+        psf_options_layout.addWidget(self.psf_1d_radio)
+        psf_options_layout.addWidget(self.psf_2d_radio)
+
+        psf_options_layout.addSpacing(20)
+
+        # Scale (log vs linear)
+        psf_options_layout.addWidget(QLabel("Scale:"))
+        self.psf_log_radio = QRadioButton("Logarithmic")
+        self.psf_linear_radio = QRadioButton("Linear")
+        self.psf_log_radio.setChecked(True)
+
+        self.psf_scale_group = QButtonGroup()
+        self.psf_scale_group.addButton(self.psf_log_radio)
+        self.psf_scale_group.addButton(self.psf_linear_radio)
+
+        psf_options_layout.addWidget(self.psf_log_radio)
+        psf_options_layout.addWidget(self.psf_linear_radio)
+
+        psf_options_layout.addSpacing(20)
+
+        # Lock axes
+        self.lock_axes_check = QCheckBox("Lock PSF Axes")
+        self.lock_axes_check.setToolTip("Keep PSF plot axes fixed when updating parameters")
+        psf_options_layout.addWidget(self.lock_axes_check)
+
+        psf_options_layout.addStretch()
+        psf_options_group.setLayout(psf_options_layout)
+        main_layout.addWidget(psf_options_group)
 
         # Bottom: Controls
         controls_group = QGroupBox("Controls")
@@ -119,8 +169,18 @@ class PerformanceTab(QWidget):
 
         self.setLayout(main_layout)
 
+        # Connect lock axes checkbox
+        self.lock_axes_check.toggled.connect(self.on_lock_axes_toggled)
+
         # Initial render
         self.update_view()
+
+    def on_lock_axes_toggled(self, checked):
+        """Handle lock axes checkbox toggle."""
+        if not checked:
+            # Unlocking - clear stored limits
+            self.locked_psf_xlim = None
+            self.locked_psf_ylim = None
 
     def build_telescope(self):
         """Build telescope object from current configuration."""
@@ -201,13 +261,61 @@ class PerformanceTab(QWidget):
             metrics = self.calculate_metrics(telescope)
             self.update_metrics_label(metrics)
 
-            # Update PSF (plot_psf_2d generates its own title)
+            # Store current PSF axes if lock is enabled
+            if self.lock_axes_check.isChecked() and self.locked_psf_xlim is None:
+                # First time locking - store current limits from canvas
+                try:
+                    current_fig = self.psf_canvas.figure
+                    if current_fig.axes:
+                        ax = current_fig.axes[0]
+                        self.locked_psf_xlim = ax.get_xlim()
+                        self.locked_psf_ylim = ax.get_ylim()
+                except:
+                    pass
+
+            # Update PSF based on mode
             telescope_type = self.telescope_combo.currentText()
-            fig_psf = plot_psf_2d(
-                telescope,
-                wavelength_nm=wavelength_nm,
-                figsize=(6, 6)
-            )
+            psf_mode = "1d" if self.psf_1d_radio.isChecked() else "2d"
+            psf_scale = "log" if self.psf_log_radio.isChecked() else "linear"
+
+            if psf_mode == "1d":
+                # 1D radial profile
+                title = f"{telescope.primary_diameter:.0f}mm f/{telescope.focal_ratio:.1f} {telescope_type} — PSF Profile"
+                fig_psf = plot_psf_profile(
+                    telescope,
+                    title=title,
+                    wavelength_nm=wavelength_nm,
+                    figsize=(6, 6)
+                )
+            else:
+                # 2D image (plot_psf_2d uses log scale internally)
+                fig_psf = plot_psf_2d(
+                    telescope,
+                    wavelength_nm=wavelength_nm,
+                    figsize=(6, 6)
+                )
+
+            # Apply linear scale if requested (for 2D mode)
+            if psf_mode == "2d" and psf_scale == "linear":
+                # Get the image from the plot and convert to linear scale
+                for ax in fig_psf.axes:
+                    for im in ax.images:
+                        # Get current data
+                        data = im.get_array()
+                        # Convert from log to linear (undo the log transformation)
+                        linear_data = 10 ** data
+                        im.set_data(linear_data)
+                        im.set_norm(plt.Normalize(vmin=linear_data.min(), vmax=linear_data.max()))
+                        # Update colorbar if it exists
+                        if hasattr(im, 'colorbar') and im.colorbar is not None:
+                            im.colorbar.update_normal(im)
+
+            # Apply locked axes if enabled
+            if self.lock_axes_check.isChecked() and self.locked_psf_xlim is not None:
+                for ax in fig_psf.axes:
+                    ax.set_xlim(self.locked_psf_xlim)
+                    ax.set_ylim(self.locked_psf_ylim)
+
             self.psf_canvas.set_figure(fig_psf)
             plt.close(fig_psf)
 
