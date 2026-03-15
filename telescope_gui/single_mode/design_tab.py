@@ -15,7 +15,7 @@ from telescope_gui.widgets.matplotlib_canvas import MatplotlibCanvas
 from telescope_sim.geometry import NewtonianTelescope, CassegrainTelescope, RefractingTelescope, MaksutovCassegrainTelescope
 from telescope_sim.plotting import plot_ray_trace
 from telescope_sim.plotting.ray_trace_plot import _render_source_through_telescope
-from telescope_sim.source.sources import JupiterSource, MoonSource
+from telescope_sim.source.sources import Jupiter, Moon
 
 
 class DesignTab(QWidget):
@@ -167,9 +167,9 @@ class DesignTab(QWidget):
         source_type = self.source_combo.currentText().lower()
 
         if source_type == "jupiter":
-            return JupiterSource()
+            return Jupiter()
         elif source_type == "moon":
-            return MoonSource()
+            return Moon()
         else:
             return None
 
