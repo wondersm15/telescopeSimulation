@@ -13,8 +13,7 @@ import matplotlib.pyplot as plt
 
 from telescope_gui.widgets.matplotlib_canvas import MatplotlibCanvas
 from telescope_sim.geometry import NewtonianTelescope, CassegrainTelescope, RefractingTelescope, MaksutovCassegrainTelescope
-from telescope_sim.plotting import plot_ray_trace
-from telescope_sim.plotting.ray_trace_plot import _render_source_through_telescope
+from telescope_sim.plotting import plot_ray_trace, plot_source_image
 from telescope_sim.source.sources import Jupiter, Moon
 from telescope_sim.source.light_source import create_parallel_rays
 
@@ -213,11 +212,10 @@ class DesignTab(QWidget):
 
             # Update simulated image (if source selected)
             if source is not None:
-                fig_image = _render_source_through_telescope(
-                    source,
+                fig_image = plot_source_image(
                     telescope,
-                    seeing_arcsec=seeing,
-                    polychromatic=False
+                    source,
+                    seeing_arcsec=seeing
                 )
                 self.image_canvas.set_figure(fig_image)
                 plt.close(fig_image)
