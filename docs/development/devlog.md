@@ -915,3 +915,102 @@ Major planned features documented:
 - ROADMAP.md provides clear direction for future development
 - Design philosophy ("realism over idealization") now prominent in
   both README.md and ROADMAP.md
+
+
+---
+
+## Session 19 — 2026-03-14
+
+### What was done
+**GUI Development Planning** — Created comprehensive plan for transforming
+the telescope simulator into an interactive GUI application.
+
+#### Planning Document Created
+**docs/development/GUI_PLAN.md** — 500+ line detailed development plan
+covering initial MVP through advanced features.
+
+#### Plan Structure
+**Framework Decision**: PyQt6 selected for professional appearance,
+mature ecosystem, excellent matplotlib integration, and cross-platform
+support.
+
+**7-Phase Development Approach**:
+
+1. **Phase 1 - MVP** (3-4 weeks):
+   - Tab 1: Design view (ray trace + simulated image side-by-side)
+   - Tab 2: Comparison view (2-4 telescope configs)
+   - Basic controls: telescope type, aperture, f-ratio, source, seeing
+   - Menu bar, status bar, configuration save/load
+   - Goal: Replace most common main.py editing workflows
+
+2. **Phase 2 - Enhanced Interactivity** (2-3 weeks):
+   - Auto-update mode with real-time rendering
+   - Advanced controls panel (spider vanes, eyepiece, wavelength)
+   - PSF analysis tab
+   - Configuration presets (common telescope designs)
+   - Better error handling and validation
+
+3. **Phase 3 - Terminal Integration** (2-3 weeks):
+   - Bottom panel showing equivalent Python commands
+   - Educational: users see API structure they're using
+   - Copy commands to clipboard
+   - Interactive tooltips with physics definitions
+   - Support learning progression from GUI to programmatic use
+
+4. **Phase 4 - Real-World Integration** (3-4 weeks):
+   - Location and time panel
+   - Fetch current seeing from weather API
+   - Calculate object positions (altitude/azimuth) from location+time
+   - Use current Earth-object distances for angular size
+   - Integration with astropy, skyfield, weather APIs
+
+5. **Phase 5 - Constellation & Sky Navigation** (2-3 weeks):
+   - Interactive star chart tab
+   - Constellation lines, bright stars, DSOs
+   - Telescope FOV overlay on sky chart
+   - Click to point telescope and simulate view
+   - Integration with Hipparcos catalog, Messier catalog
+
+6. **Phase 6 - Educational Content** (2 weeks):
+   - Learn tab with integrated educational content
+   - Telescope design guide with interactive examples
+   - Optics concepts with linked simulations
+   - Observing tips
+   - Constellation mythology and notes
+
+7. **Phase 7 - Advanced Features** (ongoing):
+   - Batch analysis mode (parameter sweeps)
+   - Astrophotography mode (sensor simulation)
+   - Custom optical designs
+   - 3D visualization
+
+#### Technical Architecture
+- **Zero refactoring** of telescope_sim package - GUI wraps around it
+- New telescope_gui/ package with modular tab structure
+- Configuration save/load (JSON format)
+- Existing plotting functions reused via matplotlib FigureCanvas
+- CLI (main.py) and GUI (gui.py) as parallel entry points
+
+#### Key Design Decisions
+- **Side-by-side layout** for Tab 1: ray trace + image on same screen
+- **Learning-focused**: Terminal panel shows underlying Python commands
+- **Progressive enhancement**: Each phase builds on previous, maintaining
+  working software
+- **Realism-first**: Preserve physics accuracy, no UI shortcuts that
+  compromise simulation quality
+
+#### Estimated Timeline
+12-16 weeks total for Phases 1-6 (full-time equivalent work)
+
+### Files Created
+- docs/development/GUI_PLAN.md
+
+### Notes
+- Plan addresses user requirements: design view + comparison tabs
+- Framework selection (PyQt6) provides professional appearance suitable
+  for educational/scientific use
+- Phased approach allows incremental development and testing
+- Terminal integration supports learning progression from GUI to API
+- Real-world integration (Phase 4) aligns with ROADMAP.md goals
+- No implementation yet - pure planning phase
+- Ready to begin Phase 1 implementation when approved
