@@ -1255,3 +1255,134 @@ Run `python gui.py` and try:
 - Users can see what's limiting performance (atmosphere vs optics)
 - Pop-out window provides "true angular scale" viewing experience
 - All 215 tests still passing (GUI wraps backend, no physics changes)
+
+
+---
+
+## Session 22 — 2026-03-14
+
+### What was done
+**GUI Feature Completion** — Completed all planned tabs for both Single Telescope
+and Comparison modes, finalized Design tab display modes.
+
+#### 1. Design Tab Display Modes
+**Problem**: True angular size images are typically smaller than GUI panel, so
+pop-out window wasn't necessary for viewing at correct scale.
+
+**Solution**: Added three buttons below simulated image panel:
+- **"True Angular Size"** - Shows image at perceived angular size (50cm viewing
+  distance). Only enabled when eyepiece active (CLI generates true_size_figure)
+- **"Standardized Size"** - Shows image scaled to fill panel nicely (default)
+- **"Pop Out"** - Opens separate window with selected figure
+
+**Implementation**:
+- Stores both figures from plot_source_image: current_figure (enhanced view)
+  and true_size_figure (true angular size view from CLI code)
+- Display mode toggle switches between figures in main panel
+- Simplified image_popout.py to just display figure without recalculating sizes
+  (reuses CLI true angular size logic from ray_trace_plot.py:3309-3385)
+
+**Example**: Jupiter at 100× magnification → ~1° apparent size → ~10mm on screen
+at 50cm, fits comfortably in panel without pop-out needed.
+
+#### 2. Performance Tab (Single Telescope Mode)
+**Implemented** comprehensive performance analysis tab:
+- **PSF Analysis**: Point Spread Function visualization using plot_psf()
+- **Spot Diagram**: Ray convergence pattern using plot_spot_diagram()
+- **Performance Metrics**: Rayleigh criterion, Dawes limit, Airy disk diameter
+- **Controls**: Independent telescope type, aperture, f-ratio, wavelength
+  (400-700nm) for exploring chromatic effects
+- **Metrics Display**: "Resolution Limits: Rayleigh = 0.69\", Dawes = 0.58\" |
+  Airy Disk = 1.34\" | Wavelength = 550 nm"
+
+#### 3. Comparison Mode Tabs
+**Implemented three comparison tabs** for side-by-side telescope analysis:
+
+**Ray Traces Tab** (telescope_gui/comparison_mode/ray_traces_tab.py):
+- Side-by-side ray trace visualization
+- Independent controls for two telescopes (type, aperture, f-ratio)
+- Horizontal scrollable layout for multiple plots
+- Uses create_parallel_rays + trace_rays + plot_ray_trace workflow
+
+**Simulated Images Tab** (telescope_gui/comparison_mode/images_tab.py):
+- Side-by-side simulated images (Jupiter/Moon)
+- Shared source and seeing controls (fair comparison under same conditions)
+- Independent telescope configurations
+- Shows how different designs affect image quality
+- Handles both single figure and list return types from plot_source_image
+
+**Analytics Tab** (telescope_gui/comparison_mode/analytics_tab.py):
+- **Metrics Table**: QTableWidget comparing aperture, focal length, f-ratio,
+  Rayleigh/Dawes limits, light gathering power (× human eye)
+- **Resolution Comparison Chart**: Bar chart showing Rayleigh criterion vs
+  Dawes limit (lower is better)
+- **Light Gathering Comparison Chart**: Bar chart showing relative light
+  gathering power (higher is better)
+- Enables quantitative comparison for design decisions
+
+#### 4. Integration
+**Updated main_window.py**:
+- Imported all new tab classes
+- Replaced placeholders with functional tabs
+- Mode switching now instantiates real tabs for both modes
+
+### Files Created
+- telescope_gui/comparison_mode/ray_traces_tab.py
+- telescope_gui/comparison_mode/images_tab.py
+- telescope_gui/comparison_mode/analytics_tab.py
+
+### Files Modified
+- telescope_gui/single_mode/design_tab.py (display mode toggle)
+- telescope_gui/single_mode/performance_tab.py (complete implementation)
+- telescope_gui/widgets/image_popout.py (simplified to reuse CLI logic)
+- telescope_gui/main_window.py (import and use new tabs)
+
+### Testing
+All GUI modes tested successfully:
+
+**Single Telescope Mode**:
+```bash
+python gui.py
+# Design tab: ray trace + image with display mode toggle
+# Performance tab: PSF + spot diagram + metrics
+```
+
+**Comparison Mode**:
+```bash
+python gui.py
+# Switch to Comparison mode radio button
+# Ray Traces: side-by-side ray traces
+# Simulated Images: side-by-side Jupiter/Moon images
+# Analytics: metrics table + comparison charts
+```
+
+### Key Features
+- **Consistent UI**: All tabs follow similar layout patterns with controls at
+  bottom, visualizations at top
+- **Independent controls**: Each tab can be configured independently for
+  flexibility
+- **Real physics**: All metrics calculated using proper optical formulas
+- **Flexible comparison**: Comparison mode allows exploring design trade-offs
+- **Professional visualization**: Clean matplotlib plots embedded in Qt widgets
+  via MatplotlibCanvas
+
+### Status
+**GUI Feature Complete** — All planned tabs implemented:
+- ✅ Single Mode: Design tab (full features) + Performance tab
+- ✅ Comparison Mode: Ray Traces + Simulated Images + Analytics
+- ✅ Display modes: True Angular Size vs Standardized Size in-panel switching
+- ✅ Pop-out capability maintained
+- ✅ All tabs tested and working
+
+**Next Steps** (future enhancements):
+- State sharing between tabs (e.g., Design → Performance)
+- Configuration save/load (File menu hooks)
+- Additional comparison configurations (3+ telescopes)
+- Export capabilities (save figures, reports)
+
+### Notes
+- Total GUI implementation: ~970 lines across comparison mode tabs
+- All 215 tests still passing (GUI independent of telescope_sim)
+- main.py CLI still fully functional alongside GUI
+- Design philosophy: reuse proven CLI code (e.g., true angular size calculation)
+  rather than reimplementing in GUI layer
