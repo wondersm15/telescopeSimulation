@@ -214,8 +214,8 @@ class DesignTab(QWidget):
             # Update simulated image (if source selected)
             if source is not None:
                 fig_image = _render_source_through_telescope(
-                    telescope,
                     source,
+                    telescope,
                     seeing_arcsec=seeing,
                     polychromatic=False
                 )
