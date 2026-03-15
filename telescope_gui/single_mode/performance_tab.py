@@ -275,18 +275,6 @@ class PerformanceTab(QWidget):
             metrics = self.calculate_metrics(telescope)
             self.update_metrics_label(metrics)
 
-            # Store current PSF axes if lock is enabled
-            if self.lock_axes_check.isChecked() and self.locked_psf_xlim is None:
-                # First time locking - store current limits from canvas
-                try:
-                    current_fig = self.psf_canvas.figure
-                    if current_fig.axes:
-                        ax = current_fig.axes[0]
-                        self.locked_psf_xlim = ax.get_xlim()
-                        self.locked_psf_ylim = ax.get_ylim()
-                except:
-                    pass
-
             # Update PSF based on mode
             telescope_type = self.telescope_combo.currentText()
             psf_mode = "1d" if self.psf_1d_radio.isChecked() else "2d"
@@ -361,11 +349,18 @@ class PerformanceTab(QWidget):
                         if hasattr(im, 'colorbar') and im.colorbar is not None:
                             im.colorbar.update_normal(im)
 
-            # Apply locked axes if enabled
-            if self.lock_axes_check.isChecked() and self.locked_psf_xlim is not None:
-                for ax in fig_psf.axes:
-                    ax.set_xlim(self.locked_psf_xlim)
-                    ax.set_ylim(self.locked_psf_ylim)
+            # Store axis limits if lock is enabled (before applying them)
+            if self.lock_axes_check.isChecked():
+                if self.locked_psf_xlim is None and fig_psf.axes:
+                    # First time locking - store current limits from the generated figure
+                    ax = fig_psf.axes[0]
+                    self.locked_psf_xlim = ax.get_xlim()
+                    self.locked_psf_ylim = ax.get_ylim()
+                elif self.locked_psf_xlim is not None:
+                    # Apply locked limits
+                    for ax in fig_psf.axes:
+                        ax.set_xlim(self.locked_psf_xlim)
+                        ax.set_ylim(self.locked_psf_ylim)
 
             self.psf_canvas.set_figure(fig_psf)
             plt.close(fig_psf)
