@@ -201,21 +201,30 @@ class PerformanceTab(QWidget):
             metrics = self.calculate_metrics(telescope)
             self.update_metrics_label(metrics)
 
-            # Update PSF
+            # Update PSF (plot_psf_2d generates its own title)
             telescope_type = self.telescope_combo.currentText()
             fig_psf = plot_psf_2d(
                 telescope,
                 wavelength_nm=wavelength_nm,
-                title=f"{telescope.primary_diameter:.0f}mm f/{telescope.focal_ratio:.1f} {telescope_type} — PSF"
+                figsize=(6, 6)
             )
             self.psf_canvas.set_figure(fig_psf)
             plt.close(fig_psf)
 
-            # Update spot diagram
+            # Update spot diagram (requires traced rays)
+            from telescope_sim.source.light_source import create_parallel_rays
+            rays = create_parallel_rays(
+                num_rays=21,  # More rays for better spot diagram
+                aperture_diameter=telescope.primary_diameter,
+                entry_height=telescope.tube_length * 1.15,
+            )
+            telescope.trace_rays(rays)
+
+            title = f"{telescope.primary_diameter:.0f}mm f/{telescope.focal_ratio:.1f} {telescope_type} — Spot Diagram"
             fig_spot = plot_spot_diagram(
-                telescope,
-                wavelength_nm=wavelength_nm,
-                title=f"{telescope.primary_diameter:.0f}mm f/{telescope.focal_ratio:.1f} {telescope_type} — Spot Diagram"
+                rays,
+                title=title,
+                figsize=(6, 6)
             )
             self.spot_canvas.set_figure(fig_spot)
             plt.close(fig_spot)
