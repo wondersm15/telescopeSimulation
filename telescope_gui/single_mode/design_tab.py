@@ -36,6 +36,7 @@ class DesignTab(QWidget):
         self.source_type = "jupiter"
         self.seeing = "good"
         self.current_figure = None  # Store current figure for pop-out
+        self.true_size_figure = None  # Store true angular size figure (with eyepiece)
 
         self.init_ui()
 
@@ -312,31 +313,16 @@ class DesignTab(QWidget):
             self.eyepiece_label.setText("Direct focal plane view (no eyepiece)")
 
     def popout_image(self):
-        """Pop out the simulated image in a separate window at full resolution."""
-        if self.current_figure is None:
+        """Pop out the simulated image - uses true angular size figure if available."""
+        # Use the true angular size figure (from CLI logic) if available (eyepiece mode)
+        # Otherwise use the normal figure
+        figure_to_show = self.true_size_figure if self.true_size_figure is not None else self.current_figure
+
+        if figure_to_show is None:
             return
 
         telescope = self.build_telescope()
         eyepiece = self.get_eyepiece(telescope)
-        source = self.build_source()
-
-        # Calculate true field of view
-        if eyepiece is not None:
-            # With eyepiece: True FOV = Apparent FOV / Magnification
-            mag = telescope.focal_length / eyepiece.focal_length_mm
-            true_fov_deg = eyepiece.apparent_fov_deg / mag
-            angular_size_arcmin = true_fov_deg * 60  # degrees to arcmin
-        else:
-            # No eyepiece - use source field extent
-            if source is not None:
-                if hasattr(source, 'field_extent_arcsec'):
-                    angular_size_arcmin = source.field_extent_arcsec / 60
-                elif hasattr(source, 'angular_diameter_arcsec'):
-                    angular_size_arcmin = source.angular_diameter_arcsec / 60
-                else:
-                    angular_size_arcmin = 30.0  # Default 0.5°
-            else:
-                angular_size_arcmin = None  # No source
 
         # Build title
         title = f"{telescope.primary_diameter:.0f}mm f/{telescope.focal_ratio:.1f}"
@@ -346,10 +332,11 @@ class DesignTab(QWidget):
         else:
             title += " — Direct Focal Plane"
 
+        # Simple pop-out - just display the figure
+        # The CLI logic already sized it correctly for perceived angular size
         window = ImagePopoutWindow(
-            self.current_figure,
+            figure_to_show,
             title=title,
-            angular_size_arcmin=angular_size_arcmin,
             parent=self
         )
         window.exec()
@@ -400,17 +387,20 @@ class DesignTab(QWidget):
                     # With eyepiece: [normal_view, true_angular_size_view]
                     # Use the first figure for the main display
                     fig_image = result[0]
-                    # Close the second figure
+                    # Save the second figure for pop-out (true angular size)
                     if len(result) > 1:
-                        plt.close(result[1])
+                        self.true_size_figure = result[1]
+                    else:
+                        self.true_size_figure = None
                 else:
                     # Without eyepiece: single figure
                     fig_image = result
+                    self.true_size_figure = None
 
                 self.image_canvas.set_figure(fig_image)
-                self.current_figure = fig_image  # Store for pop-out
+                self.current_figure = fig_image  # Store for pop-out (fallback)
                 self.popout_button.setEnabled(True)
-                # Don't close this one - we need it for pop-out
+                # Don't close these - we need them for pop-out
             else:
                 # Clear image canvas
                 self.image_canvas.figure.clear()
