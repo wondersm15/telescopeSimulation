@@ -1176,3 +1176,82 @@ Should show:
 - All 215 tests still passing (no changes to telescope_sim)
 - GUI is fully independent - main.py CLI still works
 - Simple PIL-based figure rendering avoids matplotlib/Qt integration complexity
+
+
+---
+
+## Session 21 — 2026-03-14
+
+### What was done
+**GUI Enhancements** — Added eyepiece integration, pop-out window, and
+performance limiting factor display to Design tab.
+
+#### Features Added
+
+**1. Eyepiece Integration**
+- Added "Use Eyepiece" checkbox and focal length control (3-40mm)
+- Passes eyepiece object to plot_source_image for proper magnification/washout
+- Displays eyepiece info: magnification, exit pupil, true FOV
+- Example: "10mm (50° AFOV) → 100× magnification, 2.0mm exit pupil, 0.50° true FOV"
+- Enables realistic surface brightness and washout effects at high magnification
+
+**2. Pop-Out Image Window** (telescope_gui/widgets/image_popout.py)
+- "Pop Out Image (Correct Scale)" button below simulated image
+- Opens separate QDialog window showing image at angular scale
+- Calculates proper size based on true FOV / apparent angular size
+- Scale: 10 pixels/arcmin for visibility (tunable)
+- Window title shows telescope config and magnification
+- Disabled when no source selected
+
+**3. Performance Limiting Factor Display**
+- Calculates diffraction limit: θ = 1.22 λ / D
+- Compares to atmospheric seeing
+- Shows one of three states:
+  - "✓ Diffraction-limited" (green) when seeing=None or seeing better than
+    telescope
+  - "⚠ Seeing-limited" (orange) when seeing worse than telescope capability
+  - Displays both actual resolution and what telescope is capable of
+- Example: "⚠ Seeing-limited: 1.5\" resolution (telescope capable of 0.69\"
+  but atmosphere limits performance)"
+
+#### User Experience Improvements
+- Two info labels below plots:
+  - Performance label (diffraction vs seeing) - bold, color-coded
+  - Eyepiece label (mag, exit pupil, FOV) - blue text
+- Eyepiece focal length control enabled/disabled by checkbox
+- Pop-out button enabled only when image rendered
+- Clear visual feedback on what's limiting performance
+
+#### Technical Details
+- Eyepiece object created with focal_length_mm and 50° AFOV (Plössl standard)
+- Diffraction limit calculation: 1.22 * 550nm / aperture_mm, converted to
+  arcseconds
+- Pop-out window uses PIL to render figure, scales with QPixmap
+- Figure stored in self.current_figure for pop-out (not closed immediately)
+
+### Files Created
+- telescope_gui/widgets/image_popout.py
+
+### Files Modified
+- telescope_gui/single_mode/design_tab.py (complete rewrite with new features)
+
+### Testing
+Run `python gui.py` and try:
+1. Check "Use Eyepiece", set 10mm → see magnification info
+2. Change aperture 50mm→200mm with Seeing=None → see diffraction limit change
+3. Set Seeing=Good → see "Seeing-limited" warning for small apertures
+4. Click "Pop Out Image" → separate window at angular scale
+5. Toggle eyepiece on/off → image brightness should change (washout at low mag)
+
+### Issues Fixed During Implementation
+- ModuleNotFoundError for PyQt6 (installed to wrong venv)
+- Import errors: Jupiter/Moon not JupiterSource/MoonSource
+- plot_ray_trace needs rays+components, not telescope+num_rays
+- _render_source_through_telescope returns tuple, use plot_source_image instead
+- Argument order: plot_source_image(telescope, source) not (source, telescope)
+
+### Notes
+- Eyepiece effects (magnification, washout) now properly integrated
+- Users can see what's limiting performance (atmosphere vs optics)
+- Pop-out window provides "true angular scale" viewing experience
+- All 215 tests still passing (GUI wraps backend, no physics changes)

@@ -6,13 +6,15 @@ Shows ray trace and simulated image side-by-side.
 
 from PyQt6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QGridLayout,
-    QPushButton, QLabel, QComboBox, QDoubleSpinBox, QGroupBox
+    QPushButton, QLabel, QComboBox, QDoubleSpinBox, QGroupBox, QCheckBox
 )
-from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtCore import pyqtSignal, Qt
 import matplotlib.pyplot as plt
 
 from telescope_gui.widgets.matplotlib_canvas import MatplotlibCanvas
+from telescope_gui.widgets.image_popout import ImagePopoutWindow
 from telescope_sim.geometry import NewtonianTelescope, CassegrainTelescope, RefractingTelescope, MaksutovCassegrainTelescope
+from telescope_sim.geometry.eyepiece import Eyepiece
 from telescope_sim.plotting import plot_ray_trace, plot_source_image
 from telescope_sim.source.sources import Jupiter, Moon
 from telescope_sim.source.light_source import create_parallel_rays
@@ -33,6 +35,7 @@ class DesignTab(QWidget):
         self.primary_type = "parabolic"
         self.source_type = "jupiter"
         self.seeing = "good"
+        self.current_figure = None  # Store current figure for pop-out
 
         self.init_ui()
 
@@ -44,14 +47,37 @@ class DesignTab(QWidget):
         plots_layout = QHBoxLayout()
 
         # Left: Ray trace
+        ray_trace_container = QVBoxLayout()
         self.ray_trace_canvas = MatplotlibCanvas(figsize=(7, 6))
-        plots_layout.addWidget(self.ray_trace_canvas)
+        ray_trace_container.addWidget(self.ray_trace_canvas)
+        plots_layout.addLayout(ray_trace_container)
 
-        # Right: Simulated image
+        # Right: Simulated image with pop-out button
+        image_container = QVBoxLayout()
         self.image_canvas = MatplotlibCanvas(figsize=(7, 6))
-        plots_layout.addWidget(self.image_canvas)
+        image_container.addWidget(self.image_canvas)
+
+        # Pop-out button
+        self.popout_button = QPushButton("Pop Out Image (Correct Scale)")
+        self.popout_button.clicked.connect(self.popout_image)
+        self.popout_button.setEnabled(False)  # Disabled until image is rendered
+        image_container.addWidget(self.popout_button)
+
+        plots_layout.addLayout(image_container)
 
         main_layout.addLayout(plots_layout)
+
+        # Performance info label
+        self.performance_label = QLabel("")
+        self.performance_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.performance_label.setStyleSheet("font-weight: bold; padding: 5px;")
+        main_layout.addWidget(self.performance_label)
+
+        # Eyepiece info label
+        self.eyepiece_label = QLabel("")
+        self.eyepiece_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.eyepiece_label.setStyleSheet("color: #0066cc; padding: 5px;")
+        main_layout.addWidget(self.eyepiece_label)
 
         # Bottom: Controls
         controls_group = QGroupBox("Controls")
@@ -109,6 +135,22 @@ class DesignTab(QWidget):
 
         row += 1
 
+        # Eyepiece focal length
+        controls_layout.addWidget(QLabel("Eyepiece (mm):"), row, 0)
+        self.eyepiece_check = QCheckBox("Use Eyepiece")
+        self.eyepiece_check.setChecked(False)
+        self.eyepiece_check.toggled.connect(self.toggle_eyepiece)
+        controls_layout.addWidget(self.eyepiece_check, row, 1)
+
+        self.eyepiece_spin = QDoubleSpinBox()
+        self.eyepiece_spin.setRange(3.0, 40.0)
+        self.eyepiece_spin.setSingleStep(1.0)
+        self.eyepiece_spin.setValue(10.0)
+        self.eyepiece_spin.setEnabled(False)
+        controls_layout.addWidget(self.eyepiece_spin, row, 2, 1, 2)
+
+        row += 1
+
         # Update button
         self.update_button = QPushButton("Update View")
         self.update_button.clicked.connect(self.update_view)
@@ -121,6 +163,10 @@ class DesignTab(QWidget):
 
         # Initial render
         self.update_view()
+
+    def toggle_eyepiece(self, checked):
+        """Enable/disable eyepiece focal length control."""
+        self.eyepiece_spin.setEnabled(checked)
 
     def build_telescope(self):
         """Build telescope object from current configuration."""
@@ -185,6 +231,115 @@ class DesignTab(QWidget):
         seeing = self.seeing_combo.currentText().lower()
         return seeing_presets.get(seeing, None)
 
+    def get_eyepiece(self, telescope):
+        """Build eyepiece object if enabled."""
+        if self.eyepiece_check.isChecked():
+            eyepiece_fl = self.eyepiece_spin.value()
+            return Eyepiece(
+                focal_length_mm=eyepiece_fl,
+                apparent_fov_deg=50.0  # Standard Plössl
+            )
+        return None
+
+    def calculate_diffraction_limit(self, aperture_mm, wavelength_nm=550.0):
+        """Calculate diffraction limit in arcseconds."""
+        # Rayleigh criterion: θ = 1.22 * λ / D
+        wavelength_m = wavelength_nm * 1e-9
+        aperture_m = aperture_mm * 1e-3
+        theta_rad = 1.22 * wavelength_m / aperture_m
+        theta_arcsec = theta_rad * 206265  # radians to arcseconds
+        return theta_arcsec
+
+    def update_performance_label(self, telescope, seeing_arcsec):
+        """Update the performance info label."""
+        diffraction_limit = self.calculate_diffraction_limit(telescope.primary_diameter)
+
+        if seeing_arcsec is None:
+            # No atmospheric seeing
+            self.performance_label.setText(
+                f"✓ Diffraction-limited: {diffraction_limit:.2f}\" resolution "
+                f"(no atmospheric seeing)"
+            )
+            self.performance_label.setStyleSheet(
+                "font-weight: bold; padding: 5px; color: green;"
+            )
+        elif seeing_arcsec > diffraction_limit:
+            # Seeing-limited
+            self.performance_label.setText(
+                f"⚠ Seeing-limited: {seeing_arcsec:.1f}\" resolution "
+                f"(telescope capable of {diffraction_limit:.2f}\" but atmosphere limits performance)"
+            )
+            self.performance_label.setStyleSheet(
+                "font-weight: bold; padding: 5px; color: #cc6600;"
+            )
+        else:
+            # Diffraction-limited (seeing better than telescope resolution)
+            self.performance_label.setText(
+                f"✓ Diffraction-limited: {diffraction_limit:.2f}\" resolution "
+                f"(seeing is {seeing_arcsec:.1f}\", better than telescope limit)"
+            )
+            self.performance_label.setStyleSheet(
+                "font-weight: bold; padding: 5px; color: green;"
+            )
+
+    def update_eyepiece_label(self, telescope, eyepiece):
+        """Update the eyepiece info label."""
+        if eyepiece is not None:
+            mag = telescope.focal_length / eyepiece.focal_length_mm
+            exit_pupil = telescope.primary_diameter / mag
+            true_fov = eyepiece.apparent_fov_deg / mag
+
+            self.eyepiece_label.setText(
+                f"Eyepiece: {eyepiece.focal_length_mm:.0f}mm ({eyepiece.apparent_fov_deg:.0f}° AFOV) → "
+                f"{mag:.0f}× magnification, {exit_pupil:.1f}mm exit pupil, {true_fov:.2f}° true FOV"
+            )
+        else:
+            self.eyepiece_label.setText("Direct focal plane view (no eyepiece)")
+
+    def popout_image(self):
+        """Pop out the simulated image in a separate window at correct scale."""
+        if self.current_figure is None:
+            return
+
+        telescope = self.build_telescope()
+        eyepiece = self.get_eyepiece(telescope)
+        source = self.build_source()
+
+        # Calculate angular size
+        if eyepiece is not None:
+            # With eyepiece, calculate apparent angular size
+            mag = telescope.focal_length / eyepiece.focal_length_mm
+            if source is not None:
+                # Get source angular diameter
+                if hasattr(source, 'angular_diameter_arcsec'):
+                    source_size_arcsec = source.angular_diameter_arcsec
+                elif hasattr(source, 'field_extent_arcsec'):
+                    source_size_arcsec = source.field_extent_arcsec
+                else:
+                    source_size_arcsec = 60.0  # Default 1 arcmin
+
+                # Apparent size = source size (remains constant, FOV changes)
+                # But what you see through eyepiece depends on magnification
+                angular_size_arcmin = true_fov_deg = eyepiece.apparent_fov_deg / mag
+                angular_size_arcmin *= 60  # degrees to arcmin
+            else:
+                angular_size_arcmin = 30.0  # Default
+        else:
+            # No eyepiece - use field extent
+            angular_size_arcmin = 30.0  # Default
+
+        title = f"{telescope.primary_diameter:.0f}mm f/{telescope.focal_ratio:.1f}"
+        if eyepiece:
+            title += f" with {eyepiece.focal_length_mm:.0f}mm eyepiece ({mag:.0f}×)"
+
+        window = ImagePopoutWindow(
+            self.current_figure,
+            title=title,
+            angular_size_arcmin=angular_size_arcmin,
+            parent=self
+        )
+        window.exec()
+
     def update_view(self):
         """Update both ray trace and simulated image."""
         try:
@@ -192,6 +347,13 @@ class DesignTab(QWidget):
             telescope = self.build_telescope()
             source = self.build_source()
             seeing = self.get_seeing_value()
+            eyepiece = self.get_eyepiece(telescope)
+
+            # Update performance label
+            self.update_performance_label(telescope, seeing)
+
+            # Update eyepiece label
+            self.update_eyepiece_label(telescope, eyepiece)
 
             # Update ray trace
             # Create and trace rays
@@ -215,14 +377,19 @@ class DesignTab(QWidget):
                 fig_image = plot_source_image(
                     telescope,
                     source,
-                    seeing_arcsec=seeing
+                    seeing_arcsec=seeing,
+                    eyepiece=eyepiece  # Pass eyepiece to enable magnification/washout effects
                 )
                 self.image_canvas.set_figure(fig_image)
-                plt.close(fig_image)
+                self.current_figure = fig_image  # Store for pop-out
+                self.popout_button.setEnabled(True)
+                # Don't close this one - we need it for pop-out
             else:
                 # Clear image canvas
                 self.image_canvas.figure.clear()
                 self.image_canvas.canvas.draw()
+                self.current_figure = None
+                self.popout_button.setEnabled(False)
 
             self.config_changed.emit()
 
