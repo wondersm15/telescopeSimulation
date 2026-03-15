@@ -4,8 +4,9 @@ A comprehensive guide to the codebase architecture, underlying physics,
 how to run analyses, coding patterns used, and how to apply the simulation
 to real telescope design decisions.
 
-**Last updated**: March 2026 | **Tests**: 197 passing | **Code**: ~6,800 lines
+**Last updated**: March 2026 | **Tests**: 215 passing | **Code**: ~7,200 lines
 
+> **Getting Started**: See [README.md](../../README.md) for installation and quick start. Always activate the virtual environment before working: `source venv/bin/activate`. Run `deactivate` when done.
 
 ---
 
@@ -50,16 +51,22 @@ astronomical objects (Moon, Jupiter, Saturn, star fields).
 
 ```
 telescopeSimulationProject/
+├── README.md                        Project overview and quick start
+├── CLAUDE.md                        Coding instructions for AI assistance
 ├── main.py                          Entry point — all user configuration here
-├── CLAUDE.md                        Project rules for Claude Code
-├── PHYSICS.md                       Physics implementation inventory
-├── FORMULAS.md                      Math formulas reference
-├── GUIDE.md                         Quick-start setup guide
-├── USER_GUIDE.md                    This file
-├── devlog.md                        Development history log
 ├── requirements.txt                 Dependencies (numpy, matplotlib, scipy, pytest)
 │
-├── telescope_sim/                   Main package (~5,600 lines)
+├── docs/                            Documentation
+│   ├── user/
+│   │   └── USER_GUIDE.md            This file
+│   ├── technical/
+│   │   ├── PHYSICS.md               Physics implementation inventory
+│   │   └── FORMULAS.md              Math formulas reference
+│   └── development/
+│       ├── ROADMAP.md               Development priorities and planned features
+│       └── devlog.md                Development history log
+│
+├── telescope_sim/                   Main package (~6,000 lines)
 │   ├── geometry/                    Optical components and telescope assembly
 │   │   ├── telescope.py             4 telescope classes (890 lines)
 │   │   ├── mirrors.py              Mirror types: parabolic, spherical, hyperbolic, flat (418 lines)
@@ -82,7 +89,7 @@ telescopeSimulationProject/
 │   └── plotting/                    All visualization
 │       └── ray_trace_plot.py        40+ plotting functions (2,875 lines)
 │
-└── tests/                           197 tests across 10 files
+└── tests/                           215 tests across 10 files
     ├── test_geometry.py             Mirrors, lenses, all 4 telescope types
     ├── test_physics.py              Ray class, reflection
     ├── test_refraction.py           Snell's law, dispersion, TIR

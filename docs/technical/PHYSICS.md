@@ -1,5 +1,9 @@
 # Physics Inventory
 
+This document provides a detailed technical reference of physics implementations in the telescope simulator.
+
+> **For development planning**: See [ROADMAP.md](../development/ROADMAP.md) for prioritized future work based on the "Not Yet Implemented" section below.
+
 ## Implemented
 
 ### Geometric Optics

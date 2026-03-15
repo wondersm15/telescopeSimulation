@@ -812,3 +812,106 @@ represents.
 ### Notes
 - No code behavior changes — purely documentation/clarity improvements
 - 215 tests still passing (unchanged)
+
+
+---
+
+## Session 18 — 2026-03-14
+
+### What was done
+**Documentation reorganization** — Restructured project documentation
+into a clean, categorized hierarchy to improve discoverability and
+reduce redundancy.
+
+#### New Structure
+Created `docs/` directory with three categories:
+- **docs/user/** — User-facing documentation
+- **docs/technical/** — Technical reference materials
+- **docs/development/** — Development planning and history
+
+#### Files Created
+1. **README.md** — New project overview and quick start guide
+   - Extracted project description from CLAUDE.md
+   - Merged quick start content from GUIDE.md
+   - Links to all documentation in docs/
+   - Design philosophy statement
+
+2. **docs/development/ROADMAP.md** — Comprehensive development roadmap
+   - Five major categories: Physics, GUI, Real-World Integration,
+     Constellations, Educational Features
+   - Priority/Complexity/Impact ratings for all features
+   - Physics improvements consolidated from PHYSICS.md (with references)
+   - Major new features: GUI application, location-based observing,
+     constellation system, educational content
+   - Implementation strategy with phased approach
+   - Emphasis on realism-first philosophy
+
+#### Files Modified
+1. **CLAUDE.md** — Streamlined to focus on coding conventions
+   - Removed "Project Description & Goals" (moved to README.md)
+   - Added reference to README.md
+   - Kept: Architecture, Physics Policy, Coding Conventions, Preferences
+
+2. **USER_GUIDE.md** → **docs/user/USER_GUIDE.md**
+   - Updated test count: 197 → 215
+   - Updated code size: ~6,800 → ~7,200 lines
+   - Updated file tree to reflect new docs/ structure
+   - Added "Getting Started" note referencing README.md
+   - Incorporated virtual environment quick reference from GUIDE.md
+
+3. **PHYSICS.md** → **docs/technical/PHYSICS.md**
+   - Added header note referencing ROADMAP.md
+   - Kept both "Implemented" and "Not Yet Implemented" sections
+   - (Roadmap references this file rather than duplicating content)
+
+#### Files Moved (no content changes)
+- **FORMULAS.md** → **docs/technical/FORMULAS.md**
+- **devlog.md** → **docs/development/devlog.md**
+
+#### Files Deleted
+- **GUIDE.md** — Content merged into README.md and USER_GUIDE.md
+
+### Final Structure
+```
+Root:
+  README.md           # Project overview, quick start
+  CLAUDE.md           # AI coding instructions
+
+docs/user/:
+  USER_GUIDE.md       # Comprehensive user documentation
+
+docs/technical/:
+  PHYSICS.md          # Physics implementation inventory
+  FORMULAS.md         # Mathematical reference
+
+docs/development/:
+  ROADMAP.md          # Development priorities and planning
+  devlog.md           # This file
+```
+
+### Rationale
+- **Reduced redundancy**: Eliminated overlap between GUIDE.md and USER_GUIDE.md
+- **Standard conventions**: README.md in root (GitHub best practice)
+- **Clear categorization**: User/technical/development separation
+- **Better discoverability**: New users find README.md first
+- **Planning support**: ROADMAP.md consolidates future work with priorities
+- **Cleaner root**: Only essential files (README, CLAUDE, main.py, requirements)
+
+### Roadmap Highlights
+Major planned features documented:
+- **GUI Application**: Interactive controls, tabbed interface, terminal
+  integration for learning
+- **Real-World Integration**: Location-based weather/seeing, live ephemeris,
+  current object positions
+- **Constellation System**: Star patterns, field overlays, educational notes
+- **Educational Features**: Integrated telescope design explanations,
+  physics tooltips, guided tutorials
+- **Physics Improvements**: Surface brightness vs magnification, sky
+  background brightness, Kolmogorov seeing, wavefront error analysis
+
+### Notes
+- All tests still passing (215/215)
+- No code changes — pure documentation reorganization
+- ROADMAP.md provides clear direction for future development
+- Design philosophy ("realism over idealization") now prominent in
+  both README.md and ROADMAP.md

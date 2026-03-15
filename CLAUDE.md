@@ -1,19 +1,6 @@
-# Telescope Simulation Project
+# Claude Code Instructions — Telescope Simulation Project
 
-## Project Description & Goals
-* The goal is to make a virtual telescope simulation tool that is both useful to
-help design a telescope that I am making (i.e., for practical purposes like choosing
-a focal ratio); and to simulate and visualize the optical process in the telescope and
-to produce simulated images (i.e., for fun/cool purposes).
-* It should have cool visualization capabilities like being able to show the light ray
-tracing coming into the telescope and bouncing off mirrors and going through apertures,
-within a specified telescope geometry. It should also be able to produce simulated images
-like what Jupiter would look like through a defined telescope.
-* It should be able to model important physics for telescope design like diffraction.
-If it is too difficult to model from first principles, standalone/ad hoc/empirical modules
-can be used to understand things like focal ratio impact on image quality.
-* A stretch/long-term goal would be to link to real-time data to simulate images.
-
+> See README.md for project overview and goals. This file contains coding conventions and preferences for AI assistance.
 
 ## Project Architecture
 ### Modules
