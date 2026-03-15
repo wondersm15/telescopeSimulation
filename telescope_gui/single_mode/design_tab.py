@@ -37,6 +37,7 @@ class DesignTab(QWidget):
         self.seeing = "good"
         self.current_figure = None  # Store current figure for pop-out
         self.true_size_figure = None  # Store true angular size figure (with eyepiece)
+        self.display_mode = "scaled"  # "scaled" or "true_size"
 
         self.init_ui()
 
@@ -53,16 +54,33 @@ class DesignTab(QWidget):
         ray_trace_container.addWidget(self.ray_trace_canvas)
         plots_layout.addLayout(ray_trace_container)
 
-        # Right: Simulated image with pop-out button
+        # Right: Simulated image with display controls
         image_container = QVBoxLayout()
         self.image_canvas = MatplotlibCanvas(figsize=(7, 6))
         image_container.addWidget(self.image_canvas)
 
-        # Pop-out button
-        self.popout_button = QPushButton("Pop Out Image (Correct Scale)")
+        # Display mode buttons
+        display_buttons_layout = QHBoxLayout()
+
+        self.true_size_button = QPushButton("True Angular Size")
+        self.true_size_button.setCheckable(True)
+        self.true_size_button.clicked.connect(self.show_true_size)
+        self.true_size_button.setEnabled(False)
+        display_buttons_layout.addWidget(self.true_size_button)
+
+        self.scaled_button = QPushButton("Standardized Size")
+        self.scaled_button.setCheckable(True)
+        self.scaled_button.setChecked(True)  # Default mode
+        self.scaled_button.clicked.connect(self.show_scaled)
+        self.scaled_button.setEnabled(False)
+        display_buttons_layout.addWidget(self.scaled_button)
+
+        self.popout_button = QPushButton("Pop Out")
         self.popout_button.clicked.connect(self.popout_image)
-        self.popout_button.setEnabled(False)  # Disabled until image is rendered
-        image_container.addWidget(self.popout_button)
+        self.popout_button.setEnabled(False)
+        display_buttons_layout.addWidget(self.popout_button)
+
+        image_container.addLayout(display_buttons_layout)
 
         plots_layout.addLayout(image_container)
 
@@ -182,6 +200,33 @@ class DesignTab(QWidget):
         """Enable/disable eyepiece controls."""
         self.eyepiece_spin.setEnabled(checked)
         self.afov_spin.setEnabled(checked)
+
+    def show_true_size(self):
+        """Switch to true angular size display mode."""
+        self.display_mode = "true_size"
+        self.true_size_button.setChecked(True)
+        self.scaled_button.setChecked(False)
+        self.refresh_image_display()
+
+    def show_scaled(self):
+        """Switch to standardized size display mode."""
+        self.display_mode = "scaled"
+        self.true_size_button.setChecked(False)
+        self.scaled_button.setChecked(True)
+        self.refresh_image_display()
+
+    def refresh_image_display(self):
+        """Refresh the image canvas based on current display mode."""
+        if self.display_mode == "true_size" and self.true_size_figure is not None:
+            # Show true angular size view
+            self.image_canvas.set_figure(self.true_size_figure)
+        elif self.current_figure is not None:
+            # Show standardized size view
+            self.image_canvas.set_figure(self.current_figure)
+        else:
+            # No figure available
+            self.image_canvas.figure.clear()
+            self.image_canvas.canvas.draw()
 
     def build_telescope(self):
         """Build telescope object from current configuration."""
@@ -385,27 +430,44 @@ class DesignTab(QWidget):
                 # plot_source_image returns a list if eyepiece is used, single figure otherwise
                 if isinstance(result, list):
                     # With eyepiece: [normal_view, true_angular_size_view]
-                    # Use the first figure for the main display
-                    fig_image = result[0]
-                    # Save the second figure for pop-out (true angular size)
+                    # Store both figures
+                    self.current_figure = result[0]  # Standardized size
                     if len(result) > 1:
-                        self.true_size_figure = result[1]
+                        self.true_size_figure = result[1]  # True angular size
                     else:
                         self.true_size_figure = None
                 else:
                     # Without eyepiece: single figure
-                    fig_image = result
+                    self.current_figure = result
                     self.true_size_figure = None
 
-                self.image_canvas.set_figure(fig_image)
-                self.current_figure = fig_image  # Store for pop-out (fallback)
+                # Enable buttons
+                self.scaled_button.setEnabled(True)
                 self.popout_button.setEnabled(True)
-                # Don't close these - we need them for pop-out
+
+                # Enable true size button only if we have the true size figure
+                if self.true_size_figure is not None:
+                    self.true_size_button.setEnabled(True)
+                else:
+                    self.true_size_button.setEnabled(False)
+                    # If we were in true_size mode but no longer have the figure, switch to scaled
+                    if self.display_mode == "true_size":
+                        self.display_mode = "scaled"
+                        self.scaled_button.setChecked(True)
+                        self.true_size_button.setChecked(False)
+
+                # Display based on current mode
+                self.refresh_image_display()
+
+                # Don't close these - we need them for display/pop-out
             else:
                 # Clear image canvas
                 self.image_canvas.figure.clear()
                 self.image_canvas.canvas.draw()
                 self.current_figure = None
+                self.true_size_figure = None
+                self.scaled_button.setEnabled(False)
+                self.true_size_button.setEnabled(False)
                 self.popout_button.setEnabled(False)
 
             self.config_changed.emit()
