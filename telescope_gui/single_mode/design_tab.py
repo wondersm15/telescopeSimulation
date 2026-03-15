@@ -420,6 +420,12 @@ class DesignTab(QWidget):
 
             # Update simulated image (if source selected)
             if source is not None:
+                # Close old figures to prevent memory leak
+                if self.current_figure is not None:
+                    plt.close(self.current_figure)
+                if self.true_size_figure is not None:
+                    plt.close(self.true_size_figure)
+
                 result = plot_source_image(
                     telescope,
                     source,

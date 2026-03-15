@@ -14,7 +14,7 @@ import numpy as np
 
 from telescope_gui.widgets.matplotlib_canvas import MatplotlibCanvas
 from telescope_sim.geometry import NewtonianTelescope, CassegrainTelescope, RefractingTelescope, MaksutovCassegrainTelescope
-from telescope_sim.plotting import plot_psf, plot_spot_diagram
+from telescope_sim.plotting import plot_psf_2d, plot_spot_diagram
 
 
 class PerformanceTab(QWidget):
@@ -203,7 +203,7 @@ class PerformanceTab(QWidget):
 
             # Update PSF
             telescope_type = self.telescope_combo.currentText()
-            fig_psf = plot_psf(
+            fig_psf = plot_psf_2d(
                 telescope,
                 wavelength_nm=wavelength_nm,
                 title=f"{telescope.primary_diameter:.0f}mm f/{telescope.focal_ratio:.1f} {telescope_type} — PSF"

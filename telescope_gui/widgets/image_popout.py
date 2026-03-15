@@ -69,11 +69,19 @@ class ImagePopoutWindow(QDialog):
         # Size window to fit content
         self.adjustSize()
 
-        # Center on screen
-        from PyQt6.QtGui import QGuiApplication
-        screen = QGuiApplication.primaryScreen().geometry()
-        window_rect = self.geometry()
-        self.move(
-            screen.center().x() - window_rect.width() // 2,
-            screen.center().y() - window_rect.height() // 2
-        )
+        # Center on parent or screen
+        if parent is not None:
+            # Center relative to parent window
+            parent_center = parent.geometry().center()
+            self.move(
+                parent_center.x() - self.width() // 2,
+                parent_center.y() - self.height() // 2
+            )
+        else:
+            # Center on screen
+            from PyQt6.QtGui import QGuiApplication
+            screen = QGuiApplication.primaryScreen().geometry()
+            self.move(
+                screen.center().x() - self.width() // 2,
+                screen.center().y() - self.height() // 2
+            )
