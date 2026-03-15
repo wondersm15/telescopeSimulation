@@ -1014,3 +1014,60 @@ support.
 - Real-world integration (Phase 4) aligns with ROADMAP.md goals
 - No implementation yet - pure planning phase
 - Ready to begin Phase 1 implementation when approved
+
+
+---
+
+## Session 19 (continued) — 2026-03-14
+
+### What was done
+**GUI Plan Refinement** — Updated Phase 1 structure based on user feedback
+to better organize single telescope analysis vs comparison workflows.
+
+#### Structural Changes to Phase 1
+
+**Previous structure:**
+- Tab 1: Design view (ray trace + image)
+- Tab 2: Comparison view (multiple configs)
+
+**New structure (Option 1: Mode Toggle + Dynamic Tabs):**
+
+**Single Telescope Mode** (2 tabs):
+- Tab 1: Design (ray trace + simulated image side-by-side)
+- Tab 2: Performance (PSF analysis, spot diagram, metrics table)
+
+**Comparison Mode** (3 tabs):
+- Tab 1: Ray Traces (side-by-side ray trace diagrams)
+- Tab 2: Simulated Images (side-by-side image comparison)
+- Tab 3: Analytics (comparison table, PSF overlay, bar charts)
+
+#### Rationale
+- **Logical separation**: Analytical tools (PSF, metrics) in dedicated
+  Performance tab for single mode
+- **Better comparison workflow**: Three dedicated tabs for different
+  aspects of comparison (optical design, visual output, metrics)
+- **Clean UI**: Mode toggle + dynamic tabs avoids nested tab clutter
+- **Flexible**: Can be modified to nested tabs or sidebar approach if
+  needed during development
+
+#### Implementation Approach
+- Radio buttons for mode selection (Single | Comparison)
+- Tabs rebuilt dynamically when mode changes
+- Single mode: controls panel at bottom (always visible)
+- Comparison mode: edit configs via dialogs (cleaner UI)
+- File structure: separate packages for single_mode/ and comparison_mode/
+
+#### Technical Details Added
+- Mode switching logic (Python code example)
+- File structure for modular tab organization
+- Configuration management strategy (single config vs list)
+
+### Files Modified
+- docs/development/GUI_PLAN.md
+
+### Notes
+- User approved Option 1 with flexibility to modify later
+- Structure supports incremental development (start with single mode,
+  add comparison mode second)
+- All existing backend code reuse strategy unchanged
+- Timeline unchanged: 3-4 weeks for Phase 1 MVP

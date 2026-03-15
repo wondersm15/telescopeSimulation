@@ -52,88 +52,353 @@ pip install PyQt6
 
 **Timeline estimate**: 3-4 weeks (full implementation)
 
-### Tab 1: Telescope Design View (Default)
+> **Note**: This structure uses **Option 1: Mode Toggle + Dynamic Tabs** as the initial implementation approach. This can be modified to nested tabs, sidebar navigation, or other patterns if needed during development.
 
-**Layout**: Split view with ray trace + simulated image side-by-side
+---
+
+### UI Structure: Two Modes with Dynamic Tabs
+
+**Top-level mode selector** (radio buttons or toggle):
+- **Single Telescope Mode** - analyze one telescope in depth
+- **Comparison Mode** - compare multiple telescope configurations
+
+Tabs change dynamically based on selected mode.
+
+---
+
+## SINGLE TELESCOPE MODE
+
+When "Single Telescope" mode is selected, show these tabs:
+
+### Tab 1: Design
+
+**Layout**: Ray trace + simulated image side-by-side
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ Telescope Design                                        [×] │
+│ Mode: ● Single Telescope    ○ Comparison                   │
+├─────────────────────────────────────────────────────────────┤
+│ [ Design ] [ Performance ]                                  │
 ├─────────────────────────────────────────────────────────────┤
 │ ┌──────────────────────┐ ┌─────────────────────────────┐   │
 │ │                      │ │                             │   │
 │ │   Ray Trace          │ │   Simulated Image           │   │
-│ │   (matplotlib)       │ │   (Jupiter/Moon/etc.)       │   │
+│ │   (matplotlib)       │ │   (Jupiter/Moon)            │   │
 │ │                      │ │                             │   │
 │ │                      │ │                             │   │
 │ └──────────────────────┘ └─────────────────────────────┘   │
 │                                                             │
 │ ┌─── Controls ────────────────────────────────────────────┐│
-│ │ Telescope Type: [Newtonian ▼]                          ││
-│ │ Aperture (mm):  [200     ] f-ratio: [5.0    ]          ││
-│ │ Primary Type:   [Parabolic ▼]                          ││
-│ │ Source:         [Jupiter ▼]   Seeing: [Good ▼]         ││
-│ │                                                         ││
-│ │ [Update View]  [Export Images...]  [Save Config...]    ││
+│ │ Telescope: [Newtonian ▼]  Aperture: [200mm]  f/: [5.0] ││
+│ │ Primary: [Parabolic ▼]    Source: [Jupiter ▼]          ││
+│ │ Seeing: [Good ▼]          Eyepiece: [9mm] (optional)   ││
+│ │ [Update View]  [Export...]  [Save Config...]           ││
 │ └─────────────────────────────────────────────────────────┘│
 └─────────────────────────────────────────────────────────────┘
 ```
 
-**Controls (Phase 1 MVP):**
+**Purpose**: Visual design - what the telescope looks like and what you'd see through it
+
+**Controls (bottom panel, always visible in Single mode):**
 - **Telescope Type**: Dropdown (Newtonian, Cassegrain, Refractor, Maksutov, Schmidt-Cassegrain)
 - **Aperture**: Spinbox (50-500mm, increment 10mm)
-- **f-ratio**: Spinbox (3.0-15.0, increment 0.5) OR focal length (auto-calculate)
-- **Primary Type**: Dropdown (Parabolic, Spherical) - only for Newtonian
+- **f-ratio**: Spinbox (3.0-15.0, increment 0.5) OR focal length (linked/auto-calculate)
+- **Primary Type**: Dropdown (Parabolic, Spherical) - enabled only for Newtonian
 - **Source**: Dropdown (Jupiter, Moon, Saturn, Star, None)
 - **Seeing**: Dropdown (Excellent, Good, Average, Poor, None)
-- **Update View**: Button to re-render (initially manual, later auto-update)
+- **Eyepiece**: Optional focal length (mm) - shows visual observing view
+- **Update View**: Button to re-render (initially manual, Phase 2 adds auto-update)
 
-**Interaction:**
-1. User selects parameters
-2. Clicks "Update View"
-3. GUI calls existing `telescope_sim` functions
-4. Matplotlib figures embedded in Qt widgets
-5. Updates both ray trace and simulated image
+**Backend calls:**
+- `plot_ray_trace()` for left panel
+- `_render_source_through_telescope()` for right panel
 
-**Technical Implementation:**
-- `QMainWindow` with `QTabWidget`
-- Matplotlib `FigureCanvas` embedded in Qt widgets
-- Signals/slots for button clicks
-- Backend: reuse existing `plot_ray_trace()` and `_render_source_through_telescope()`
+---
 
-### Tab 2: Comparison View
+### Tab 2: Performance
 
-**Layout**: Side-by-side comparison of 2-4 telescope configurations
+**Layout**: Analytical performance metrics and plots
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ Comparison                                              [×] │
+│ Mode: ● Single Telescope    ○ Comparison                   │
 ├─────────────────────────────────────────────────────────────┤
-│ Config 1           Config 2           Config 3              │
-│ ┌────────────┐    ┌────────────┐    ┌────────────┐         │
-│ │ Ray Trace  │    │ Ray Trace  │    │ Ray Trace  │         │
-│ └────────────┘    └────────────┘    └────────────┘         │
-│ ┌────────────┐    ┌────────────┐    ┌────────────┐         │
-│ │ Simulated  │    │ Simulated  │    │ Simulated  │         │
-│ │ Image      │    │ Image      │    │ Image      │         │
-│ └────────────┘    └────────────┘    └────────────┘         │
+│ [ Design ] [ Performance ]                                  │
+├─────────────────────────────────────────────────────────────┤
+│ ┌─── PSF Analysis ──────┐  ┌─── Spot Diagram ──────────┐   │
+│ │                       │  │                           │   │
+│ │  Airy Pattern         │  │   Ray convergence         │   │
+│ │  (radial profile)     │  │   (2D scatter)            │   │
+│ │                       │  │                           │   │
+│ └───────────────────────┘  └───────────────────────────┘   │
 │                                                             │
-│ [Add Config] [Remove Config] [Export Comparison...]         │
+│ ┌─── Performance Metrics ─────────────────────────────────┐│
+│ │ Resolution (Rayleigh):     0.69 arcsec                  ││
+│ │ Airy disk diameter:        6.7 μm (focal plane)         ││
+│ │ Strehl ratio:              0.95 (diffraction-limited)   ││
+│ │ Central obstruction:       25% (secondary)              ││
+│ │ Light gathering (vs eye):  680× (7mm pupil)             ││
+│ │ Magnification:             133× (with 9mm eyepiece)     ││
+│ │ Exit pupil:                1.5 mm (ideal for planets)   ││
+│ │ True FOV:                  0.38° (22.8 arcmin)          ││
+│ └─────────────────────────────────────────────────────────┘│
+│                                                             │
+│ [Export Metrics (CSV)]  [Export Plots...]                  │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-**Features:**
-- Start with 2 configs by default
-- Add up to 4 configs maximum (screen real estate limit)
-- Each config has independent controls (collapsible panel)
-- Same source across all configs (for fair comparison)
-- Export comparison as single multi-panel figure
+**Purpose**: Quantitative analysis - how well does the telescope perform?
 
-**Use Cases:**
-- f/5 vs f/8 Newtonian comparison
-- Singlet vs achromat refractor (chromatic aberration)
-- Parabolic vs spherical primary
-- Different apertures at same f-ratio
+**Plots:**
+- PSF (point spread function): Airy pattern with central obstruction if applicable
+- Spot diagram: Geometric ray convergence at focal plane
+- Optional: Radial profile overlay showing diffraction limit
+
+**Metrics table:**
+- Resolution (Rayleigh criterion)
+- Airy disk size (arcsec and focal plane μm)
+- Strehl ratio (diffraction-limited quality measure)
+- Central obstruction percentage
+- Light gathering power vs dark-adapted eye
+- Magnification (if eyepiece configured)
+- Exit pupil (if eyepiece configured)
+- True field of view (if eyepiece configured)
+
+**Backend calls:**
+- Reuse existing PSF functions (`compute_psf()`, `plot_psf_analysis()`)
+- Calculate metrics from telescope geometry
+
+---
+
+## COMPARISON MODE
+
+When "Comparison" mode is selected, show these tabs:
+
+User first configures 2-4 telescope configs (via dialog or sidebar panel), then explores comparisons across three analytical tabs.
+
+### Tab 1: Ray Traces
+
+**Layout**: Side-by-side ray trace diagrams
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Mode: ○ Single Telescope    ● Comparison                   │
+├─────────────────────────────────────────────────────────────┤
+│ [ Ray Traces ] [ Simulated Images ] [ Analytics ]          │
+├─────────────────────────────────────────────────────────────┤
+│ Config 1: 8" f/5 Newt    Config 2: 8" f/8 Newt             │
+│ ┌────────────────────┐    ┌────────────────────┐           │
+│ │                    │    │                    │           │
+│ │  Ray Trace         │    │  Ray Trace         │           │
+│ │                    │    │                    │           │
+│ └────────────────────┘    └────────────────────┘           │
+│                                                             │
+│ Config 3: 6" f/10 Achromat                                 │
+│ ┌────────────────────┐                                     │
+│ │                    │                                     │
+│ │  Ray Trace         │                                     │
+│ │                    │                                     │
+│ └────────────────────┘                                     │
+│                                                             │
+│ [Add Config] [Edit Config] [Remove] [Export Comparison...] │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Purpose**: Compare optical paths - focal plane position, obstruction size, etc.
+
+**Features:**
+- 2-4 configs (start with 2)
+- Each labeled with brief description (auto-generated from params)
+- Grid layout adapts to number of configs
+- Click config label to edit in dialog
+
+---
+
+### Tab 2: Simulated Images
+
+**Layout**: Side-by-side simulated images of same source
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Mode: ○ Single Telescope    ● Comparison                   │
+├─────────────────────────────────────────────────────────────┤
+│ [ Ray Traces ] [ Simulated Images ] [ Analytics ]          │
+├─────────────────────────────────────────────────────────────┤
+│ Source: [Jupiter ▼]  Seeing: [Good ▼]  [Update All]        │
+├─────────────────────────────────────────────────────────────┤
+│ Config 1: 8" f/5      Config 2: 8" f/8                     │
+│ ┌────────────────┐    ┌────────────────┐                   │
+│ │                │    │                │                   │
+│ │   Jupiter      │    │   Jupiter      │                   │
+│ │                │    │                │                   │
+│ └────────────────┘    └────────────────┘                   │
+│                                                             │
+│ Config 3: 6" Achromat                                       │
+│ ┌────────────────┐                                         │
+│ │                │                                         │
+│ │   Jupiter      │                                         │
+│ │                │                                         │
+│ └────────────────┘                                         │
+│                                                             │
+│ [Export Comparison...]                                      │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Purpose**: Visual comparison - which telescope gives better planetary views?
+
+**Key feature**: Same source and seeing across all configs for fair comparison
+
+**Use cases:**
+- "Does the larger aperture make Jupiter noticeably better?"
+- "How much does chromatic aberration affect the singlet vs achromat?"
+- "f/5 vs f/8 at same aperture - is the image quality difference visible?"
+
+---
+
+### Tab 3: Analytics
+
+**Layout**: Performance metrics table + comparative plots
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Mode: ○ Single Telescope    ● Comparison                   │
+├─────────────────────────────────────────────────────────────┤
+│ [ Ray Traces ] [ Simulated Images ] [ Analytics ]          │
+├─────────────────────────────────────────────────────────────┤
+│ ┌─── Performance Comparison Table ────────────────────────┐ │
+│ │ Metric              │ Config 1 │ Config 2 │ Config 3   │ │
+│ │────────────────────│──────────│──────────│────────────│ │
+│ │ Resolution (arcsec)│ 0.69     │ 0.69     │ 0.84       │ │
+│ │ Strehl ratio       │ 0.95     │ 0.96     │ 0.98       │ │
+│ │ Central obstr.     │ 25%      │ 25%      │ 0% (refr.) │ │
+│ │ Light gathering    │ 680×     │ 680×     │ 366×       │ │
+│ │ Focal length       │ 1000mm   │ 1600mm   │ 600mm      │ │
+│ │ Chromatic defocus  │ 0 mm     │ 0 mm     │ 5.96 mm*   │ │
+│ │ *singlet - achromat would be ~0.12mm                   │ │
+│ └─────────────────────────────────────────────────────────┘ │
+│                                                             │
+│ ┌─── PSF Overlay ─────────┐  ┌─── Metric Bar Chart ─────┐ │
+│ │                         │  │                          │ │
+│ │ All PSFs overlaid       │  │ Resolution, Strehl,      │ │
+│ │ (normalized)            │  │ Light gathering          │ │
+│ └─────────────────────────┘  └──────────────────────────┘ │
+│                                                             │
+│ [Export Table (CSV)]  [Export Plots...]                    │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Purpose**: Quantitative comparison - which performs best for your needs?
+
+**Features:**
+- Comparison table (auto-populated from each config)
+- PSF overlay plot (all configs on same axes, normalized)
+- Bar chart comparing key metrics
+- Export table as CSV for spreadsheet analysis
+
+**Highlights differences:**
+- Resolution differences (aperture-limited vs seeing-limited)
+- Strehl ratio (quality comparison)
+- Tradeoffs (large aperture + obstruction vs small aperture + no obstruction)
+
+---
+
+## Technical Implementation (Mode Switching)
+
+### File Structure
+```python
+telescope_gui/
+├── main_window.py           # QMainWindow, mode toggle, tab management
+├── single_mode/
+│   ├── design_tab.py        # Ray trace + image side-by-side
+│   └── performance_tab.py   # PSF analysis + metrics
+├── comparison_mode/
+│   ├── ray_trace_tab.py     # Side-by-side ray traces
+│   ├── image_tab.py         # Side-by-side images
+│   └── analytics_tab.py     # Comparison table + plots
+├── widgets/
+│   ├── telescope_controls.py
+│   ├── matplotlib_canvas.py
+│   └── config_manager.py    # Add/remove/edit comparison configs
+└── config.py                # Config save/load (JSON)
+```
+
+### Mode Switching Logic
+
+```python
+class MainWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+
+        # Mode selector (radio buttons)
+        self.mode_group = QButtonGroup()
+        self.single_mode_radio = QRadioButton("Single Telescope")
+        self.comparison_mode_radio = QRadioButton("Comparison")
+        self.mode_group.addButton(self.single_mode_radio)
+        self.mode_group.addButton(self.comparison_mode_radio)
+        self.single_mode_radio.setChecked(True)
+
+        # Tab widget (content changes based on mode)
+        self.tab_widget = QTabWidget()
+
+        # Connect mode change
+        self.mode_group.buttonClicked.connect(self.switch_mode)
+
+        # Initialize with single mode tabs
+        self.switch_mode()
+
+    def switch_mode(self):
+        """Rebuild tabs based on selected mode."""
+        self.tab_widget.clear()
+
+        if self.single_mode_radio.isChecked():
+            # Single telescope tabs
+            self.tab_widget.addTab(
+                DesignTab(self.current_config),
+                "Design"
+            )
+            self.tab_widget.addTab(
+                PerformanceTab(self.current_config),
+                "Performance"
+            )
+            self.controls_panel.show()  # Bottom controls visible
+
+        else:  # Comparison mode
+            # Comparison tabs
+            self.tab_widget.addTab(
+                RayTraceComparisonTab(self.comparison_configs),
+                "Ray Traces"
+            )
+            self.tab_widget.addTab(
+                ImageComparisonTab(self.comparison_configs),
+                "Simulated Images"
+            )
+            self.tab_widget.addTab(
+                AnalyticsComparisonTab(self.comparison_configs),
+                "Analytics"
+            )
+            self.controls_panel.hide()  # Use config dialogs instead
+```
+
+**Key points:**
+- Tabs are **rebuilt** when mode changes (simple, clean)
+- Single mode: controls panel at bottom
+- Comparison mode: edit configs via dialog (keeps UI cleaner)
+- Each tab widget receives either `current_config` (single) or `comparison_configs` (list)
+
+### Configuration Management
+
+**Single Mode:**
+- One `TelescopeConfig` object
+- Modified via controls panel at bottom
+- Saved/loaded as JSON
+
+**Comparison Mode:**
+- List of 2-4 `TelescopeConfig` objects
+- Add/edit/remove via buttons in comparison tabs
+- Each config opened in dialog for editing
+- Saved/loaded as JSON array
+
+---
 
 ### Menu Bar
 
