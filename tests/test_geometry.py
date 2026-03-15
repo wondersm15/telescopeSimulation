@@ -7,7 +7,7 @@ from telescope_sim.physics.ray import Ray
 from telescope_sim.geometry.mirrors import (
     FlatMirror, HyperbolicMirror, ParabolicMirror, SphericalMirror,
 )
-from telescope_sim.geometry.lenses import SphericalLens
+from telescope_sim.geometry.lenses import AchromaticDoublet, SphericalLens
 from telescope_sim.geometry.telescope import (
     CassegrainTelescope,
     MaksutovCassegrainTelescope,
@@ -387,6 +387,124 @@ class TestRefractingTelescope:
 
     def test_tube_length(self):
         assert self.telescope.tube_length == 900.0
+
+
+# --- Achromatic doublet tests ---
+
+class TestAchromaticDoublet:
+    def setup_method(self):
+        self.doublet = AchromaticDoublet(
+            focal_length=800.0, diameter=80.0,
+            center=(0.0, 800.0),
+        )
+
+    def test_objective_type(self):
+        assert self.doublet.objective_type == "achromat"
+
+    def test_has_crown_and_flint(self):
+        assert hasattr(self.doublet, 'crown')
+        assert hasattr(self.doublet, 'flint')
+        assert self.doublet.crown.glass == "BK7"
+        assert self.doublet.flint.glass == "F2"
+
+    def test_refract_ray_changes_direction(self):
+        ray = Ray(origin=[20.0, 1200.0], direction=[0.0, -1.0])
+        hit = self.doublet.refract_ray(ray)
+        assert hit is True
+        assert ray.direction[0] < 0
+
+    def test_surface_points_shape(self):
+        front = self.doublet.get_front_surface_points(50)
+        back = self.doublet.get_back_surface_points(50)
+        interface = self.doublet.get_interface_surface_points(50)
+        assert front.shape == (50, 2)
+        assert back.shape == (50, 2)
+        assert interface.shape == (50, 2)
+
+    def test_chromatic_correction(self):
+        """Red and blue rays should converge closer together
+        through an achromat than through a singlet."""
+        from telescope_sim.geometry.lenses import SphericalLens
+        from telescope_sim.physics.refraction import (
+            GLASS_CATALOG, refractive_index_cauchy,
+        )
+
+        # Build a singlet with the same focal length
+        coeffs = GLASS_CATALOG["BK7"]
+        n = refractive_index_cauchy(550.0, coeffs["B"], coeffs["C"])
+        R = 2.0 * 800.0 * (n - 1.0)
+        singlet = SphericalLens(
+            R_front=R, R_back=-R, thickness=6.0, diameter=80.0,
+            center=(0.0, 800.0), glass="BK7",
+        )
+
+        def trace_focal_y(lens, wavelength_nm):
+            ray = Ray(origin=[20.0, 1200.0], direction=[0.0, -1.0],
+                      wavelength_nm=wavelength_nm)
+            lens.refract_ray(ray, wavelength_nm=wavelength_nm)
+            if abs(ray.direction[0]) > 1e-12:
+                t = -ray.origin[0] / ray.direction[0]
+                return ray.origin[1] + t * ray.direction[1]
+            return ray.origin[1]
+
+        # Singlet focus spread (red vs blue)
+        singlet_red = trace_focal_y(singlet, 656.3)
+        singlet_blue = trace_focal_y(singlet, 486.1)
+        singlet_spread = abs(singlet_red - singlet_blue)
+
+        # Achromat focus spread
+        achromat_red = trace_focal_y(self.doublet, 656.3)
+        achromat_blue = trace_focal_y(self.doublet, 486.1)
+        achromat_spread = abs(achromat_red - achromat_blue)
+
+        assert achromat_spread < singlet_spread, (
+            f"Achromat spread {achromat_spread:.2f}mm should be less "
+            f"than singlet spread {singlet_spread:.2f}mm"
+        )
+
+
+class TestRefractingTelescopeAchromat:
+    def setup_method(self):
+        self.telescope = RefractingTelescope(
+            primary_diameter=80.0, focal_length=800.0,
+            objective_type="achromat",
+        )
+
+    def test_objective_type(self):
+        assert self.telescope.objective_type == "achromat"
+
+    def test_corrected_optics(self):
+        assert self.telescope.corrected_optics is True
+
+    def test_focal_ratio(self):
+        assert abs(self.telescope.focal_ratio - 10.0) < 1e-10
+
+    def test_ray_convergence(self):
+        rays = [
+            Ray(origin=[x, 1200], direction=[0, -1])
+            for x in [-25, -10, 10, 25]
+        ]
+        self.telescope.trace_rays(rays)
+        end_points = [r.history[-1] for r in rays if len(r.history) >= 3]
+        assert len(end_points) >= 2
+        xs = [p[0] for p in end_points]
+        spread = max(xs) - min(xs)
+        assert spread < 10.0
+
+    def test_components_has_achromat_info(self):
+        components = self.telescope.get_components_for_plotting()
+        assert components["objective_type"] == "achromat"
+        assert "interface_surface" in components
+
+    def test_chromatic_defocus_smaller_than_singlet(self):
+        from telescope_sim.plotting.ray_trace_plot import chromatic_defocus
+        singlet = RefractingTelescope(
+            primary_diameter=80.0, focal_length=800.0,
+            objective_type="singlet",
+        )
+        singlet_defocus = abs(chromatic_defocus(singlet, 486.1))
+        achromat_defocus = abs(chromatic_defocus(self.telescope, 486.1))
+        assert achromat_defocus < singlet_defocus
 
 
 # --- Maksutov-Cassegrain telescope tests ---

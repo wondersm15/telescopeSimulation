@@ -104,20 +104,53 @@ def _draw_ray_trace(ax: plt.Axes, rays: list[Ray], components: dict,
                 solid_capstyle="round", label="Secondary (spherical)")
 
     elif components.get("telescope_style") == "refractor":
-        # Draw the objective as a filled shape between front and back
-        # surface curves (light blue fill, darker outline).
+        # Draw the objective lens(es).
+        obj_type = components.get("objective_type", "singlet")
         glass_label = components.get("objective_glass", "")
-        obj_label = f"Objective lens ({glass_label})" if glass_label else "Objective lens"
-        lens_x = np.concatenate([primary_pts[:, 0], secondary_pts[::-1, 0]])
-        lens_y = np.concatenate([primary_pts[:, 1], secondary_pts[::-1, 1]])
-        ax.fill(lens_x, lens_y, color="lightblue", alpha=0.5,
-                label=obj_label)
-        ax.plot(primary_pts[:, 0], primary_pts[:, 1],
-                color="steelblue", linewidth=mirror_linewidth,
-                solid_capstyle="round")
-        ax.plot(secondary_pts[:, 0], secondary_pts[:, 1],
-                color="steelblue", linewidth=mirror_linewidth,
-                solid_capstyle="round")
+
+        if obj_type == "achromat" and "interface_surface" in components:
+            # Draw achromatic doublet: crown (light blue) + flint (light orange)
+            interface_pts = components["interface_surface"]
+            # Crown element: front surface to interface
+            crown_x = np.concatenate([primary_pts[:, 0],
+                                       interface_pts[::-1, 0]])
+            crown_y = np.concatenate([primary_pts[:, 1],
+                                       interface_pts[::-1, 1]])
+            ax.fill(crown_x, crown_y, color="lightblue", alpha=0.5,
+                    label="Crown (BK7)")
+            # Flint element: interface to back surface
+            flint_x = np.concatenate([interface_pts[:, 0],
+                                       secondary_pts[::-1, 0]])
+            flint_y = np.concatenate([interface_pts[:, 1],
+                                       secondary_pts[::-1, 1]])
+            ax.fill(flint_x, flint_y, color="navajowhite", alpha=0.5,
+                    label="Flint (F2)")
+            # Outlines
+            ax.plot(primary_pts[:, 0], primary_pts[:, 1],
+                    color="steelblue", linewidth=mirror_linewidth,
+                    solid_capstyle="round")
+            ax.plot(interface_pts[:, 0], interface_pts[:, 1],
+                    color="gray", linewidth=mirror_linewidth * 0.7,
+                    solid_capstyle="round", linestyle="--", alpha=0.7)
+            ax.plot(secondary_pts[:, 0], secondary_pts[:, 1],
+                    color="darkorange", linewidth=mirror_linewidth,
+                    solid_capstyle="round")
+        else:
+            # Singlet: single filled shape
+            obj_label = (f"Objective lens ({glass_label})"
+                         if glass_label else "Objective lens")
+            lens_x = np.concatenate([primary_pts[:, 0],
+                                      secondary_pts[::-1, 0]])
+            lens_y = np.concatenate([primary_pts[:, 1],
+                                      secondary_pts[::-1, 1]])
+            ax.fill(lens_x, lens_y, color="lightblue", alpha=0.5,
+                    label=obj_label)
+            ax.plot(primary_pts[:, 0], primary_pts[:, 1],
+                    color="steelblue", linewidth=mirror_linewidth,
+                    solid_capstyle="round")
+            ax.plot(secondary_pts[:, 0], secondary_pts[:, 1],
+                    color="steelblue", linewidth=mirror_linewidth,
+                    solid_capstyle="round")
     else:
         primary_label = f"Primary ({primary_type})" if primary_type else "Primary mirror"
         secondary_label = (f"Secondary ({secondary_type})"
@@ -705,6 +738,9 @@ def _compute_focal_image(telescope: Telescope,
         image = fftconvolve(geometric_image, airy_kernel, mode="same")
 
     if seeing_arcsec is not None and seeing_arcsec > 0:
+        # Apply atmospheric seeing (Gaussian blur).
+        # seeing_arcsec = FWHM of the seeing disk in arcseconds.
+        # Convert to σ: σ = FWHM / 2.355
         plate_scale = 206265.0 / focal_length
         seeing_sigma_mm = (seeing_arcsec / 2.355) / plate_scale
         coords = np.linspace(-half_size, half_size, num_pixels)
@@ -1223,6 +1259,186 @@ def plot_ray_trace_comparison(
         axes[0, i].set_ylim(shared_ylim)
 
     fig.suptitle("Ray Trace Comparison", fontsize=14)
+    plt.tight_layout()
+
+    if save_path:
+        fig.savefig(save_path, dpi=150, bbox_inches="tight")
+
+    return fig
+
+
+def plot_polychromatic_ray_trace(
+    telescope: Telescope,
+    num_display_rays: int = 5,
+    wavelengths: dict[str, float] | None = None,
+    figsize: tuple[float, float] = (14, 8),
+    save_path: str | None = None,
+) -> plt.Figure:
+    """Plot a polychromatic ray trace showing R/G/B colored rays.
+
+    Traces the telescope at multiple wavelengths and overlays the
+    ray paths with wavelength-appropriate colors.  For refracting
+    telescopes this reveals chromatic aberration (different focal
+    points for different colors).
+
+    Args:
+        telescope: The telescope to trace.
+        num_display_rays: Number of rays per wavelength.
+        wavelengths: Dict mapping label to wavelength in nm.
+            Defaults to R/G/B Fraunhofer lines.
+        figsize: Figure size in inches.
+        save_path: If provided, save the figure to this path.
+
+    Returns:
+        The matplotlib Figure object.
+    """
+    from telescope_sim.source import create_parallel_rays
+    from telescope_sim.physics.ray import (
+        CHROMATIC_WAVELENGTHS, wavelength_to_color,
+    )
+
+    if wavelengths is None:
+        wavelengths = CHROMATIC_WAVELENGTHS
+
+    fig, ax = plt.subplots(figsize=figsize)
+
+    # Draw optics using the green (design) wavelength rays first
+    green_wl = wavelengths.get("G", 550.0)
+    green_rays = create_parallel_rays(
+        num_rays=num_display_rays,
+        aperture_diameter=telescope.primary_diameter,
+        entry_height=telescope.tube_length * 1.15,
+        wavelength_nm=green_wl,
+    )
+    telescope.trace_rays(green_rays)
+    components = telescope.get_components_for_plotting()
+
+    # Draw the telescope structure (optics + tube) without rays
+    _draw_ray_trace(ax, [], components,
+                    title="Polychromatic Ray Trace",
+                    ray_color="gold", show_tube=True)
+
+    # Trace and draw rays for each wavelength
+    for label, wl in wavelengths.items():
+        color = wavelength_to_color(wl)
+        rays = create_parallel_rays(
+            num_rays=num_display_rays,
+            aperture_diameter=telescope.primary_diameter,
+            entry_height=telescope.tube_length * 1.15,
+            wavelength_nm=wl,
+        )
+        telescope.trace_rays(rays)
+
+        for ray in rays:
+            if len(ray.history) < 2:
+                continue
+            path = np.array(ray.history)
+            ax.plot(path[:, 0], path[:, 1],
+                    color=color, alpha=0.7, linewidth=1.0)
+
+        # Mark focal point for this wavelength
+        end_points = [r.history[-1] for r in rays if len(r.history) >= 3]
+        if end_points:
+            focal = np.mean(end_points, axis=0)
+            ax.plot(focal[0], focal[1], "*", color=color,
+                    markersize=10, label=f"{label} ({wl:.0f}nm)",
+                    zorder=5)
+
+    ax.legend(loc="upper right", fontsize="small")
+    plt.tight_layout()
+
+    if save_path:
+        fig.savefig(save_path, dpi=150, bbox_inches="tight")
+
+    return fig
+
+
+def plot_polychromatic_ray_trace_comparison(
+    telescopes: list[Telescope],
+    labels: list[str],
+    num_display_rays: int = 5,
+    wavelengths: dict[str, float] | None = None,
+    figsize_per_panel: tuple[float, float] = (7, 8),
+    save_path: str | None = None,
+) -> plt.Figure:
+    """Plot polychromatic ray traces side by side for comparison.
+
+    Useful for comparing singlet vs achromat chromatic aberration.
+
+    Args:
+        telescopes: List of telescope objects to compare.
+        labels: Display label for each telescope.
+        num_display_rays: Number of rays per wavelength per telescope.
+        wavelengths: Dict mapping label to wavelength in nm.
+        figsize_per_panel: (width, height) per subplot panel.
+        save_path: If provided, save the figure to this path.
+
+    Returns:
+        The matplotlib Figure object.
+    """
+    from telescope_sim.source import create_parallel_rays
+    from telescope_sim.physics.ray import (
+        CHROMATIC_WAVELENGTHS, wavelength_to_color,
+    )
+
+    if wavelengths is None:
+        wavelengths = CHROMATIC_WAVELENGTHS
+
+    n = len(telescopes)
+    fig, axes = plt.subplots(
+        1, n,
+        figsize=(figsize_per_panel[0] * n, figsize_per_panel[1]),
+        squeeze=False,
+    )
+
+    for i, (telescope, label) in enumerate(zip(telescopes, labels)):
+        ax = axes[0, i]
+        components = telescope.get_components_for_plotting()
+
+        # Draw optics without rays
+        _draw_ray_trace(ax, [], components, title=label, show_tube=True)
+
+        # Trace each wavelength
+        for wl_label, wl in wavelengths.items():
+            color = wavelength_to_color(wl)
+            rays = create_parallel_rays(
+                num_rays=num_display_rays,
+                aperture_diameter=telescope.primary_diameter,
+                entry_height=telescope.tube_length * 1.15,
+                wavelength_nm=wl,
+            )
+            telescope.trace_rays(rays)
+
+            for ray in rays:
+                if len(ray.history) < 2:
+                    continue
+                path = np.array(ray.history)
+                ax.plot(path[:, 0], path[:, 1],
+                        color=color, alpha=0.7, linewidth=1.0)
+
+            end_points = [r.history[-1] for r in rays
+                          if len(r.history) >= 3]
+            if end_points:
+                focal = np.mean(end_points, axis=0)
+                ax.plot(focal[0], focal[1], "*", color=color,
+                        markersize=10,
+                        label=f"{wl_label} ({wl:.0f}nm)",
+                        zorder=5)
+
+        ax.legend(loc="upper right", fontsize="small")
+
+    # Shared axis limits
+    all_xlims = [axes[0, i].get_xlim() for i in range(n)]
+    all_ylims = [axes[0, i].get_ylim() for i in range(n)]
+    shared_xlim = (min(lo for lo, _ in all_xlims),
+                   max(hi for _, hi in all_xlims))
+    shared_ylim = (min(lo for lo, _ in all_ylims),
+                   max(hi for _, hi in all_ylims))
+    for i in range(n):
+        axes[0, i].set_xlim(shared_xlim)
+        axes[0, i].set_ylim(shared_ylim)
+
+    fig.suptitle("Polychromatic Ray Trace Comparison", fontsize=14)
     plt.tight_layout()
 
     if save_path:
@@ -2283,6 +2499,122 @@ def plot_coma_field_analysis_comparison(
 # ── Source imaging ──────────────────────────────────────────────────────
 
 
+def chromatic_defocus(telescope: Telescope,
+                      wavelength_nm: float) -> float:
+    """Compute focal length shift (mm) from design wavelength (550 nm).
+
+    For a singlet refractor the shift follows the thin-lens relation:
+        f(λ) / f_design = (n_design - 1) / (n_λ - 1)
+
+    For an achromat the residual secondary spectrum is approximated as:
+        Δf ≈ f / 2500   (small, nearly constant)
+
+    For reflectors: returns 0 (no chromatic aberration).
+
+    Args:
+        telescope: The telescope instance.
+        wavelength_nm: Wavelength to compute defocus for.
+
+    Returns:
+        Focal length shift in mm (positive = focus farther from lens).
+    """
+    from telescope_sim.physics.refraction import (
+        GLASS_CATALOG, refractive_index_cauchy,
+    )
+
+    # Reflectors have zero chromatic aberration
+    if not hasattr(telescope, 'objective'):
+        return 0.0
+
+    design_wl = 550.0
+    f_design = telescope.focal_length
+
+    obj_type = getattr(telescope, 'objective_type', 'singlet')
+
+    if obj_type == "achromat":
+        # Residual secondary spectrum: small residual proportional to
+        # deviation from design wavelength, roughly f/2500 peak-to-peak.
+        delta_wl = abs(wavelength_nm - design_wl)
+        max_delta = 170.0  # max spread (486..656 range)
+        return f_design / 2500.0 * (delta_wl / max_delta)
+    else:
+        # Singlet: full primary chromatic aberration
+        glass = getattr(telescope.objective, 'glass', 'BK7')
+        if glass in GLASS_CATALOG:
+            coeffs = GLASS_CATALOG[glass]
+        else:
+            coeffs = GLASS_CATALOG["BK7"]
+        n_design = refractive_index_cauchy(design_wl, coeffs["B"],
+                                           coeffs["C"])
+        n_wl = refractive_index_cauchy(wavelength_nm, coeffs["B"],
+                                       coeffs["C"])
+        f_wl = f_design * (n_design - 1.0) / (n_wl - 1.0)
+        return f_wl - f_design
+
+
+def chromatic_psf_kernel(
+    telescope: Telescope,
+    wavelength_nm: float,
+    psf_size_pixels: int,
+    psf_half_mm: float,
+    include_obstruction: bool = True,
+) -> np.ndarray:
+    """Compute PSF kernel including chromatic defocus.
+
+    When defocused, the PSF broadens into a filled disk (defocus
+    aberration) convolved with the wavelength-scaled Airy pattern.
+
+    For small defocus (< 0.5 pixel), returns the standard Airy PSF
+    at the given wavelength.
+
+    Args:
+        telescope: Telescope instance.
+        wavelength_nm: Wavelength in nm.
+        psf_size_pixels: Kernel size in pixels.
+        psf_half_mm: Half-width of the PSF kernel in mm.
+        include_obstruction: Include secondary obstruction.
+
+    Returns:
+        2D PSF kernel, normalized to unit sum.
+    """
+    defocus_mm = chromatic_defocus(telescope, wavelength_nm)
+
+    # Compute standard Airy PSF at this wavelength
+    airy_psf = _compute_psf_at_field_angle(
+        telescope, 0.0, wavelength_nm, psf_size_pixels,
+        psf_half_mm, include_obstruction,
+    )
+
+    # If defocus is negligible, return the Airy PSF
+    pixel_scale_mm = 2.0 * psf_half_mm / psf_size_pixels
+    defocus_radius_mm = abs(defocus_mm) / (2.0 * telescope.focal_ratio)
+    defocus_radius_pix = defocus_radius_mm / pixel_scale_mm
+
+    if defocus_radius_pix < 0.5:
+        total = airy_psf.sum()
+        if total > 0:
+            airy_psf /= total
+        return airy_psf
+
+    # Build defocus disk kernel
+    center = psf_size_pixels // 2
+    coords = np.arange(psf_size_pixels) - center
+    xx, yy = np.meshgrid(coords, coords)
+    rr = np.sqrt(xx ** 2 + yy ** 2)
+    defocus_disk = np.where(rr <= defocus_radius_pix, 1.0, 0.0)
+    disk_sum = defocus_disk.sum()
+    if disk_sum > 0:
+        defocus_disk /= disk_sum
+
+    # Convolve Airy with defocus disk
+    from scipy.signal import fftconvolve
+    psf = fftconvolve(airy_psf, defocus_disk, mode="same")
+    total = psf.sum()
+    if total > 0:
+        psf /= total
+    return psf
+
+
 def _compute_psf_at_field_angle(telescope: Telescope,
                                 field_angle_arcsec: float,
                                 wavelength_nm: float,
@@ -2391,6 +2723,7 @@ def _render_source_through_telescope(
         seeing_arcsec: float | None = None,
         include_obstruction: bool = True,
         method: str = "analytical",
+        polychromatic: bool = False,
 ) -> tuple[np.ndarray, float, dict]:
     """Render an astronomical source as seen through the telescope.
 
@@ -2402,14 +2735,23 @@ def _render_source_through_telescope(
     4. Apply vignetting
     5. Optional atmospheric seeing blur
 
+    When *polychromatic* is True and the telescope has an objective lens
+    (refractor), each RGB channel is convolved with a wavelength-specific
+    PSF that includes chromatic defocus.  This produces realistic color
+    fringing on high-contrast edges (e.g. Jupiter's limb).
+
     Args:
         source: An AstronomicalSource instance.
         telescope: The telescope to image through.
         wavelength_nm: Wavelength of light in nm.
         num_pixels: Image resolution.
-        seeing_arcsec: Atmospheric seeing FWHM (None = no atmosphere).
+        seeing_arcsec: Atmospheric seeing FWHM (full width at half maximum)
+            of the seeing disk in arcseconds. This is the angular size
+            a point source appears due to atmospheric turbulence.
+            None = no atmosphere (space telescope).
         include_obstruction: Include secondary obstruction in PSF.
         method: PSF method ("analytical" or "traced").
+        polychromatic: Use per-channel chromatic PSFs for refractors.
 
     Returns:
         Tuple of (image_2d, half_fov_arcsec, info_dict).
@@ -2509,21 +2851,71 @@ def _render_source_through_telescope(
             psf_n_img += 1  # odd for symmetric kernel
 
         psf_half_for_kernel = psf_angular_half / plate_scale
-        psf = _compute_psf_at_field_angle(
-            telescope, 0.0, wavelength_nm, psf_n_img,
-            psf_half_for_kernel, include_obstruction,
-        )
-        psf_kernel = psf / psf.sum()
 
         # Apply vignetting (uniform across small Jupiter disk)
         vignetting = telescope.compute_vignetting(0.0)
-        image = fftconvolve(ideal, psf_kernel, mode="same") * vignetting
 
-        # Convolve each RGB channel with the PSF for color rendering
-        image_rgb = np.zeros_like(ideal_rgb)
-        for c in range(3):
-            image_rgb[..., c] = (fftconvolve(ideal_rgb[..., c], psf_kernel,
-                                             mode="same") * vignetting)
+        # Polychromatic mode: use per-channel chromatic PSFs for
+        # refractors to show color fringing.
+        _use_chromatic = (polychromatic
+                          and hasattr(telescope, 'objective')
+                          and not getattr(telescope, 'corrected_optics',
+                                          False))
+
+        if _use_chromatic:
+            # R, G, B channel wavelengths (nm)
+            channel_wavelengths = [656.3, 550.0, 486.1]
+
+            # Need a larger PSF kernel to capture chromatic defocus
+            max_defocus = max(
+                abs(chromatic_defocus(telescope, wl))
+                for wl in channel_wavelengths
+            )
+            defocus_radius_mm = max_defocus / (2.0 * telescope.focal_ratio)
+            defocus_angular = defocus_radius_mm * plate_scale
+            chromatic_half = max(psf_angular_half,
+                                 defocus_angular * 3 + psf_angular_half)
+            chromatic_n = max(
+                psf_n_img,
+                int(2 * chromatic_half / pixel_scale_arcsec),
+            )
+            chromatic_n = min(chromatic_n, num_pixels)
+            if chromatic_n % 2 == 0:
+                chromatic_n += 1
+            chromatic_half_mm = chromatic_half / plate_scale
+
+            image_rgb = np.zeros_like(ideal_rgb)
+            for ch, wl in enumerate(channel_wavelengths):
+                psf_kernel = chromatic_psf_kernel(
+                    telescope, wl, chromatic_n, chromatic_half_mm,
+                    include_obstruction,
+                )
+                image_rgb[..., ch] = (
+                    fftconvolve(ideal_rgb[..., ch], psf_kernel,
+                                mode="same") * vignetting
+                )
+
+            # Grayscale from luminance
+            image = (0.2126 * image_rgb[..., 0]
+                     + 0.7152 * image_rgb[..., 1]
+                     + 0.0722 * image_rgb[..., 2])
+
+        else:
+            psf = _compute_psf_at_field_angle(
+                telescope, 0.0, wavelength_nm, psf_n_img,
+                psf_half_for_kernel, include_obstruction,
+            )
+            psf_kernel = psf / psf.sum()
+
+            image = fftconvolve(ideal, psf_kernel, mode="same") * vignetting
+
+            # Convolve each RGB channel with the PSF for color rendering
+            image_rgb = np.zeros_like(ideal_rgb)
+            for c in range(3):
+                image_rgb[..., c] = (
+                    fftconvolve(ideal_rgb[..., c], psf_kernel,
+                                mode="same") * vignetting
+                )
 
     else:
         # Generic fallback: convolve ideal with on-axis PSF
@@ -2537,10 +2929,16 @@ def _render_source_through_telescope(
 
     # Optional atmospheric seeing
     if seeing_arcsec is not None and seeing_arcsec > 0:
+        # Atmospheric turbulence blurs the image with a Gaussian PSF.
+        # seeing_arcsec is the FWHM (full width at half maximum) of
+        # the seeing disk in arcseconds.
+        # Convert FWHM to standard deviation: σ = FWHM / 2.355
+        # (where 2.355 ≈ 2*sqrt(2*ln(2)) for a Gaussian)
         pixel_scale_arcsec = 2.0 * half_fov_arcsec / num_pixels
         seeing_sigma_pix = (seeing_arcsec / 2.355) / pixel_scale_arcsec
         coords = np.arange(num_pixels) - num_pixels / 2
         sxx, syy = np.meshgrid(coords, coords)
+        # 2D Gaussian kernel: exp(-(x²+y²)/(2σ²))
         seeing_kernel = np.exp(-(sxx ** 2 + syy ** 2)
                                / (2 * seeing_sigma_pix ** 2))
         seeing_kernel /= seeing_kernel.sum()
@@ -2570,6 +2968,7 @@ def _render_source_through_telescope(
         include_obstruction=include_obstruction,
         source_type=type(source).__name__,
         image_rgb=image_rgb,
+        polychromatic=polychromatic,
     )
     return image, half_fov_arcsec, info
 
@@ -2731,6 +3130,7 @@ def plot_source_image(telescope: Telescope,
                       figsize: tuple[float, float] = (8, 7),
                       save_path: str | None = None,
                       eyepiece=None,
+                      polychromatic: bool = False,
                       ) -> plt.Figure | list[plt.Figure]:
     """Plot a simulated image of an astronomical source through the telescope.
 
@@ -2740,7 +3140,10 @@ def plot_source_image(telescope: Telescope,
             Jupiter, Saturn, Moon, etc.).
         wavelength_nm: Wavelength of light in nm.
         num_pixels: Image resolution (pixels per side).
-        seeing_arcsec: Atmospheric seeing FWHM (None = no atmosphere).
+        seeing_arcsec: Atmospheric seeing FWHM (full width at half maximum)
+            of the seeing disk in arcseconds. This is the angular size
+            a point source appears due to atmospheric turbulence.
+            None = no atmosphere (space telescope).
         include_obstruction: Include secondary obstruction in PSF.
         method: PSF method ("analytical" or "traced").
         log_scale: Use logarithmic intensity scaling.
@@ -2787,6 +3190,7 @@ def plot_source_image(telescope: Telescope,
         seeing_arcsec=seeing_arcsec,
         include_obstruction=include_obstruction,
         method=method,
+        polychromatic=polychromatic,
     )
 
     image_rgb = info.get("image_rgb")
@@ -2823,7 +3227,10 @@ def plot_source_image(telescope: Telescope,
     else:
         ann_lines.append("No atmospheric seeing")
 
-    ann_lines.append("Approx: Monochromatic, no atmospheric dispersion")
+    if polychromatic and hasattr(telescope, 'objective'):
+        ann_lines.append("Polychromatic (R/G/B chromatic PSF)")
+    else:
+        ann_lines.append("Approx: Monochromatic, no atmospheric dispersion")
 
     # ── Eyepiece calculations ────────────────────────────────────────
     if eyepiece is not None:

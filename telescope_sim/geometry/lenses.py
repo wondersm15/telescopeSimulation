@@ -58,14 +58,21 @@ class Lens(ABC):
         Returns an array of shape (N, 2).
         """
 
-    def refract_ray(self, ray: Ray, wavelength_nm: float = 550.0) -> bool:
+    def refract_ray(self, ray: Ray, wavelength_nm: float | None = None) -> bool:
         """Refract a ray through this lens. Modifies the ray in place.
 
         Sequence: refract at front surface -> propagate through glass ->
         refract at back surface.
 
+        If *wavelength_nm* is not given, uses the ray's own
+        ``wavelength_nm`` attribute (defaults to 550 nm for backward
+        compatibility).
+
         Returns True if the ray passed through the lens, False otherwise.
         """
+        if wavelength_nm is None:
+            wavelength_nm = getattr(ray, 'wavelength_nm', 550.0)
+
         # Front surface: air -> glass
         t_front = self.front_intersect(ray)
         if t_front is None:
@@ -286,3 +293,277 @@ class SphericalLens(Lens):
             self._back_vertex, self.R_back,
             self._back_sphere_center, num_points,
         )
+
+
+class AchromaticDoublet:
+    """Two-element cemented doublet objective (crown + flint glass).
+
+    Achromatism condition: the combined lens brings two wavelengths
+    (typically F and C Fraunhofer lines, 486.1 nm and 656.3 nm) to the
+    same focus.  This is achieved when:
+
+        phi_crown / V_crown + phi_flint / V_flint = 0
+
+    where phi = 1/f is the optical power and V is the Abbe number.
+
+    The doublet is cemented: the crown back surface and flint front
+    surface share the same radius, so the interface refracts directly
+    from crown glass to flint glass (no air gap).
+
+    Attributes:
+        focal_length: Combined focal length of the doublet (mm).
+        diameter: Lens diameter (mm).
+        center: (x, y) of the front vertex of the crown element.
+        crown_glass: Glass type for the crown element (low dispersion).
+        flint_glass: Glass type for the flint element (high dispersion).
+        objective_type: Always ``"achromat"``.
+    """
+
+    def __init__(self, focal_length: float, diameter: float,
+                 center: tuple[float, float] = (0.0, 0.0),
+                 crown_glass: str = "BK7", flint_glass: str = "F2"):
+        self.focal_length = focal_length
+        self.diameter = diameter
+        self.center = np.asarray(center, dtype=float)
+        self.crown_glass = crown_glass
+        self.flint_glass = flint_glass
+        self.objective_type = "achromat"
+        self.glass = f"{crown_glass}+{flint_glass}"
+
+        # Compute Abbe numbers from glass catalog
+        self._crown_coeffs = GLASS_CATALOG[crown_glass]
+        self._flint_coeffs = GLASS_CATALOG[flint_glass]
+
+        n_d_crown = refractive_index_cauchy(587.6, self._crown_coeffs["B"],
+                                            self._crown_coeffs["C"])
+        n_f_crown = refractive_index_cauchy(486.1, self._crown_coeffs["B"],
+                                            self._crown_coeffs["C"])
+        n_c_crown = refractive_index_cauchy(656.3, self._crown_coeffs["B"],
+                                            self._crown_coeffs["C"])
+        v_crown = (n_d_crown - 1.0) / (n_f_crown - n_c_crown)
+
+        n_d_flint = refractive_index_cauchy(587.6, self._flint_coeffs["B"],
+                                            self._flint_coeffs["C"])
+        n_f_flint = refractive_index_cauchy(486.1, self._flint_coeffs["B"],
+                                            self._flint_coeffs["C"])
+        n_c_flint = refractive_index_cauchy(656.3, self._flint_coeffs["B"],
+                                            self._flint_coeffs["C"])
+        v_flint = (n_d_flint - 1.0) / (n_f_flint - n_c_flint)
+
+        # Achromatism: phi_crown/V_crown + phi_flint/V_flint = 0
+        # Combined power: phi_crown + phi_flint = 1/f
+        phi_total = 1.0 / focal_length
+        phi_crown = phi_total * v_crown / (v_crown - v_flint)
+        phi_flint = phi_total - phi_crown
+
+        # Individual focal lengths
+        f_crown = 1.0 / phi_crown
+        f_flint = 1.0 / phi_flint
+
+        # Lens thicknesses
+        thickness_crown = max(diameter / 15.0, 3.0)
+        thickness_flint = max(diameter / 25.0, 2.0)
+        self.thickness = thickness_crown + thickness_flint
+        self.radius = diameter / 2.0
+
+        # Compute radii via thin-lens lensmaker's equation.
+        n_crown = refractive_index_cauchy(550.0, self._crown_coeffs["B"],
+                                          self._crown_coeffs["C"])
+        n_flint = refractive_index_cauchy(550.0, self._flint_coeffs["B"],
+                                          self._flint_coeffs["C"])
+
+        # Crown: symmetric biconvex → R1 = -R2 = R
+        r1_crown = 2.0 * f_crown * (n_crown - 1.0)
+        # Interface: from crown lensmaker's
+        r_interface_inv = 1.0 / r1_crown - phi_crown / (n_crown - 1.0)
+        r_interface = (1.0 / r_interface_inv
+                       if abs(r_interface_inv) > 1e-12 else float('inf'))
+        # Flint back:
+        r3_inv = r_interface_inv - phi_flint / (n_flint - 1.0)
+        r3_flint = (1.0 / r3_inv
+                    if abs(r3_inv) > 1e-12 else float('inf'))
+
+        # Iterative paraxial-ray solver to refine radii for thick lenses.
+        # Trace a ray through the cemented doublet (air→crown→flint→air)
+        # and adjust radii to match the target focal length.
+        crown_y = center[1]
+        for _iteration in range(15):
+            # Build temporary lens objects for the cemented doublet
+            temp_crown = SphericalLens(
+                R_front=r1_crown, R_back=r_interface,
+                thickness=thickness_crown, diameter=diameter,
+                center=(center[0], crown_y), glass=crown_glass,
+            )
+            temp_flint = SphericalLens(
+                R_front=r_interface, R_back=r3_flint,
+                thickness=thickness_flint, diameter=diameter,
+                center=(center[0], crown_y - thickness_crown),
+                glass=flint_glass,
+            )
+
+            h = diameter * 0.02
+            test_ray = Ray(
+                origin=np.array([h, crown_y + 100.0]),
+                direction=np.array([0.0, -1.0]),
+            )
+
+            # Manually trace: air→crown, crown→flint, flint→air
+            wl = 550.0
+            nc = refractive_index_cauchy(wl, self._crown_coeffs["B"],
+                                         self._crown_coeffs["C"])
+            nf = refractive_index_cauchy(wl, self._flint_coeffs["B"],
+                                         self._flint_coeffs["C"])
+
+            # Surface 1: air→crown
+            t1 = temp_crown.front_intersect(test_ray)
+            if t1 is None:
+                break
+            p1 = test_ray.origin + t1 * test_ray.direction
+            n1 = temp_crown.front_normal_at(p1)
+            d1 = refract_direction(test_ray.direction, n1, 1.0, nc)
+            if d1 is None:
+                break
+            test_ray.propagate_to(p1)
+            test_ray.set_direction(d1)
+
+            # Surface 2: crown→flint (cemented)
+            t2 = temp_crown.back_intersect(test_ray)
+            if t2 is None:
+                break
+            p2 = test_ray.origin + t2 * test_ray.direction
+            n2 = temp_crown.back_normal_at(p2)
+            d2 = refract_direction(test_ray.direction, n2, nc, nf)
+            if d2 is None:
+                break
+            test_ray.propagate_to(p2)
+            test_ray.set_direction(d2)
+
+            # Surface 3: flint→air
+            t3 = temp_flint.back_intersect(test_ray)
+            if t3 is None:
+                break
+            p3 = test_ray.origin + t3 * test_ray.direction
+            n3 = temp_flint.back_normal_at(p3)
+            d3 = refract_direction(test_ray.direction, n3, nf, 1.0)
+            if d3 is None:
+                break
+            test_ray.propagate_to(p3)
+            test_ray.set_direction(d3)
+
+            if abs(test_ray.direction[0]) < 1e-15:
+                break
+            t_axis = -test_ray.origin[0] / test_ray.direction[0]
+            focus_y = (test_ray.origin[1]
+                       + t_axis * test_ray.direction[1])
+            lens_center_y = crown_y - thickness_crown / 2.0
+            measured_f = lens_center_y - focus_y
+            if abs(measured_f) < 1e-6:
+                break
+            scale = focal_length / measured_f
+            if abs(scale - 1.0) < 1e-4:
+                break
+            r1_crown *= scale
+            r_interface *= scale
+            r3_flint *= scale
+
+        # Store final radii
+        self._r1 = r1_crown
+        self._r_interface = r_interface
+        self._r3 = r3_flint
+        self._thickness_crown = thickness_crown
+        self._thickness_flint = thickness_flint
+
+        # Build SphericalLens objects for surface geometry (plotting).
+        # These are NOT used for refraction — refract_ray handles
+        # the cemented interface directly.
+        self.crown = SphericalLens(
+            R_front=r1_crown, R_back=r_interface,
+            thickness=thickness_crown, diameter=diameter,
+            center=(center[0], crown_y), glass=crown_glass,
+        )
+        flint_y = crown_y - thickness_crown
+        self.flint = SphericalLens(
+            R_front=r_interface, R_back=r3_flint,
+            thickness=thickness_flint, diameter=diameter,
+            center=(center[0], flint_y), glass=flint_glass,
+        )
+
+    def _n_crown(self, wavelength_nm: float) -> float:
+        return refractive_index_cauchy(
+            wavelength_nm, self._crown_coeffs["B"],
+            self._crown_coeffs["C"],
+        )
+
+    def _n_flint(self, wavelength_nm: float) -> float:
+        return refractive_index_cauchy(
+            wavelength_nm, self._flint_coeffs["B"],
+            self._flint_coeffs["C"],
+        )
+
+    def refract_ray(self, ray: Ray, wavelength_nm: float | None = None) -> bool:
+        """Refract a ray through the cemented doublet.
+
+        Sequence:
+        1. Air → crown front surface (air→glass refraction)
+        2. Propagate through crown glass
+        3. Crown back / flint front surface (crown→flint refraction)
+        4. Propagate through flint glass
+        5. Flint back surface (glass→air refraction)
+
+        Returns True if the ray passed through all three surfaces.
+        """
+        if wavelength_nm is None:
+            wavelength_nm = getattr(ray, 'wavelength_nm', 550.0)
+
+        n_crown = self._n_crown(wavelength_nm)
+        n_flint = self._n_flint(wavelength_nm)
+
+        # Surface 1: air → crown (front surface of crown lens)
+        t_front = self.crown.front_intersect(ray)
+        if t_front is None:
+            return False
+        hit_front = ray.origin + t_front * ray.direction
+        front_n = self.crown.front_normal_at(hit_front)
+        new_dir = refract_direction(ray.direction, front_n, 1.0, n_crown)
+        if new_dir is None:
+            return False
+        ray.propagate_to(hit_front)
+        ray.set_direction(new_dir)
+
+        # Surface 2: crown → flint (cemented interface)
+        t_interface = self.crown.back_intersect(ray)
+        if t_interface is None:
+            return False
+        hit_interface = ray.origin + t_interface * ray.direction
+        interface_n = self.crown.back_normal_at(hit_interface)
+        new_dir = refract_direction(ray.direction, interface_n,
+                                    n_crown, n_flint)
+        if new_dir is None:
+            return False
+        ray.propagate_to(hit_interface)
+        ray.set_direction(new_dir)
+
+        # Surface 3: flint → air (back surface of flint lens)
+        t_back = self.flint.back_intersect(ray)
+        if t_back is None:
+            return False
+        hit_back = ray.origin + t_back * ray.direction
+        back_n = self.flint.back_normal_at(hit_back)
+        new_dir = refract_direction(ray.direction, back_n, n_flint, 1.0)
+        if new_dir is None:
+            return False
+        ray.propagate_to(hit_back)
+        ray.set_direction(new_dir)
+        return True
+
+    def get_front_surface_points(self, num_points: int = 100) -> np.ndarray:
+        """Front surface of the crown element."""
+        return self.crown.get_front_surface_points(num_points)
+
+    def get_back_surface_points(self, num_points: int = 100) -> np.ndarray:
+        """Back surface of the flint element."""
+        return self.flint.get_back_surface_points(num_points)
+
+    def get_interface_surface_points(self, num_points: int = 100) -> np.ndarray:
+        """Cemented interface between crown and flint."""
+        return self.crown.get_back_surface_points(num_points)

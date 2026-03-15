@@ -9,7 +9,8 @@ def create_parallel_rays(num_rays: int, aperture_diameter: float,
                          entry_height: float,
                          direction: tuple[float, float] = (0.0, -1.0),
                          margin_fraction: float = 0.05,
-                         field_angle_arcsec: float = 0.0) -> list[Ray]:
+                         field_angle_arcsec: float = 0.0,
+                         wavelength_nm: float = 550.0) -> list[Ray]:
     """Create parallel rays simulating a point source at infinity.
 
     Rays are evenly spaced across the aperture diameter and enter
@@ -30,6 +31,8 @@ def create_parallel_rays(num_rays: int, aperture_diameter: float,
                             overrides *direction* with a tilted beam at
                             the specified angle from the optical axis.
                             Default 0.0 preserves existing on-axis behavior.
+        wavelength_nm: Wavelength of light in nanometers (default 550 nm).
+                       Stored on each Ray for wavelength-dependent refraction.
 
     Returns:
         List of Ray objects.
@@ -51,6 +54,7 @@ def create_parallel_rays(num_rays: int, aperture_diameter: float,
     rays = []
     for x in x_positions:
         origin = np.array([x, entry_height])
-        rays.append(Ray(origin=origin, direction=direction.copy()))
+        rays.append(Ray(origin=origin, direction=direction.copy(),
+                        wavelength_nm=wavelength_nm))
 
     return rays

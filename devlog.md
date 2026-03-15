@@ -698,3 +698,117 @@
 - Schmidt-Cassegrain has expected residual aberration due to zero-power corrector approximation
 - Mak-Cass now uses physically accurate iterative solver instead of thin-lens approximation
 - 204 tests passing (was 197 before session)
+
+
+## Session 16 — 2026-03-08
+
+### What was done
+**Multi-wavelength chromatic aberration** — Added the defining physics
+of refracting telescopes: chromatic aberration and achromatic correction.
+
+1. **Per-ray wavelength tracking** — `Ray` dataclass now carries
+   `wavelength_nm` (default 550.0 for backward compat). Constants
+   `CHROMATIC_WAVELENGTHS` and `WAVELENGTH_COLORS` for R/G/B.
+   `create_parallel_rays()` accepts `wavelength_nm` parameter.
+
+2. **Wavelength-aware refraction** — `Lens.refract_ray()` auto-reads
+   `ray.wavelength_nm` when no explicit wavelength is given.
+
+3. **Polychromatic ray trace visualization** — New
+   `plot_polychromatic_ray_trace()` and comparison version draw R/G/B
+   colored rays through the telescope, showing wavelength-dependent
+   focus for singlet refractors.
+
+4. **Chromatic PSF for source images** — `chromatic_defocus()` computes
+   focal shift from design wavelength. `chromatic_psf_kernel()` builds
+   defocused PSF (Airy convolved with defocus disk). When
+   `polychromatic=True`, each RGB channel in source images (Jupiter,
+   etc.) gets its own wavelength-specific PSF, producing realistic
+   color fringing on high-contrast edges.
+
+5. **Achromatic doublet objective** — `AchromaticDoublet` class
+   implements a cemented BK7+F2 doublet using the achromatism
+   condition. Three-surface refraction: air→crown, crown→flint
+   (cemented interface), flint→air. Iterative paraxial-ray solver
+   refines thin-lens radii for thick-lens accuracy. Reduces chromatic
+   spread by ~10× vs singlet.
+
+6. **RefractingTelescope achromat support** — `objective_type="achromat"`
+   parameter builds an `AchromaticDoublet` objective. Sets
+   `corrected_optics=True`. Plotting draws crown (blue) + flint
+   (orange) with dashed interface line.
+
+7. **main.py integration** — `polychromatic` toggle, `objective_type`
+   support, comparison presets for singlet vs achromat. Polychromatic
+   ray trace plot toggle.
+
+8. **Tests** — 11 new tests: `TestAchromaticDoublet` (5 tests including
+   chromatic correction comparison vs singlet) and
+   `TestRefractingTelescopeAchromat` (6 tests including defocus
+   comparison). 215 tests total, all passing.
+
+### Files modified
+- `telescope_sim/physics/ray.py` — wavelength field, constants
+- `telescope_sim/geometry/lenses.py` — auto-read wavelength, AchromaticDoublet
+- `telescope_sim/geometry/telescope.py` — achromat objective option
+- `telescope_sim/geometry/__init__.py` — export AchromaticDoublet
+- `telescope_sim/source/light_source.py` — wavelength param
+- `telescope_sim/plotting/ray_trace_plot.py` — polychromatic ray trace,
+  chromatic PSF, achromat drawing
+- `telescope_sim/plotting/__init__.py` — new exports
+- `main.py` — polychromatic toggle, achromat support, comparison presets
+- `tests/test_geometry.py` — achromat and chromatic tests
+- `PHYSICS.md` — moved chromatic items to Implemented
+- `USER_GUIDE.md` — chromatic aberration section, updated status tables
+
+### Notes
+- Cemented doublet requires custom 3-surface refraction (not two
+  separate `SphericalLens.refract_ray` calls) because the interface
+  refracts crown→flint glass directly (no air gap)
+- Thin-lens radii from lensmaker's equation are already very accurate
+  (measured f = 800.26mm for target 800mm) — iterative solver converges
+  in 1-2 steps
+- Reflectors are completely unaffected by polychromatic mode (zero
+  chromatic defocus)
+- 215 tests passing (was 204 before session)
+
+
+## Session 17 — 2026-03-08
+
+### What was done
+**Clarified seeing_arcsec units and physical meaning** — Enhanced
+documentation to clearly explain what the atmospheric seeing parameter
+represents.
+
+1. **main.py** — Added detailed comment block explaining that
+   `seeing_arcsec` is the FWHM (full width at half maximum) of the
+   seeing disk in arcseconds — the angular size a star appears due
+   to atmospheric turbulence. Included typical values and what they
+   represent physically.
+
+2. **PHYSICS.md** — Expanded atmospheric seeing entry to explicitly
+   state that `seeing_arcsec` is the FWHM of the seeing disk, and
+   explain the FWHM→σ conversion (FWHM = 2.355σ for Gaussian).
+
+3. **ray_trace_plot.py** — Added inline comments at both seeing
+   application sites explaining:
+   - seeing_arcsec is the FWHM of the seeing disk
+   - Conversion formula: σ = FWHM / 2.355
+   - 2D Gaussian kernel formula: exp(-(x²+y²)/(2σ²))
+   Updated docstrings to expand "FWHM" to "full width at half maximum"
+   with explanation.
+
+4. **USER_GUIDE.md** — Enhanced atmospheric seeing section to explain
+   what FWHM physically means ("the angular diameter at which brightness
+   drops to 50% of peak") with concrete example. Added Gaussian formula
+   and note about units.
+
+### Files modified
+- `main.py` — expanded seeing_arcsec comment block
+- `PHYSICS.md` — clarified FWHM meaning
+- `telescope_sim/plotting/ray_trace_plot.py` — inline comments + docstrings
+- `USER_GUIDE.md` — enhanced atmospheric seeing section
+
+### Notes
+- No code behavior changes — purely documentation/clarity improvements
+- 215 tests still passing (unchanged)

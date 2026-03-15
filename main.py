@@ -37,6 +37,8 @@ from telescope_sim.plotting import (
     plot_coma_spot,
     plot_focal_image,
     plot_focal_image_comparison,
+    plot_polychromatic_ray_trace,
+    plot_polychromatic_ray_trace_comparison,
     plot_psf_2d,
     plot_psf_2d_comparison,
     plot_psf_comparison,
@@ -79,6 +81,7 @@ _TELESCOPE_KEYS = (_NEWTONIAN_KEYS | _CASSEGRAIN_KEYS | _REFRACTING_KEYS
 # Keys that control per-panel physics in comparison mode
 _PHYSICS_KEYS = {
     "wavelength_nm", "method", "seeing_arcsec", "include_obstruction",
+    "polychromatic",
 }
 
 # Every key that a comparison config dict may contain
@@ -168,7 +171,9 @@ def run_single(telescope, num_display_rays, wavelength_nm, method,
                field_angle_arcsec=0.0, source=None, eyepiece=None,
                show_ray_trace=True, show_spot_diagram=True,
                show_focal_image=True, show_psf_profile=True,
-               show_psf_2d=True, show_source_image=True):
+               show_psf_2d=True, show_source_image=True,
+               polychromatic=False,
+               show_polychromatic_ray_trace=False):
     """Run all plots for a single telescope configuration."""
     if isinstance(telescope, MaksutovCassegrainTelescope):
         tel_name = "Maksutov-Cass"
@@ -256,6 +261,13 @@ def run_single(telescope, num_display_rays, wavelength_nm, method,
             include_obstruction=include_obstruction,
         )
 
+    # Polychromatic ray trace (only for refractors, only when enabled)
+    if (show_polychromatic_ray_trace and polychromatic
+            and isinstance(telescope, RefractingTelescope)):
+        plot_polychromatic_ray_trace(
+            telescope, num_display_rays=num_display_rays,
+        )
+
     # Source imaging
     if show_source_image and source is not None:
         #log_scale = isinstance(source, StarField)
@@ -268,6 +280,7 @@ def run_single(telescope, num_display_rays, wavelength_nm, method,
             method=method,
             log_scale=log_scale,
             eyepiece=eyepiece,
+            polychromatic=polychromatic,
         )
 
 
@@ -387,7 +400,14 @@ def main():
     # ── Refracting-specific parameters ──────────────────────────────
     # (only used when telescope_type = "refracting")
     objective_type = "singlet"      # "singlet" — single biconvex lens
-    # objective_type = "achromat"   # future: crown + flint doublet
+    # objective_type = "achromat"   # crown + flint doublet (corrects chromatic aberration)
+
+    # ── Chromatic / polychromatic settings ────────────────────────────
+    # When True, refractors use per-wavelength (R/G/B) PSFs for source
+    # imaging, showing realistic color fringing on high-contrast edges.
+    # Reflectors are unaffected (no chromatic aberration).
+    polychromatic = False
+    # polychromatic = True          # enable to see chromatic aberration effects
 
     # ── Spider vanes ─────────────────────────────────────────────────
     # Number of vanes holding the secondary mirror (0=none, 4=standard).
@@ -416,13 +436,27 @@ def main():
     method = "analytical"
     # method = "traced"
 
-    # Atmospheric seeing — use a preset name, a float (arcsec FWHM),
-    # or None for space telescope (no atmosphere).
+    # Atmospheric seeing — FWHM of the seeing disk in arcseconds.
+    #
+    # Atmospheric turbulence causes stars to appear as blurred disks
+    # rather than point sources. The seeing_arcsec parameter is the
+    # full width at half maximum (FWHM) of this disk — the angular
+    # diameter at which the brightness drops to 50% of the peak.
+    #
+    # Smaller values = steadier atmosphere (better seeing).
+    # Typical values:
+    #   0.5-1.0" = excellent (rare, high-altitude observatories)
+    #   1.0-2.0" = good (decent amateur site on a good night)
+    #   2.0-3.0" = average (typical suburban/rural)
+    #   3.0-5.0" = poor (turbulent, near horizon, or humid)
+    #
+    # Set to None for space telescope (no atmosphere).
+    #
     seeing_arcsec = "good"          # 1.5" FWHM — good ground-based seeing
-    # seeing_arcsec = "excellent"   # 0.8" — rare, high-altitude site
-    # seeing_arcsec = "average"     # 2.5" — typical suburban/rural
-    # seeing_arcsec = "poor"        # 4.0" — turbulent atmosphere
-    # seeing_arcsec = 2.0           # custom value in arcseconds
+    # seeing_arcsec = "excellent"   # 0.8" FWHM — rare, high-altitude site
+    # seeing_arcsec = "average"     # 2.5" FWHM — typical suburban/rural
+    # seeing_arcsec = "poor"        # 4.0" FWHM — turbulent atmosphere
+    # seeing_arcsec = 2.0           # custom value in arcseconds (FWHM)
     # seeing_arcsec = None          # space telescope (no atmosphere)
 
     # ── Obstruction toggle ─────────────────────────────────────────
@@ -454,6 +488,7 @@ def main():
     # show_vignetting = False     # (already exists below)
     # show_coma_analysis = False  # (already exists above)
     show_source_image = True      # only renders if source is configured
+    show_polychromatic_ray_trace = True  # only renders if polychromatic=True + refractor
 
     # Comparison-mode plots:
     show_ray_trace_comparison = True
@@ -604,6 +639,17 @@ def main():
     #      "focal_length": 1000.0},
     # ]
 
+    # --- Singlet vs Achromat refractor (chromatic aberration comparison) ---
+    # Enable polychromatic = True above for this comparison.
+    # comparison_configs = [
+    #     {"label": "80mm f/10 Singlet", "telescope_type": "refracting",
+    #      "primary_diameter": 80.0, "focal_length": 800.0,
+    #      "objective_type": "singlet"},
+    #     {"label": "80mm f/10 Achromat", "telescope_type": "refracting",
+    #      "primary_diameter": 80.0, "focal_length": 800.0,
+    #      "objective_type": "achromat"},
+    # ]
+
     # --- Cassegrain vs Maksutov-Cassegrain ---
     comparison_configs = [
         {"label": "200mm f/20 Cassegrain", "telescope_type": "cassegrain",
@@ -658,6 +704,7 @@ def main():
             method=method,
             seeing_arcsec=seeing_arcsec,
             include_obstruction=include_obstruction,
+            polychromatic=polychromatic,
         )
         if back_focal_distance is not None:
             defaults["back_focal_distance"] = back_focal_distance
@@ -765,7 +812,9 @@ def main():
                         show_focal_image=show_focal_image,
                         show_psf_profile=show_psf_profile,
                         show_psf_2d=show_psf_2d,
-                        show_source_image=show_source_image)
+                        show_source_image=show_source_image,
+                        polychromatic=polychromatic,
+                        show_polychromatic_ray_trace=show_polychromatic_ray_trace)
 
     plt.show()
 

@@ -350,8 +350,28 @@ Glass catalog:
 - **F2** (dense flint): B=1.6032, C=9500 — high dispersion
 
 Blue light (450nm) refracts more than red (650nm), causing chromatic
-aberration in lenses. Currently the simulation traces at a single
-wavelength, so chromatic effects are not yet visible.
+aberration in lenses.
+
+### Chromatic aberration
+
+Enable `polychromatic = True` in main.py to activate multi-wavelength
+imaging for refractors.  Each RGB channel is convolved with a PSF at
+its own wavelength (R=656nm, G=550nm, B=486nm), including
+wavelength-dependent defocus.
+
+**Singlet refractor** — large chromatic defocus produces visible
+purple/green fringing on high-contrast edges (e.g., Jupiter's limb).
+
+**Achromatic doublet** (`objective_type = "achromat"`) — BK7 crown +
+F2 flint cemented doublet cancels primary chromatic aberration.
+Residual secondary spectrum is ~f/2500.
+
+**Reflectors** — zero chromatic aberration (mirrors are achromatic).
+The `polychromatic` flag has no effect on reflectors.
+
+**Polychromatic ray trace** — `plot_polychromatic_ray_trace()` draws
+R/G/B colored rays through the telescope, showing how different
+wavelengths focus at different points for singlets.
 
 ### Vignetting (`vignetting.py`)
 
@@ -367,11 +387,23 @@ Tube wall vignetting is not modeled.
 
 ### Atmospheric seeing
 
-Applied as Gaussian blur with configurable FWHM:
-- Excellent: 0.8" (rare, high-altitude)
-- Good: 1.5" (decent night)
-- Average: 2.5" (typical)
-- Poor: 4.0" (turbulent)
+Atmospheric turbulence causes stars to appear as blurred disks rather
+than point sources. The `seeing_arcsec` parameter is the **full width
+at half maximum (FWHM)** of this seeing disk — the angular diameter
+at which the brightness drops to 50% of the peak.
+
+**What FWHM means**: For a star with 1.5" seeing, the disk measures
+1.5" across at half-brightness. Smaller FWHM = sharper images.
+
+Applied as Gaussian blur:
+- Excellent: 0.8" FWHM (rare, high-altitude observatories)
+- Good: 1.5" FWHM (good amateur site on a calm night)
+- Average: 2.5" FWHM (typical suburban/rural)
+- Poor: 4.0" FWHM (turbulent, near horizon, or humid)
+- None: space telescope (no atmosphere)
+
+The Gaussian formula: blur σ = FWHM / 2.355, applied as a 2D kernel
+`exp(-(x²+y²)/(2σ²))`.
 
 **Approximation**: Real seeing follows a Moffat/Kolmogorov profile
 with broader wings than Gaussian. The Gaussian model overestimates
@@ -613,9 +645,9 @@ when an eyepiece is configured.
 
 | Feature | Status | Impact |
 |---------|--------|--------|
-| Chromatic aberration (refractors) | **Not modeled** | Refractors appear unrealistically good |
+| Chromatic aberration (refractors) | **Implemented** | Enable `polychromatic = True` to see color fringing |
+| Achromatic doublet | **Implemented** | Set `objective_type = "achromat"` for crown+flint doublet |
 | Coma for corrected systems (Cassegrain, Mak) | **Overestimated** | Uses Newtonian formula; these designs have less coma |
-| Achromatic doublet | Not implemented | Can't model realistic refractors |
 | Field curvature, astigmatism | Not implemented | Only coma among off-axis aberrations |
 | Surface errors (manufacturing) | Not implemented | Assumes perfect optics |
 | Atmospheric seeing profile | **Gaussian approx** | Real profile has broader wings (Moffat) |
@@ -628,8 +660,10 @@ when an eyepiece is configured.
 
 When comparing **across** design types (Newtonian vs Refractor vs
 Mak-Cass), be aware:
-- The **refractor** will look too good because chromatic aberration
-  is not shown
+- For **refractors**, enable `polychromatic = True` to see realistic
+  chromatic aberration.  Without it, singlet refractors appear
+  unrealistically sharp.  Use `objective_type = "achromat"` to see
+  how a doublet corrects this.
 - **Coma comparisons** between Newtonian and Mak-Cass/Cassegrain
   are not yet meaningful — the coma model doesn't account for the
   secondary's coma correction
@@ -643,12 +677,9 @@ Mak-Cass), be aware:
 
 ### High priority (enables honest cross-design comparison)
 
-1. **Chromatic aberration for refractors** — Trace at multiple
-   wavelengths (e.g., 450, 550, 650 nm) through the lens and show
-   the color fringing / longitudinal chromatic shift. The Cauchy
-   dispersion model already exists — this is mainly a matter of
-   tracing 3 wavelengths and compositing. Would make refractor
-   vs reflector comparisons honest.
+1. ~~**Chromatic aberration for refractors**~~ — **Done.** Set
+   `polychromatic = True` in main.py. Multi-wavelength (R/G/B)
+   PSFs produce color fringing on singlet refractors.
 
 2. **Design-aware coma model** — The classical Cassegrain's hyperbolic
    secondary doesn't correct coma (same as Newtonian). But the
@@ -662,9 +693,9 @@ Mak-Cass), be aware:
    Airy disk size, coma-free field, weight estimate. Directly
    useful for purchase decisions.
 
-4. **Achromatic doublet** — Model a crown+flint doublet to show
-   how achromats reduce chromatic aberration vs singlets. The glass
-   catalog already has BK7 and F2.
+4. ~~**Achromatic doublet**~~ — **Done.** Set
+   `objective_type = "achromat"` for a BK7+F2 cemented doublet.
+   Comparison presets in main.py for singlet vs achromat.
 
 5. **Type hint cleanup** — Plotting functions are annotated as
    `telescope: NewtonianTelescope` but actually accept any type.

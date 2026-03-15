@@ -8,7 +8,7 @@ from telescope_sim.geometry.mirrors import (
     ParabolicMirror,
     SphericalMirror,
 )
-from telescope_sim.geometry.lenses import Lens, SphericalLens
+from telescope_sim.geometry.lenses import AchromaticDoublet, Lens, SphericalLens
 from telescope_sim.geometry.telescope import (
     CassegrainTelescope,
     MaksutovCassegrainTelescope,
@@ -18,6 +18,7 @@ from telescope_sim.geometry.telescope import (
 )
 
 __all__ = [
+    "AchromaticDoublet",
     "Eyepiece",
     "Mirror",
     "ParabolicMirror",

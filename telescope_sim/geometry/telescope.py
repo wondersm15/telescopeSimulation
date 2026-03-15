@@ -9,7 +9,7 @@ from telescope_sim.geometry.mirrors import (
     ParabolicMirror,
     SphericalMirror,
 )
-from telescope_sim.geometry.lenses import SphericalLens
+from telescope_sim.geometry.lenses import AchromaticDoublet, SphericalLens
 from telescope_sim.physics.ray import Ray
 from telescope_sim.physics.reflection import reflect_direction
 
@@ -470,39 +470,44 @@ class RefractingTelescope:
         self.spider_vanes = spider_vanes
         self.spider_vane_width = spider_vane_width
 
-        # Build objective lens using thin-lens / lensmaker's equation.
-        # For a symmetric biconvex singlet in BK7 (n ≈ 1.519 at 550nm):
-        #   1/f = (n-1) * [1/R_front - 1/R_back]
-        # For symmetric biconvex: R_front = R, R_back = -R
-        #   1/f = (n-1) * 2/R  =>  R = 2*f*(n-1)
-        from telescope_sim.physics.refraction import (
-            GLASS_CATALOG,
-            refractive_index_cauchy,
-        )
-        glass = "BK7"
-        coeffs = GLASS_CATALOG[glass]
-        n = refractive_index_cauchy(550.0, coeffs["B"], coeffs["C"])
-        R = 2.0 * focal_length * (n - 1.0)
-
-        # Lens thickness: reasonable default
-        thickness = max(primary_diameter / 15.0, 3.0)
-
         # Place the lens so that its front vertex is at (0, focal_length).
         # Light enters from above (y > focal_length), refracts through
         # the lens, and converges near y = 0.
         lens_y = focal_length
-        self.objective = SphericalLens(
-            R_front=R,
-            R_back=-R,
-            thickness=thickness,
-            diameter=primary_diameter,
-            center=(0.0, lens_y),
-            glass=glass,
-        )
+
+        if objective_type == "achromat":
+            self.objective = AchromaticDoublet(
+                focal_length=focal_length,
+                diameter=primary_diameter,
+                center=(0.0, lens_y),
+            )
+            self.corrected_optics = True
+        else:
+            # Singlet: symmetric biconvex BK7 lens
+            # 1/f = (n-1) * 2/R  =>  R = 2*f*(n-1)
+            from telescope_sim.physics.refraction import (
+                GLASS_CATALOG,
+                refractive_index_cauchy,
+            )
+            glass = "BK7"
+            coeffs = GLASS_CATALOG[glass]
+            n = refractive_index_cauchy(550.0, coeffs["B"], coeffs["C"])
+            R = 2.0 * focal_length * (n - 1.0)
+            thickness = max(primary_diameter / 15.0, 3.0)
+
+            self.objective = SphericalLens(
+                R_front=R,
+                R_back=-R,
+                thickness=thickness,
+                diameter=primary_diameter,
+                center=(0.0, lens_y),
+                glass=glass,
+            )
+            self.corrected_optics = False
 
         # Store derived quantities
         self._lens_y = lens_y
-        self._thickness = thickness
+        self._thickness = getattr(self.objective, 'thickness', 0.0)
 
     @property
     def focal_ratio(self) -> float:
@@ -596,7 +601,12 @@ class RefractingTelescope:
             "secondary_type": "lens",
             "telescope_style": "refractor",
             "objective_glass": self.objective.glass,
+            "objective_type": self.objective_type,
         }
+        if self.objective_type == "achromat":
+            components["interface_surface"] = (
+                self.objective.get_interface_surface_points()
+            )
         return components
 
 

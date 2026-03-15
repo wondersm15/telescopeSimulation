@@ -12,7 +12,9 @@
 - **Refraction (Snell's law)**: `n1 * sin(θ1) = n2 * sin(θ2)` — exact 2D vector form. Handles total internal reflection (returns None when sin(θ2) > 1). Used for lens surfaces.
 - **Spherical lens surfaces**: Two-surface lens model with independent front and back radii of curvature. Supports biconvex, planoconvex, and meniscus configurations. Ray traced through front (air→glass) and back (glass→air) refractions.
 - **Cauchy dispersion model**: `n(λ) = B + C/λ²` — wavelength-dependent refractive index for optical glasses. Preset coefficients for BK7 crown and F2 flint glass. Enables chromatic analysis (blue light refracts more than red).
-- **Refracting telescope**: Objective lens focuses light directly to focal plane. Zero central obstruction. Lens geometry auto-computed from lensmaker's equation for symmetric biconvex singlet. *Approximation: thin-lens formula R = 2f(n-1) used for initial geometry; thick-lens effects shift focus slightly.*
+- **Refracting telescope**: Objective lens focuses light directly to focal plane. Zero central obstruction. Lens geometry auto-computed from lensmaker's equation for symmetric biconvex singlet. Supports singlet and achromatic doublet objectives. *Approximation: thin-lens formula R = 2f(n-1) used for initial geometry; iterative paraxial-ray solver refines for thick-lens effects.*
+- **Achromatic doublet**: Crown (BK7) + flint (F2) cemented doublet that brings two wavelengths (F=486.1nm, C=656.3nm) to the same focus using the achromatism condition: `phi_crown/V_crown + phi_flint/V_flint = 0`. Radii computed from Abbe numbers and lensmaker's equation. Three-surface refraction: air→crown, crown→flint (cemented interface), flint→air. Reduces chromatic aberration by ~10× compared to a singlet. *Approximation: residual secondary spectrum (Δf ≈ f/2500) is estimated empirically rather than fully ray-traced.*
+- **Chromatic aberration (singlet)**: Wavelength-dependent focal shift from dispersion: `f(λ)/f_design = (n_design-1)/(n_λ-1)`. Produces defocused PSFs at non-design wavelengths, visible as color fringing on high-contrast edges in polychromatic mode.
 - **Maksutov-Cassegrain**: Meniscus corrector (refraction through front and back surfaces) + spherical primary (reflection) + aluminized spot on meniscus back surface acting as convex secondary (reflection). The corrector compensates spherical aberration from the spherical primary. Reuses Cassegrain geometry formulas for secondary placement and magnification. *Approximation: near-concentric meniscus formula used for auto-computed front radius; exact aberration correction depends on precise radius matching in real designs.*
 - **Schmidt-Cassegrain**: Spherical primary + convex spherical secondary + Schmidt corrector plate. The corrector compensates spherical aberration from the spherical primary. *Approximation: corrector plate modeled as zero-power element (aberration correction assumed, not ray-traced). The real corrector has a 4th-order aspheric profile.*
 - **Vignetting**: Circle-overlap computation for off-axis illumination fraction at the secondary mirror. Beam diameter and shift at the secondary plane computed from geometry. *Approximation: tube wall vignetting not modeled.*
@@ -22,6 +24,8 @@
 - **Central obstruction diffraction**: Annular aperture PSF accounting for secondary mirror obstruction. Uses `PSF(r) = [1/(1-ε²)]² × [2J₁(x)/x - ε²·2J₁(εx)/(εx)]²` where `ε = D_secondary / D_primary`. Reduces to the standard Airy pattern when ε=0. Produces stronger secondary rings and slightly lower peak intensity compared to an unobstructed aperture.
 - **Spider vane diffraction**: 2D FFT-based PSF with pupil mask including spider vane obstructions. Computes `PSF = |FFT(pupil)|²` (Fraunhofer diffraction). Each vane produces a pair of opposing diffraction spikes perpendicular to the vane direction. Validated against analytical Airy when no vanes are present.
 
+- **Chromatic PSF**: Polychromatic imaging mode convolves each RGB channel with a wavelength-specific PSF that includes chromatic defocus. For singlet refractors, blue and red channels get defocused disk kernels convolved with the Airy pattern at their respective wavelengths. Produces realistic color fringing on planet limbs and high-contrast edges. Achromats and reflectors show minimal or zero chromatic defocus.
+
 ### Aberrations
 - **Off-axis coma (Seidel 3rd order)**: Tangential coma `C_T(h) = 3θh²/(2R²)`, sagittal `C_S = C_T/3`. Produces the classic comet/fan pattern for off-axis sources. Includes RMS computation, coma-free field calculation, and 2D spot diagrams. *Approximation: Seidel 3rd-order — valid for small field angles.*
 
@@ -30,7 +34,7 @@
 - **Adaptive resolution**: Image resolution automatically scales to resolve the telescope's diffraction limit or atmospheric seeing (whichever is larger), with ~3 pixels per resolution element. Capped at source texture resolution (2048 for Moon) or 4096 hard ceiling.
 
 ### Atmospheric
-- **Atmospheric seeing**: Gaussian blurring of the focal-plane image with configurable FWHM. Presets: "excellent" (0.8"), "good" (1.5"), "average" (2.5"), "poor" (4.0"). *Approximation: Gaussian profile; real seeing follows Moffat/Kolmogorov profile with broader wings.*
+- **Atmospheric seeing**: Gaussian blurring of the focal-plane image simulating atmospheric turbulence. The `seeing_arcsec` parameter is the **full width at half maximum (FWHM)** of the seeing disk in arcseconds — the angular size a point source (star) appears due to atmospheric turbulence. For a Gaussian blur, FWHM = 2.355σ where σ is the standard deviation. The image is convolved with a 2D Gaussian kernel with this FWHM. Presets: "excellent" (0.8"), "good" (1.5"), "average" (2.5"), "poor" (4.0"). *Approximation: Gaussian profile; real seeing follows Moffat/Kolmogorov profile with broader wings and more power at high spatial frequencies.*
 
 ### Visual Observing
 - **Eyepiece model**: Computes magnification (f_telescope / f_eyepiece), true field of view (AFOV / magnification), and exit pupil (aperture / magnification). Crops/pads the rendered image to the eyepiece's TFOV. Produces a "true angular size" figure scaled to match the apparent size at 50cm viewing distance. *Note: the eyepiece does not modify the PSF — the image is formed at the focal plane before the eyepiece. This is a geometric/field-of-view model, not a ray-traced optical element.*
@@ -40,13 +44,10 @@
 ## Not Yet Implemented
 
 ### Geometric Optics
-- **Chromatic aberration visualization** — multi-wavelength tracing through lenses to show color fringing
-- **Achromatic doublet** — crown + flint glass combination to cancel chromatic aberration
 - **Conic sections beyond implemented** — elliptical mirrors (for Ritchey-Chrétien designs and other advanced configurations)
 - **Surface errors** — real mirrors have manufacturing imperfections (wavefront error from surface figure)
 
 ### Wave Optics
-- **Chromatic PSF** — wavelength-dependent diffraction pattern (polychromatic imaging)
 - **Wavefront error** — phase errors from imperfect optics, Zernike polynomial decomposition
 - **Interference and coherence effects**
 
