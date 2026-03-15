@@ -135,19 +135,32 @@ class DesignTab(QWidget):
 
         row += 1
 
-        # Eyepiece focal length
-        controls_layout.addWidget(QLabel("Eyepiece (mm):"), row, 0)
+        # Eyepiece controls
+        controls_layout.addWidget(QLabel("Eyepiece:"), row, 0)
         self.eyepiece_check = QCheckBox("Use Eyepiece")
         self.eyepiece_check.setChecked(False)
         self.eyepiece_check.toggled.connect(self.toggle_eyepiece)
         controls_layout.addWidget(self.eyepiece_check, row, 1)
 
+        controls_layout.addWidget(QLabel("Focal Length (mm):"), row, 2)
         self.eyepiece_spin = QDoubleSpinBox()
         self.eyepiece_spin.setRange(3.0, 40.0)
         self.eyepiece_spin.setSingleStep(1.0)
         self.eyepiece_spin.setValue(10.0)
         self.eyepiece_spin.setEnabled(False)
-        controls_layout.addWidget(self.eyepiece_spin, row, 2, 1, 2)
+        controls_layout.addWidget(self.eyepiece_spin, row, 3)
+
+        row += 1
+
+        # Eyepiece AFOV
+        controls_layout.addWidget(QLabel(""), row, 0)  # Empty
+        controls_layout.addWidget(QLabel("Apparent FOV (°):"), row, 2)
+        self.afov_spin = QDoubleSpinBox()
+        self.afov_spin.setRange(30.0, 100.0)
+        self.afov_spin.setSingleStep(5.0)
+        self.afov_spin.setValue(50.0)  # Plössl standard
+        self.afov_spin.setEnabled(False)
+        controls_layout.addWidget(self.afov_spin, row, 3)
 
         row += 1
 
@@ -165,8 +178,9 @@ class DesignTab(QWidget):
         self.update_view()
 
     def toggle_eyepiece(self, checked):
-        """Enable/disable eyepiece focal length control."""
+        """Enable/disable eyepiece controls."""
         self.eyepiece_spin.setEnabled(checked)
+        self.afov_spin.setEnabled(checked)
 
     def build_telescope(self):
         """Build telescope object from current configuration."""
@@ -235,9 +249,10 @@ class DesignTab(QWidget):
         """Build eyepiece object if enabled."""
         if self.eyepiece_check.isChecked():
             eyepiece_fl = self.eyepiece_spin.value()
+            afov = self.afov_spin.value()
             return Eyepiece(
                 focal_length_mm=eyepiece_fl,
-                apparent_fov_deg=50.0  # Standard Plössl
+                apparent_fov_deg=afov
             )
         return None
 
@@ -374,12 +389,25 @@ class DesignTab(QWidget):
 
             # Update simulated image (if source selected)
             if source is not None:
-                fig_image = plot_source_image(
+                result = plot_source_image(
                     telescope,
                     source,
                     seeing_arcsec=seeing,
                     eyepiece=eyepiece  # Pass eyepiece to enable magnification/washout effects
                 )
+
+                # plot_source_image returns a list if eyepiece is used, single figure otherwise
+                if isinstance(result, list):
+                    # With eyepiece: [normal_view, true_angular_size_view]
+                    # Use the first figure for the main display
+                    fig_image = result[0]
+                    # Close the second figure
+                    if len(result) > 1:
+                        plt.close(result[1])
+                else:
+                    # Without eyepiece: single figure
+                    fig_image = result
+
                 self.image_canvas.set_figure(fig_image)
                 self.current_figure = fig_image  # Store for pop-out
                 self.popout_button.setEnabled(True)

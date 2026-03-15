@@ -36,19 +36,21 @@ class ImagePopoutWindow(QDialog):
         buf = io.BytesIO()
         figure.savefig(buf, format='png', dpi=150, bbox_inches='tight')
         buf.seek(0)
-        img = Image.open(buf)
-
-        # Convert to QPixmap
-        img_data = img.tobytes("raw", "RGBA")
-        qimage = QPixmap()
-        qimage.loadFromData(img_data)
 
         # Layout
         layout = QVBoxLayout()
 
         # Image label
         image_label = QLabel()
-        pixmap = QPixmap(buf.getvalue())
+        pixmap = QPixmap()
+        pixmap.loadFromData(buf.getvalue())
+
+        if pixmap.isNull():
+            # Fallback if QPixmap loading fails
+            img = Image.open(buf)
+            img.save("temp_popout.png")
+            pixmap = QPixmap("temp_popout.png")
+
         pixmap = pixmap.scaled(window_size, window_size,
                               Qt.AspectRatioMode.KeepAspectRatio,
                               Qt.TransformationMode.SmoothTransformation)
