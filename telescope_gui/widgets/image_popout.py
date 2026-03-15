@@ -1,95 +1,110 @@
 """
-Pop-out window for simulated images at full resolution.
+Pop-out window for simulated images at perceived angular scale.
 """
 
-from PyQt6.QtWidgets import QDialog, QVBoxLayout, QLabel, QScrollArea
+from PyQt6.QtWidgets import QDialog, QVBoxLayout, QLabel
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QPixmap
-import matplotlib.pyplot as plt
 import io
 
 
 class ImagePopoutWindow(QDialog):
-    """Pop-out window showing image at full resolution."""
+    """Pop-out window showing image at perceived angular scale."""
 
     def __init__(self, figure, title="Simulated View", angular_size_arcmin=None, parent=None):
         super().__init__(parent)
 
         self.setWindowTitle(title)
 
-        # Convert figure to pixmap at high DPI
+        # Convert figure to pixmap
         buf = io.BytesIO()
-        # Use higher DPI for better quality
-        figure.savefig(buf, format='png', dpi=200, bbox_inches='tight')
+        figure.savefig(buf, format='png', dpi=150, bbox_inches='tight')
         buf.seek(0)
 
         # Load as QPixmap
-        pixmap = QPixmap()
-        pixmap.loadFromData(buf.getvalue())
+        original_pixmap = QPixmap()
+        original_pixmap.loadFromData(buf.getvalue())
         buf.close()
 
-        if pixmap.isNull():
+        if original_pixmap.isNull():
             print("Warning: Failed to load pixmap in pop-out window")
             self.close()
             return
 
-        # Get image dimensions
-        img_width = pixmap.width()
-        img_height = pixmap.height()
+        # Calculate display size based on angular size
+        # Goal: show the image at a size that matches the perceived angular size
+        # when viewing the screen at ~50cm distance
 
-        # Layout with scroll area for large images
+        # At 50cm viewing distance:
+        # 1 degree subtends ~8.7mm on screen
+        # Typical screen: 100-150 DPI
+        # This gives ~34-52 pixels per degree - too small!
+
+        # Solution: Use a comfortable scale factor (pixels per degree)
+        # that makes the image visible while preserving FOV relationships
+        if angular_size_arcmin is not None:
+            angular_size_deg = angular_size_arcmin / 60.0
+
+            # Scale factor: pixels per degree
+            # Higher value = larger image (more comfortable to view)
+            # Lower value = more "realistic" angular size
+            # 200-300 pixels/degree is a good compromise
+            pixels_per_degree = 250
+
+            display_size = int(angular_size_deg * pixels_per_degree)
+
+            # Clamp to reasonable range
+            display_size = max(200, min(display_size, 1200))
+
+            scale_info = f"True FOV: {angular_size_arcmin:.1f} arcmin ({angular_size_deg:.2f}°) | Scale: {pixels_per_degree} pixels/degree"
+        else:
+            # No angular size info - use a default
+            display_size = 600
+            scale_info = "Angular scale not available"
+
+        # Scale the pixmap
+        scaled_pixmap = original_pixmap.scaled(
+            display_size, display_size,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation
+        )
+
+        # Layout
         layout = QVBoxLayout()
 
-        # Info label at top
-        info_text = f"Full resolution view"
-        if angular_size_arcmin is not None:
-            info_text += f" | True FOV: {angular_size_arcmin:.2f} arcmin ({angular_size_arcmin/60:.3f}°)"
-        info_text += f"\nImage size: {img_width} × {img_height} pixels"
-
-        info_label = QLabel(info_text)
+        # Info header
+        info_label = QLabel(scale_info)
         info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        info_label.setStyleSheet("padding: 10px; background-color: #f0f0f0;")
+        info_label.setStyleSheet("padding: 10px; background-color: #f0f0f0; font-weight: bold;")
         layout.addWidget(info_label)
 
-        # Scroll area for image (allows scrolling if image is larger than screen)
-        scroll_area = QScrollArea()
-        scroll_area.setWidgetResizable(False)
-        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-
-        # Image label
+        # Image
         image_label = QLabel()
-        image_label.setPixmap(pixmap)
-        scroll_area.setWidget(image_label)
-
-        layout.addWidget(scroll_area)
+        image_label.setPixmap(scaled_pixmap)
+        image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(image_label)
 
         # Instructions
-        instructions = QLabel("Scroll to view full image if it's larger than the window")
+        instructions = QLabel(
+            "This window shows the approximate perceived angular size.\n"
+            "Higher magnification → smaller field of view → smaller window.\n"
+            f"View from ~50cm for most realistic angular perception."
+        )
         instructions.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        instructions.setStyleSheet("padding: 5px; font-size: 10pt; color: #666;")
+        instructions.setStyleSheet("padding: 10px; font-size: 10pt; color: #666;")
         layout.addWidget(instructions)
 
         self.setLayout(layout)
 
-        # Set window size - allow up to 90% of screen, minimum 600x600
-        # This shows the image at its actual rendered size (or scrollable if larger)
-        from PyQt6.QtGui import QGuiApplication
-        screen = QGuiApplication.primaryScreen().geometry()
-        max_width = int(screen.width() * 0.9)
-        max_height = int(screen.height() * 0.9)
-
-        # Add padding for info labels and scrollbars
-        window_width = min(img_width + 50, max_width)
-        window_height = min(img_height + 150, max_height)
-
-        # Minimum size
-        window_width = max(600, window_width)
-        window_height = max(600, window_height)
+        # Window size
+        window_width = display_size + 100
+        window_height = display_size + 200  # Extra space for labels
 
         self.resize(window_width, window_height)
 
         # Center on screen
+        from PyQt6.QtGui import QGuiApplication
+        screen = QGuiApplication.primaryScreen().geometry()
         self.move(
             screen.center().x() - window_width // 2,
             screen.center().y() - window_height // 2
