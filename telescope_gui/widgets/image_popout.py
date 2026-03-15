@@ -1,72 +1,96 @@
 """
-Pop-out window for simulated images at correct angular scale.
+Pop-out window for simulated images at full resolution.
 """
 
-from PyQt6.QtWidgets import QDialog, QVBoxLayout, QLabel
+from PyQt6.QtWidgets import QDialog, QVBoxLayout, QLabel, QScrollArea
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QPixmap
 import matplotlib.pyplot as plt
 import io
-from PIL import Image
 
 
 class ImagePopoutWindow(QDialog):
-    """Pop-out window showing image at correct angular scale."""
+    """Pop-out window showing image at full resolution."""
 
     def __init__(self, figure, title="Simulated View", angular_size_arcmin=None, parent=None):
         super().__init__(parent)
 
         self.setWindowTitle(title)
 
-        # Calculate window size
-        # Assume viewing distance of 50cm and convert angular size to linear size
-        # At 50cm, 1 degree = ~8.7mm, so 1 arcmin = ~0.145mm
-        # Screen pixels: assume ~100 DPI (typical), so 1mm = ~4 pixels
-        # Therefore: 1 arcmin ≈ 0.58 pixels... but we want it visible!
-
-        # Use a scale factor: 1 arcmin = 10 pixels (reasonable for viewing)
-        if angular_size_arcmin is not None:
-            pixels_per_arcmin = 10  # Tunable
-            window_size = int(angular_size_arcmin * pixels_per_arcmin)
-            window_size = max(400, min(window_size, 1200))  # Clamp to reasonable range
-        else:
-            window_size = 600  # Default
-
-        # Convert figure to pixmap
+        # Convert figure to pixmap at high DPI
         buf = io.BytesIO()
-        figure.savefig(buf, format='png', dpi=150, bbox_inches='tight')
+        # Use higher DPI for better quality
+        figure.savefig(buf, format='png', dpi=200, bbox_inches='tight')
         buf.seek(0)
 
-        # Layout
+        # Load as QPixmap
+        pixmap = QPixmap()
+        pixmap.loadFromData(buf.getvalue())
+        buf.close()
+
+        if pixmap.isNull():
+            print("Warning: Failed to load pixmap in pop-out window")
+            self.close()
+            return
+
+        # Get image dimensions
+        img_width = pixmap.width()
+        img_height = pixmap.height()
+
+        # Layout with scroll area for large images
         layout = QVBoxLayout()
+
+        # Info label at top
+        info_text = f"Full resolution view"
+        if angular_size_arcmin is not None:
+            info_text += f" | True FOV: {angular_size_arcmin:.2f} arcmin ({angular_size_arcmin/60:.3f}°)"
+        info_text += f"\nImage size: {img_width} × {img_height} pixels"
+
+        info_label = QLabel(info_text)
+        info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        info_label.setStyleSheet("padding: 10px; background-color: #f0f0f0;")
+        layout.addWidget(info_label)
+
+        # Scroll area for image (allows scrolling if image is larger than screen)
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(False)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
 
         # Image label
         image_label = QLabel()
-        pixmap = QPixmap()
-        pixmap.loadFromData(buf.getvalue())
-
-        if pixmap.isNull():
-            # Fallback if QPixmap loading fails
-            img = Image.open(buf)
-            img.save("temp_popout.png")
-            pixmap = QPixmap("temp_popout.png")
-
-        pixmap = pixmap.scaled(window_size, window_size,
-                              Qt.AspectRatioMode.KeepAspectRatio,
-                              Qt.TransformationMode.SmoothTransformation)
         image_label.setPixmap(pixmap)
-        layout.addWidget(image_label)
+        scroll_area.setWidget(image_label)
 
-        # Info label
-        if angular_size_arcmin is not None:
-            info = QLabel(f"Approximate angular size: {angular_size_arcmin:.1f} arcmin\n"
-                         f"(Scale: {pixels_per_arcmin} pixels/arcmin for visibility)")
-            info.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            layout.addWidget(info)
+        layout.addWidget(scroll_area)
+
+        # Instructions
+        instructions = QLabel("Scroll to view full image if it's larger than the window")
+        instructions.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        instructions.setStyleSheet("padding: 5px; font-size: 10pt; color: #666;")
+        layout.addWidget(instructions)
 
         self.setLayout(layout)
 
-        buf.close()
+        # Set window size - allow up to 90% of screen, minimum 600x600
+        # This shows the image at its actual rendered size (or scrollable if larger)
+        from PyQt6.QtGui import QGuiApplication
+        screen = QGuiApplication.primaryScreen().geometry()
+        max_width = int(screen.width() * 0.9)
+        max_height = int(screen.height() * 0.9)
 
-        # Set window size
-        self.resize(window_size + 50, window_size + 100)
+        # Add padding for info labels and scrollbars
+        window_width = min(img_width + 50, max_width)
+        window_height = min(img_height + 150, max_height)
+
+        # Minimum size
+        window_width = max(600, window_width)
+        window_height = max(600, window_height)
+
+        self.resize(window_width, window_height)
+
+        # Center on screen
+        self.move(
+            screen.center().x() - window_width // 2,
+            screen.center().y() - window_height // 2
+        )

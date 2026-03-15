@@ -312,7 +312,7 @@ class DesignTab(QWidget):
             self.eyepiece_label.setText("Direct focal plane view (no eyepiece)")
 
     def popout_image(self):
-        """Pop out the simulated image in a separate window at correct scale."""
+        """Pop out the simulated image in a separate window at full resolution."""
         if self.current_figure is None:
             return
 
@@ -320,32 +320,31 @@ class DesignTab(QWidget):
         eyepiece = self.get_eyepiece(telescope)
         source = self.build_source()
 
-        # Calculate angular size
+        # Calculate true field of view
         if eyepiece is not None:
-            # With eyepiece, calculate apparent angular size
+            # With eyepiece: True FOV = Apparent FOV / Magnification
             mag = telescope.focal_length / eyepiece.focal_length_mm
-            if source is not None:
-                # Get source angular diameter
-                if hasattr(source, 'angular_diameter_arcsec'):
-                    source_size_arcsec = source.angular_diameter_arcsec
-                elif hasattr(source, 'field_extent_arcsec'):
-                    source_size_arcsec = source.field_extent_arcsec
-                else:
-                    source_size_arcsec = 60.0  # Default 1 arcmin
-
-                # Apparent size = source size (remains constant, FOV changes)
-                # But what you see through eyepiece depends on magnification
-                angular_size_arcmin = true_fov_deg = eyepiece.apparent_fov_deg / mag
-                angular_size_arcmin *= 60  # degrees to arcmin
-            else:
-                angular_size_arcmin = 30.0  # Default
+            true_fov_deg = eyepiece.apparent_fov_deg / mag
+            angular_size_arcmin = true_fov_deg * 60  # degrees to arcmin
         else:
-            # No eyepiece - use field extent
-            angular_size_arcmin = 30.0  # Default
+            # No eyepiece - use source field extent
+            if source is not None:
+                if hasattr(source, 'field_extent_arcsec'):
+                    angular_size_arcmin = source.field_extent_arcsec / 60
+                elif hasattr(source, 'angular_diameter_arcsec'):
+                    angular_size_arcmin = source.angular_diameter_arcsec / 60
+                else:
+                    angular_size_arcmin = 30.0  # Default 0.5°
+            else:
+                angular_size_arcmin = None  # No source
 
+        # Build title
         title = f"{telescope.primary_diameter:.0f}mm f/{telescope.focal_ratio:.1f}"
         if eyepiece:
-            title += f" with {eyepiece.focal_length_mm:.0f}mm eyepiece ({mag:.0f}×)"
+            mag = telescope.focal_length / eyepiece.focal_length_mm
+            title += f" with {eyepiece.focal_length_mm:.0f}mm eyepiece ({mag:.0f}× magnification)"
+        else:
+            title += " — Direct Focal Plane"
 
         window = ImagePopoutWindow(
             self.current_figure,
