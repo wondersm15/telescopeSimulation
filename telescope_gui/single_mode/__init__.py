@@ -1,0 +1,1 @@
+"""Single telescope mode tabs."""

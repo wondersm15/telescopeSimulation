@@ -1071,3 +1071,108 @@ to better organize single telescope analysis vs comparison workflows.
   add comparison mode second)
 - All existing backend code reuse strategy unchanged
 - Timeline unchanged: 3-4 weeks for Phase 1 MVP
+
+
+---
+
+## Session 20 — 2026-03-14
+
+### What was done
+**GUI Phase 1 Implementation Started** — Created foundation for PyQt6-based
+GUI with mode toggle and initial Single Telescope Design tab.
+
+#### Components Implemented
+
+**1. Package Structure**
+- Created `telescope_gui/` package with subpackages:
+  - `single_mode/` - Design and Performance tabs
+  - `comparison_mode/` - Comparison tabs (placeholders)
+  - `widgets/` - Reusable components
+
+**2. Matplotlib Canvas Widget** (`telescope_gui/widgets/matplotlib_canvas.py`)
+- Embeds matplotlib figures in Qt widgets
+- Includes navigation toolbar (zoom, pan, save)
+- `set_figure()` method converts external figures to images for display
+- Simple, reliable approach using PIL/numpy
+
+**3. Design Tab** (`telescope_gui/single_mode/design_tab.py`)
+- Side-by-side layout: ray trace + simulated image
+- Controls panel with:
+  - Telescope type dropdown (Newtonian, Cassegrain, Refractor, Maksutov)
+  - Aperture spinbox (50-500mm)
+  - f-ratio spinbox (3.0-15.0)
+  - Primary type dropdown (Parabolic, Spherical)
+  - Source dropdown (Jupiter, Moon, None)
+  - Seeing dropdown (Excellent, Good, Average, Poor, None)
+  - Update View button
+- Integrates with existing backend:
+  - Calls `plot_ray_trace()` for ray diagram
+  - Calls `_render_source_through_telescope()` for images
+  - Reuses telescope and source classes
+
+**4. Performance Tab Placeholder** (`telescope_gui/single_mode/performance_tab.py`)
+- Simple placeholder for Phase 1 Week 2+
+
+**5. Main Window** (`telescope_gui/main_window.py`)
+- Mode toggle: Radio buttons for Single / Comparison modes
+- Dynamic tab switching - rebuilds tabs when mode changes
+- Single mode: Design + Performance tabs
+- Comparison mode: Placeholder tabs (Ray Traces, Images, Analytics)
+- Menu bar: File (New, Open, Save, Exit), Help (User Guide, Physics Ref, About)
+- Status bar showing current mode
+
+**6. GUI Entry Point** (`gui.py`)
+- Launch script: `python gui.py`
+- Initializes QApplication and MainWindow
+
+#### Technical Decisions
+
+- **Matplotlib integration**: Render figures to PNG, display as images
+  (simple, reliable, avoids complex artist copying)
+- **Mode switching**: Clear and rebuild tabs (clean, easy to maintain)
+- **Controls**: Bottom panel for single mode, dialogs planned for comparison
+- **Backend reuse**: Zero changes to telescope_sim package - GUI wraps existing functions
+
+#### Dependencies Added
+- PyQt6 6.10.2
+- PyQt6-Qt6 6.10.2
+- PyQt6-sip 13.11.1
+- Pillow (PIL) - for image handling in matplotlib canvas
+
+### Files Created
+- telescope_gui/__init__.py
+- telescope_gui/single_mode/__init__.py
+- telescope_gui/single_mode/design_tab.py
+- telescope_gui/single_mode/performance_tab.py
+- telescope_gui/comparison_mode/__init__.py
+- telescope_gui/widgets/__init__.py
+- telescope_gui/widgets/matplotlib_canvas.py
+- telescope_gui/main_window.py
+- gui.py
+
+### Files Modified
+- requirements.txt (added PyQt6 dependencies)
+
+### Testing
+Ready for initial testing:
+```bash
+python gui.py
+```
+
+Should show:
+- Main window with mode toggle (Single selected by default)
+- Design and Performance tabs
+- Design tab with controls and two plot areas
+- Clicking "Update View" renders 200mm f/5 Newtonian with Jupiter
+
+### Status
+- Phase 1, Week 1 foundation: COMPLETE
+- Design tab functional (basic version)
+- Performance tab: placeholder
+- Comparison mode: placeholders
+- Next: Week 2 - complete Design tab polish, implement Performance tab
+
+### Notes
+- All 215 tests still passing (no changes to telescope_sim)
+- GUI is fully independent - main.py CLI still works
+- Simple PIL-based figure rendering avoids matplotlib/Qt integration complexity
