@@ -14,6 +14,9 @@ from PyQt6.QtGui import QAction
 
 from telescope_gui.single_mode.design_tab import DesignTab
 from telescope_gui.single_mode.performance_tab import PerformanceTab
+from telescope_gui.comparison_mode.ray_traces_tab import RayTracesTab
+from telescope_gui.comparison_mode.images_tab import ImagesTab
+from telescope_gui.comparison_mode.analytics_tab import AnalyticsTab
 
 
 class MainWindow(QMainWindow):
@@ -134,23 +137,10 @@ class MainWindow(QMainWindow):
             # Comparison mode
             self.status_bar.showMessage("Comparison Mode")
 
-            # Placeholder tabs
-            placeholder1 = QWidget()
-            placeholder2 = QWidget()
-            placeholder3 = QWidget()
+            ray_traces_tab = RayTracesTab()
+            images_tab = ImagesTab()
+            analytics_tab = AnalyticsTab()
 
-            layout1 = QVBoxLayout()
-            layout1.addWidget(QLabel("Ray Traces Comparison - Coming Soon"))
-            placeholder1.setLayout(layout1)
-
-            layout2 = QVBoxLayout()
-            layout2.addWidget(QLabel("Simulated Images Comparison - Coming Soon"))
-            placeholder2.setLayout(layout2)
-
-            layout3 = QVBoxLayout()
-            layout3.addWidget(QLabel("Analytics Comparison - Coming Soon"))
-            placeholder3.setLayout(layout3)
-
-            self.tab_widget.addTab(placeholder1, "Ray Traces")
-            self.tab_widget.addTab(placeholder2, "Simulated Images")
-            self.tab_widget.addTab(placeholder3, "Analytics")
+            self.tab_widget.addTab(ray_traces_tab, "Ray Traces")
+            self.tab_widget.addTab(images_tab, "Simulated Images")
+            self.tab_widget.addTab(analytics_tab, "Analytics")
