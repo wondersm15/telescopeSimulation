@@ -15,6 +15,8 @@ import numpy as np
 from telescope_gui.widgets.matplotlib_canvas import MatplotlibCanvas
 from telescope_sim.geometry import NewtonianTelescope, CassegrainTelescope, RefractingTelescope, MaksutovCassegrainTelescope
 from telescope_sim.plotting import plot_psf_2d, plot_psf_profile, plot_spot_diagram
+from matplotlib.figure import Figure
+from scipy.signal import fftconvolve
 
 
 class PerformanceTab(QWidget):
@@ -118,6 +120,12 @@ class PerformanceTab(QWidget):
         psf_options_group.setLayout(psf_options_layout)
         main_layout.addWidget(psf_options_group)
 
+        # Connect PSF option changes to auto-update
+        self.psf_1d_radio.toggled.connect(self.on_psf_options_changed)
+        self.psf_2d_radio.toggled.connect(self.on_psf_options_changed)
+        self.psf_log_radio.toggled.connect(self.on_psf_options_changed)
+        self.psf_linear_radio.toggled.connect(self.on_psf_options_changed)
+
         # Bottom: Controls
         controls_group = QGroupBox("Controls")
         controls_layout = QGridLayout()
@@ -181,6 +189,12 @@ class PerformanceTab(QWidget):
             # Unlocking - clear stored limits
             self.locked_psf_xlim = None
             self.locked_psf_ylim = None
+
+    def on_psf_options_changed(self):
+        """Handle PSF display option changes - auto-update view."""
+        # Only update if we have a valid configuration
+        if hasattr(self, 'update_button'):
+            self.update_view()
 
     def build_telescope(self):
         """Build telescope object from current configuration."""
@@ -279,14 +293,51 @@ class PerformanceTab(QWidget):
             psf_scale = "log" if self.psf_log_radio.isChecked() else "linear"
 
             if psf_mode == "1d":
-                # 1D radial profile
+                # 1D radial profile - create custom single-scale plot
                 title = f"{telescope.primary_diameter:.0f}mm f/{telescope.focal_ratio:.1f} {telescope_type} — PSF Profile"
-                fig_psf = plot_psf_profile(
+
+                # Generate the full plot (has both linear and log)
+                fig_full = plot_psf_profile(
                     telescope,
                     title=title,
                     wavelength_nm=wavelength_nm,
-                    figsize=(6, 6)
+                    figsize=(14, 7)  # Original size with both plots
                 )
+
+                # Extract the subplot we want (0=linear, 1=log)
+                subplot_idx = 1 if psf_scale == "log" else 0
+                source_ax = fig_full.axes[subplot_idx]
+
+                # Create new figure with just this plot, expanded
+                fig_psf = Figure(figsize=(8, 6))
+                ax = fig_psf.add_subplot(111)
+
+                # Copy all lines from source to new axis
+                for line in source_ax.get_lines():
+                    ax.plot(line.get_xdata(), line.get_ydata(),
+                           color=line.get_color(),
+                           linestyle=line.get_linestyle(),
+                           linewidth=line.get_linewidth(),
+                           label=line.get_label())
+
+                # Copy axis properties
+                ax.set_xlabel(source_ax.get_xlabel())
+                ax.set_ylabel(source_ax.get_ylabel())
+                ax.set_title(f"{title} ({'Logarithmic' if psf_scale == 'log' else 'Linear'} scale)")
+
+                # Set scale
+                if psf_scale == "log":
+                    ax.set_yscale('log')
+                    ax.set_ylim(source_ax.get_ylim())
+                else:
+                    ax.set_ylim(source_ax.get_ylim())
+
+                ax.set_xlim(source_ax.get_xlim())
+                ax.legend(fontsize=9)
+                ax.grid(True, alpha=0.3)
+
+                fig_psf.tight_layout()
+                plt.close(fig_full)  # Close the temporary full figure
             else:
                 # 2D image (plot_psf_2d uses log scale internally)
                 fig_psf = plot_psf_2d(
