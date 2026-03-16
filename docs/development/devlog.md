@@ -1386,3 +1386,122 @@ python gui.py
 - main.py CLI still fully functional alongside GUI
 - Design philosophy: reuse proven CLI code (e.g., true angular size calculation)
   rather than reimplementing in GUI layer
+
+
+---
+
+## Session 23 — 2026-03-15
+
+### What was done
+**APO Refractor Implementation** — Added apochromatic doublet and triplet
+objective lens designs for high-end refracting telescopes, with full
+multi-element visualization in ray tracing.
+
+#### Backend Implementation
+
+**1. ED Glass Types** (`telescope_sim/physics/refraction.py`)
+- Added FPL51, FPL53, S-FPL51 to GLASS_CATALOG
+- Extra-low dispersion (ED) fluorite-like glass for superior chromatic correction
+- Cauchy coefficients for accurate wavelength-dependent refractive index
+
+**2. APO Lens Classes** (`telescope_sim/geometry/apo_lenses.py` - NEW FILE)
+
+**ApochromaticDoublet**:
+- Two-element ED + crown design (default: FPL51 + BK7)
+- Brings three wavelengths to nearly the same focus
+- Cemented doublet with interface surface
+- Auto-computes radii from focal length and glass dispersion
+- Methods: refract_ray, get_front/back/interface_surface_points
+
+**ApochromaticTriplet**:
+- Three-element design: ED + flint + ED (default: FPL51 + F2 + FPL51)
+- Excellent chromatic correction across visible spectrum
+- Positive-negative-positive power distribution
+- Two cemented interfaces
+- Methods: refract_ray, get_front/back/interface1/interface2_surface_points
+
+**3. RefractingTelescope Updates** (`telescope_sim/geometry/telescope.py`)
+- Extended `objective_type` parameter to support four types:
+  - "singlet" - Single lens element
+  - "achromat" - Achromatic doublet (BK7 + F2)
+  - "apo-doublet" - Apochromatic doublet (FPL51 + BK7)
+  - "apo-triplet" - Apochromatic triplet (FPL51 + F2 + FPL51)
+- Updated get_components_for_plotting() to include interface surfaces
+
+**4. Ray Trace Visualization** (`telescope_sim/plotting/ray_trace_plot.py`)
+- Singlet: Single filled light blue lens shape
+- Achromat: Light blue crown + light orange flint with dashed interface
+- APO Doublet: Light cyan ED element + light blue crown with dashed interface
+- APO Triplet: Light cyan + navajowhite + light cyan with two interfaces
+- Correctly shows 1/2/3 element structure matching optical design
+
+#### GUI Integration
+
+**Updated all 5 GUI tabs** to support objective type selection:
+
+**Single Mode**:
+- `design_tab.py`: Added objective type dropdown (Singlet/Achromat/APO Doublet/APO Triplet)
+- `performance_tab.py`: Same controls for independent PSF analysis
+- Show/hide logic: "Objective Type" appears only when Refractor selected
+  (replaces "Primary Type" which is for reflectors)
+
+**Comparison Mode**:
+- `ray_traces_tab.py`: Objective type combos for both telescopes
+- `images_tab.py`: Objective type combos for fair visual comparison
+- `analytics_tab.py`: Objective type controls passed to build_telescope()
+
+**Implementation Pattern**:
+- GUI labels: "Singlet", "Achromat", "APO Doublet", "APO Triplet"
+- Mapped to backend values: "singlet", "achromat", "apo-doublet", "apo-triplet"
+- Dynamic show/hide prevents UI clutter when not applicable
+
+#### Bug Fix
+
+**Critical refract_ray() bug** discovered during GUI testing:
+- **Problem**: SphericalLens.refract_ray() returns bool (success/failure) and
+  modifies ray in-place, but APO lens classes incorrectly assigned return
+  value to ray variable: `ray = self.ed_element.refract_ray(ray, wavelength_nm)`
+  resulted in ray becoming `True` or `False`
+- **Error**: AttributeError: 'bool' object has no attribute 'origin'
+- **Fix**: Changed to proper pattern checking success and returning bool:
+  ```python
+  success = self.ed_element.refract_ray(ray, wavelength_nm)
+  if not success:
+      return False
+  success = self.crown_element.refract_ray(ray, wavelength_nm)
+  return success
+  ```
+- Fixed in both ApochromaticDoublet and ApochromaticTriplet classes
+
+### Files Created
+- telescope_sim/geometry/apo_lenses.py (270 lines)
+
+### Files Modified
+- telescope_sim/physics/refraction.py (added ED glass catalog entries)
+- telescope_sim/geometry/telescope.py (apo-doublet and apo-triplet support)
+- telescope_sim/geometry/__init__.py (exports)
+- telescope_sim/plotting/ray_trace_plot.py (multi-element visualization)
+- telescope_gui/single_mode/design_tab.py (objective type selector)
+- telescope_gui/single_mode/performance_tab.py (objective type selector)
+- telescope_gui/comparison_mode/ray_traces_tab.py (objective type combos)
+- telescope_gui/comparison_mode/images_tab.py (objective type combos)
+- telescope_gui/comparison_mode/analytics_tab.py (objective type support)
+
+### Testing
+- GUI tested successfully with all objective types
+- Ray tracing correctly shows 1/2/3 element structures
+- No errors when switching between objective types
+- Chromatic aberration effects visible in polychromatic mode
+
+### Commits
+- c9b8c18: Backend implementation (APO classes, ED glass, refractor support)
+- 13aab97: GUI integration (all 5 tabs updated with objective selector)
+- 1cd68c0: Bug fix (refract_ray boolean return handling)
+
+### Notes
+- APO refractors complete the refractor family: singlet → achromat → APO doublet → APO triplet
+- ED glass provides ~2× better chromatic correction than standard achromat
+- Triplet provides excellent correction across full visible spectrum
+- Ray trace visualization now accurately represents actual optical design
+- All 215 tests still passing (no breaking changes to existing code)
+- User can now compare chromatic aberration: singlet vs achromat vs APO in GUI

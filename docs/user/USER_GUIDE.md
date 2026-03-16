@@ -366,12 +366,22 @@ imaging for refractors.  Each RGB channel is convolved with a PSF at
 its own wavelength (R=656nm, G=550nm, B=486nm), including
 wavelength-dependent defocus.
 
-**Singlet refractor** — large chromatic defocus produces visible
+**Singlet refractor** (`objective_type = "singlet"`, default) — large chromatic defocus produces visible
 purple/green fringing on high-contrast edges (e.g., Jupiter's limb).
 
 **Achromatic doublet** (`objective_type = "achromat"`) — BK7 crown +
 F2 flint cemented doublet cancels primary chromatic aberration.
-Residual secondary spectrum is ~f/2500.
+Residual secondary spectrum is ~f/2500. ~10× better than singlet.
+
+**APO doublet** (`objective_type = "apo-doublet"`) — FPL51 ED glass +
+BK7 crown cemented doublet. Extra-low dispersion glass provides superior
+chromatic correction. ~2× better than standard achromat, brings three
+wavelengths to nearly the same focus.
+
+**APO triplet** (`objective_type = "apo-triplet"`) — FPL51 + F2 + FPL51
+three-element design. Excellent chromatic correction across full visible
+spectrum. ~5× better than achromat. Used in high-end astrophotography
+refractors.
 
 **Reflectors** — zero chromatic aberration (mirrors are achromatic).
 The `polychromatic` flag has no effect on reflectors.
@@ -654,6 +664,7 @@ when an eyepiece is configured.
 |---------|--------|--------|
 | Chromatic aberration (refractors) | **Implemented** | Enable `polychromatic = True` to see color fringing |
 | Achromatic doublet | **Implemented** | Set `objective_type = "achromat"` for crown+flint doublet |
+| APO doublet/triplet | **Implemented** | Set `objective_type = "apo-doublet"` or `"apo-triplet"` for ED glass designs |
 | Coma for corrected systems (Cassegrain, Mak) | **Overestimated** | Uses Newtonian formula; these designs have less coma |
 | Field curvature, astigmatism | Not implemented | Only coma among off-axis aberrations |
 | Surface errors (manufacturing) | Not implemented | Assumes perfect optics |
@@ -669,8 +680,10 @@ When comparing **across** design types (Newtonian vs Refractor vs
 Mak-Cass), be aware:
 - For **refractors**, enable `polychromatic = True` to see realistic
   chromatic aberration.  Without it, singlet refractors appear
-  unrealistically sharp.  Use `objective_type = "achromat"` to see
-  how a doublet corrects this.
+  unrealistically sharp.  Use `objective_type = "achromat"` for standard
+  crown+flint doublet, `"apo-doublet"` for ED glass doublet, or
+  `"apo-triplet"` for three-element ED design to see how these
+  progressively correct chromatic aberration.
 - **Coma comparisons** between Newtonian and Mak-Cass/Cassegrain
   are not yet meaningful — the coma model doesn't account for the
   secondary's coma correction
