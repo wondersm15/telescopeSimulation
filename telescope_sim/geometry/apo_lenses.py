@@ -112,11 +112,13 @@ class ApochromaticDoublet:
             glass=crown_glass
         )
 
-    def refract_ray(self, ray: Ray, wavelength_nm: float | None = None) -> Ray:
-        """Refract ray through both elements."""
-        ray = self.ed_element.refract_ray(ray, wavelength_nm)
-        ray = self.crown_element.refract_ray(ray, wavelength_nm)
-        return ray
+    def refract_ray(self, ray: Ray, wavelength_nm: float | None = None) -> bool:
+        """Refract ray through both elements. Returns success status."""
+        success = self.ed_element.refract_ray(ray, wavelength_nm)
+        if not success:
+            return False
+        success = self.crown_element.refract_ray(ray, wavelength_nm)
+        return success
 
     def get_front_surface_points(self, num_points: int = 100) -> np.ndarray:
         """Front surface of the ED element."""
@@ -240,12 +242,16 @@ class ApochromaticTriplet:
             glass=outer_glass
         )
 
-    def refract_ray(self, ray: Ray, wavelength_nm: float | None = None) -> Ray:
-        """Refract ray through all three elements."""
-        ray = self.element1.refract_ray(ray, wavelength_nm)
-        ray = self.element2.refract_ray(ray, wavelength_nm)
-        ray = self.element3.refract_ray(ray, wavelength_nm)
-        return ray
+    def refract_ray(self, ray: Ray, wavelength_nm: float | None = None) -> bool:
+        """Refract ray through all three elements. Returns success status."""
+        success = self.element1.refract_ray(ray, wavelength_nm)
+        if not success:
+            return False
+        success = self.element2.refract_ray(ray, wavelength_nm)
+        if not success:
+            return False
+        success = self.element3.refract_ray(ray, wavelength_nm)
+        return success
 
     def get_front_surface_points(self, num_points: int = 100) -> np.ndarray:
         """Front surface of element 1."""
