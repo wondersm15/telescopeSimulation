@@ -75,6 +75,12 @@ class RayTracesTab(QWidget):
         self.fratio1_spin.setValue(5.0)
         config1_layout.addWidget(self.fratio1_spin, 0, 5)
 
+        # Objective type for telescope 1 (row 1, only shown for refractors)
+        config1_layout.addWidget(QLabel("Objective:"), 1, 0)
+        self.obj1_combo = QComboBox()
+        self.obj1_combo.addItems(["Singlet", "Achromat", "APO Doublet", "APO Triplet"])
+        config1_layout.addWidget(self.obj1_combo, 1, 1)
+
         controls_layout.addLayout(config1_layout)
 
         # Configuration 2
@@ -98,6 +104,12 @@ class RayTracesTab(QWidget):
         self.fratio2_spin.setValue(10.0)
         config2_layout.addWidget(self.fratio2_spin, 0, 5)
 
+        # Objective type for telescope 2 (row 1, only shown for refractors)
+        config2_layout.addWidget(QLabel("Objective:"), 1, 0)
+        self.obj2_combo = QComboBox()
+        self.obj2_combo.addItems(["Singlet", "Achromat", "APO Doublet", "APO Triplet"])
+        config2_layout.addWidget(self.obj2_combo, 1, 1)
+
         controls_layout.addLayout(config2_layout)
 
         # Update button
@@ -113,7 +125,7 @@ class RayTracesTab(QWidget):
         # Initial render
         self.update_view()
 
-    def build_telescope(self, telescope_type, diameter, fratio):
+    def build_telescope(self, telescope_type, diameter, fratio, objective_type="singlet"):
         """Build telescope object from configuration."""
         telescope_type = telescope_type.lower().replace("-", "")
         focal_length = diameter * fratio
@@ -130,9 +142,18 @@ class RayTracesTab(QWidget):
                 secondary_magnification=3.0
             )
         elif telescope_type == "refractor":
+            # Map GUI labels to objective_type values
+            objective_map = {
+                "singlet": "singlet",
+                "achromat": "achromat",
+                "apo doublet": "apo-doublet",
+                "apo triplet": "apo-triplet"
+            }
+            obj_type = objective_map.get(objective_type.lower(), "singlet")
             return RefractingTelescope(
                 primary_diameter=diameter,
-                focal_length=focal_length
+                focal_length=focal_length,
+                objective_type=obj_type
             )
         elif telescope_type == "maksutovcassegrain":
             return MaksutovCassegrainTelescope(
@@ -161,11 +182,13 @@ class RayTracesTab(QWidget):
                     "type": self.type1_combo.currentText(),
                     "diameter": self.diameter1_spin.value(),
                     "fratio": self.fratio1_spin.value(),
+                    "objective": self.obj1_combo.currentText(),
                 },
                 {
                     "type": self.type2_combo.currentText(),
                     "diameter": self.diameter2_spin.value(),
                     "fratio": self.fratio2_spin.value(),
+                    "objective": self.obj2_combo.currentText(),
                 },
             ]
 
@@ -174,7 +197,8 @@ class RayTracesTab(QWidget):
                 telescope = self.build_telescope(
                     config["type"],
                     config["diameter"],
-                    config["fratio"]
+                    config["fratio"],
+                    config["objective"]
                 )
 
                 # Create rays

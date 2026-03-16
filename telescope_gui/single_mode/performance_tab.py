@@ -137,7 +137,20 @@ class PerformanceTab(QWidget):
         self.telescope_combo = QComboBox()
         self.telescope_combo.addItems(["Newtonian", "Cassegrain", "Refractor", "Maksutov-Cassegrain"])
         self.telescope_combo.setCurrentText("Newtonian")
+        self.telescope_combo.currentTextChanged.connect(self.on_telescope_type_changed)
         controls_layout.addWidget(self.telescope_combo, row, 1)
+
+        # Objective type (for refractors) - same position as telescope type in next column
+        self.objective_label = QLabel("Objective Type:")
+        controls_layout.addWidget(self.objective_label, row, 0)
+        self.objective_combo = QComboBox()
+        self.objective_combo.addItems(["Singlet", "Achromat", "APO Doublet", "APO Triplet"])
+        self.objective_combo.setCurrentText("Singlet")
+        controls_layout.addWidget(self.objective_combo, row, 1)
+
+        # Hide objective controls initially
+        self.objective_label.hide()
+        self.objective_combo.hide()
 
         # Aperture
         controls_layout.addWidget(QLabel("Aperture (mm):"), row, 2)
@@ -196,6 +209,14 @@ class PerformanceTab(QWidget):
         if hasattr(self, 'update_button'):
             self.update_view()
 
+    def on_telescope_type_changed(self, telescope_type):
+        """Show/hide appropriate controls based on telescope type."""
+        is_refractor = telescope_type == "Refractor"
+
+        # Show objective type for refractors, hide for reflectors
+        self.objective_label.setVisible(is_refractor)
+        self.objective_combo.setVisible(is_refractor)
+
     def build_telescope(self):
         """Build telescope object from current configuration."""
         telescope_type = self.telescope_combo.currentText().lower().replace("-", "")
@@ -215,9 +236,21 @@ class PerformanceTab(QWidget):
                 secondary_magnification=3.0
             )
         elif telescope_type == "refractor":
+            # Map GUI labels to objective_type values
+            objective_map = {
+                "singlet": "singlet",
+                "achromat": "achromat",
+                "apo doublet": "apo-doublet",
+                "apo triplet": "apo-triplet"
+            }
+            objective_type = objective_map.get(
+                self.objective_combo.currentText().lower(),
+                "singlet"
+            )
             telescope = RefractingTelescope(
                 primary_diameter=primary_diameter,
-                focal_length=focal_length
+                focal_length=focal_length,
+                objective_type=objective_type
             )
         elif telescope_type == "maksutovcassegrain":
             telescope = MaksutovCassegrainTelescope(

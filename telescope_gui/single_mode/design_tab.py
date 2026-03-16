@@ -109,6 +109,7 @@ class DesignTab(QWidget):
         self.telescope_combo = QComboBox()
         self.telescope_combo.addItems(["Newtonian", "Cassegrain", "Refractor", "Maksutov-Cassegrain"])
         self.telescope_combo.setCurrentText("Newtonian")
+        self.telescope_combo.currentTextChanged.connect(self.on_telescope_type_changed)
         controls_layout.addWidget(self.telescope_combo, row, 1)
 
         # Aperture
@@ -121,12 +122,25 @@ class DesignTab(QWidget):
 
         row += 1
 
-        # Primary type
-        controls_layout.addWidget(QLabel("Primary Type:"), row, 0)
+        # Primary type (for reflectors)
+        self.primary_label = QLabel("Primary Type:")
+        controls_layout.addWidget(self.primary_label, row, 0)
         self.primary_combo = QComboBox()
         self.primary_combo.addItems(["Parabolic", "Spherical"])
         self.primary_combo.setCurrentText("Parabolic")
         controls_layout.addWidget(self.primary_combo, row, 1)
+
+        # Objective type (for refractors)
+        self.objective_label = QLabel("Objective Type:")
+        controls_layout.addWidget(self.objective_label, row, 0)
+        self.objective_combo = QComboBox()
+        self.objective_combo.addItems(["Singlet", "Achromat", "APO Doublet", "APO Triplet"])
+        self.objective_combo.setCurrentText("Singlet")
+        controls_layout.addWidget(self.objective_combo, row, 1)
+
+        # Hide objective controls initially (shown when refractor selected)
+        self.objective_label.hide()
+        self.objective_combo.hide()
 
         # f-ratio
         controls_layout.addWidget(QLabel("f-ratio:"), row, 2)
@@ -201,6 +215,16 @@ class DesignTab(QWidget):
         self.eyepiece_spin.setEnabled(checked)
         self.afov_spin.setEnabled(checked)
 
+    def on_telescope_type_changed(self, telescope_type):
+        """Show/hide appropriate controls based on telescope type."""
+        is_refractor = telescope_type == "Refractor"
+
+        # Show primary type for reflectors, objective type for refractors
+        self.primary_label.setVisible(not is_refractor)
+        self.primary_combo.setVisible(not is_refractor)
+        self.objective_label.setVisible(is_refractor)
+        self.objective_combo.setVisible(is_refractor)
+
     def show_true_size(self):
         """Switch to true angular size display mode."""
         self.display_mode = "true_size"
@@ -249,9 +273,21 @@ class DesignTab(QWidget):
                 secondary_magnification=3.0
             )
         elif telescope_type == "refractor":
+            # Map GUI labels to objective_type values
+            objective_map = {
+                "singlet": "singlet",
+                "achromat": "achromat",
+                "apo doublet": "apo-doublet",
+                "apo triplet": "apo-triplet"
+            }
+            objective_type = objective_map.get(
+                self.objective_combo.currentText().lower(),
+                "singlet"
+            )
             telescope = RefractingTelescope(
                 primary_diameter=primary_diameter,
-                focal_length=focal_length
+                focal_length=focal_length,
+                objective_type=objective_type
             )
         elif telescope_type == "maksutovcassegrain":
             telescope = MaksutovCassegrainTelescope(
