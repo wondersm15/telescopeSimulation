@@ -144,7 +144,7 @@ class PerformanceTab(QWidget):
         self.objective_label = QLabel("Objective Type:")
         controls_layout.addWidget(self.objective_label, row, 0)
         self.objective_combo = QComboBox()
-        self.objective_combo.addItems(["Singlet", "Achromat", "APO Doublet", "APO Triplet"])
+        self.objective_combo.addItems(["Singlet", "Achromat", "APO Doublet", "APO Triplet (air-spaced)"])
         self.objective_combo.setCurrentText("Singlet")
         controls_layout.addWidget(self.objective_combo, row, 1)
 
@@ -241,7 +241,7 @@ class PerformanceTab(QWidget):
                 "singlet": "singlet",
                 "achromat": "achromat",
                 "apo doublet": "apo-doublet",
-                "apo triplet": "apo-triplet"
+                "apo triplet (air-spaced)": "apo-triplet"
             }
             objective_type = objective_map.get(
                 self.objective_combo.currentText().lower(),

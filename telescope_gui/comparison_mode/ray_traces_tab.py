@@ -78,7 +78,7 @@ class RayTracesTab(QWidget):
         # Objective type for telescope 1 (row 1, only shown for refractors)
         config1_layout.addWidget(QLabel("Objective:"), 1, 0)
         self.obj1_combo = QComboBox()
-        self.obj1_combo.addItems(["Singlet", "Achromat", "APO Doublet", "APO Triplet"])
+        self.obj1_combo.addItems(["Singlet", "Achromat", "APO Doublet", "APO Triplet (air-spaced)"])
         config1_layout.addWidget(self.obj1_combo, 1, 1)
 
         controls_layout.addLayout(config1_layout)
@@ -107,7 +107,7 @@ class RayTracesTab(QWidget):
         # Objective type for telescope 2 (row 1, only shown for refractors)
         config2_layout.addWidget(QLabel("Objective:"), 1, 0)
         self.obj2_combo = QComboBox()
-        self.obj2_combo.addItems(["Singlet", "Achromat", "APO Doublet", "APO Triplet"])
+        self.obj2_combo.addItems(["Singlet", "Achromat", "APO Doublet", "APO Triplet (air-spaced)"])
         config2_layout.addWidget(self.obj2_combo, 1, 1)
 
         controls_layout.addLayout(config2_layout)
@@ -147,7 +147,7 @@ class RayTracesTab(QWidget):
                 "singlet": "singlet",
                 "achromat": "achromat",
                 "apo doublet": "apo-doublet",
-                "apo triplet": "apo-triplet"
+                "apo triplet (air-spaced)": "apo-triplet"
             }
             obj_type = objective_map.get(objective_type.lower(), "singlet")
             return RefractingTelescope(

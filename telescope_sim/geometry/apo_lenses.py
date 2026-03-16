@@ -134,10 +134,15 @@ class ApochromaticDoublet:
 
 
 class ApochromaticTriplet:
-    """Three-element apochromatic triplet.
+    """Three-element apochromatic triplet with air-spaced design.
 
     Classic triplet design: crown + flint + crown (or ED + crown + ED variants).
     Provides excellent chromatic correction across the visible spectrum.
+
+    Air-spaced design (small gaps between elements) is typical for high-end
+    APO refractors from manufacturers like TEC, Astro-Physics, and Takahashi.
+    Air gaps provide more design freedom and superior chromatic correction
+    compared to cemented triplets.
 
     Common design: two outer crown/ED elements (positive power) with a
     central flint element (negative power) to correct chromatic aberration.
@@ -148,17 +153,20 @@ class ApochromaticTriplet:
         center: (x, y) of the front vertex.
         outer_glass: Glass for outer elements (crown or ED).
         middle_glass: Glass for middle element (flint).
+        air_gap: Spacing between elements (mm). Default 2.5mm is typical.
         objective_type: Always "apo-triplet".
     """
 
     def __init__(self, focal_length: float, diameter: float,
                  center: tuple[float, float] = (0.0, 0.0),
-                 outer_glass: str = "FPL51", middle_glass: str = "F2"):
+                 outer_glass: str = "FPL51", middle_glass: str = "F2",
+                 air_gap: float = 2.5):
         self.focal_length = focal_length
         self.diameter = diameter
         self.center = np.asarray(center, dtype=float)
         self.outer_glass = outer_glass
         self.middle_glass = middle_glass
+        self.air_gap = air_gap
         self.objective_type = "apo-triplet"
         self.glass = f"{outer_glass}+{middle_glass}+{outer_glass}"
 
@@ -191,7 +199,8 @@ class ApochromaticTriplet:
         # Lens thicknesses
         thickness_outer = max(diameter / 15.0, 3.0)
         thickness_middle = max(diameter / 30.0, 1.5)
-        self.thickness = 2 * thickness_outer + thickness_middle
+        # Total thickness includes air gaps between elements
+        self.thickness = 2 * thickness_outer + thickness_middle + 2 * air_gap
         self.radius = diameter / 2.0
 
         # Compute radii
@@ -210,10 +219,11 @@ class ApochromaticTriplet:
         r1_elem3 = 2.0 * f_outer * (n_outer - 1.0)
         r2_elem3 = -r1_elem3
 
-        # Build elements
+        # Build elements with air gaps
+        # Air-spaced triplet: element1 -> air gap -> element2 -> air gap -> element3
         elem1_y = self.center[1]
-        elem2_y = elem1_y - thickness_outer
-        elem3_y = elem2_y - thickness_middle
+        elem2_y = elem1_y - thickness_outer - air_gap
+        elem3_y = elem2_y - thickness_middle - air_gap
 
         self.element1 = SphericalLens(
             R_front=r1_elem1,
