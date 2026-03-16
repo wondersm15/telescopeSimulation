@@ -8,6 +8,10 @@ import numpy as np
 GLASS_CATALOG = {
     "BK7": {"B": 1.5046, "C": 4200.0},   # borosilicate crown glass
     "F2":  {"B": 1.6032, "C": 9500.0},    # dense flint glass
+    # ED (Extra-low Dispersion) glasses for APO refractors
+    "FPL51": {"B": 1.4969, "C": 2800.0},  # fluorite phosphate crown (low dispersion)
+    "FPL53": {"B": 1.4387, "C": 2100.0},  # special fluorite phosphate (ultra-low dispersion)
+    "S-FPL51": {"B": 1.4964, "C": 2750.0},  # Ohara equivalent to FPL51
 }
 
 

@@ -135,6 +135,70 @@ def _draw_ray_trace(ax: plt.Axes, rays: list[Ray], components: dict,
             ax.plot(secondary_pts[:, 0], secondary_pts[:, 1],
                     color="darkorange", linewidth=mirror_linewidth,
                     solid_capstyle="round")
+        elif obj_type == "apo-doublet" and "interface_surface" in components:
+            # Draw APO doublet: ED (light cyan) + crown (light blue)
+            interface_pts = components["interface_surface"]
+            # ED element: front surface to interface
+            ed_x = np.concatenate([primary_pts[:, 0],
+                                   interface_pts[::-1, 0]])
+            ed_y = np.concatenate([primary_pts[:, 1],
+                                   interface_pts[::-1, 1]])
+            ax.fill(ed_x, ed_y, color="lightcyan", alpha=0.5,
+                    label="ED (FPL51)")
+            # Crown element: interface to back surface
+            crown_x = np.concatenate([interface_pts[:, 0],
+                                      secondary_pts[::-1, 0]])
+            crown_y = np.concatenate([interface_pts[:, 1],
+                                      secondary_pts[::-1, 1]])
+            ax.fill(crown_x, crown_y, color="lightblue", alpha=0.5,
+                    label="Crown (BK7)")
+            # Outlines
+            ax.plot(primary_pts[:, 0], primary_pts[:, 1],
+                    color="cyan", linewidth=mirror_linewidth,
+                    solid_capstyle="round")
+            ax.plot(interface_pts[:, 0], interface_pts[:, 1],
+                    color="gray", linewidth=mirror_linewidth * 0.7,
+                    solid_capstyle="round", linestyle="--", alpha=0.7)
+            ax.plot(secondary_pts[:, 0], secondary_pts[:, 1],
+                    color="steelblue", linewidth=mirror_linewidth,
+                    solid_capstyle="round")
+        elif obj_type == "apo-triplet" and "interface1_surface" in components and "interface2_surface" in components:
+            # Draw APO triplet: outer (ED) + middle (flint) + outer (ED)
+            interface1_pts = components["interface1_surface"]
+            interface2_pts = components["interface2_surface"]
+            # Element 1 (front): front surface to interface1
+            elem1_x = np.concatenate([primary_pts[:, 0],
+                                      interface1_pts[::-1, 0]])
+            elem1_y = np.concatenate([primary_pts[:, 1],
+                                      interface1_pts[::-1, 1]])
+            ax.fill(elem1_x, elem1_y, color="lightcyan", alpha=0.5,
+                    label="ED outer (FPL51)")
+            # Element 2 (middle): interface1 to interface2
+            elem2_x = np.concatenate([interface1_pts[:, 0],
+                                      interface2_pts[::-1, 0]])
+            elem2_y = np.concatenate([interface1_pts[:, 1],
+                                      interface2_pts[::-1, 1]])
+            ax.fill(elem2_x, elem2_y, color="navajowhite", alpha=0.5,
+                    label="Flint (F2)")
+            # Element 3 (back): interface2 to back surface
+            elem3_x = np.concatenate([interface2_pts[:, 0],
+                                      secondary_pts[::-1, 0]])
+            elem3_y = np.concatenate([interface2_pts[:, 1],
+                                      secondary_pts[::-1, 1]])
+            ax.fill(elem3_x, elem3_y, color="lightcyan", alpha=0.5)
+            # Outlines
+            ax.plot(primary_pts[:, 0], primary_pts[:, 1],
+                    color="cyan", linewidth=mirror_linewidth,
+                    solid_capstyle="round")
+            ax.plot(interface1_pts[:, 0], interface1_pts[:, 1],
+                    color="gray", linewidth=mirror_linewidth * 0.7,
+                    solid_capstyle="round", linestyle="--", alpha=0.7)
+            ax.plot(interface2_pts[:, 0], interface2_pts[:, 1],
+                    color="gray", linewidth=mirror_linewidth * 0.7,
+                    solid_capstyle="round", linestyle="--", alpha=0.7)
+            ax.plot(secondary_pts[:, 0], secondary_pts[:, 1],
+                    color="cyan", linewidth=mirror_linewidth,
+                    solid_capstyle="round")
         else:
             # Singlet: single filled shape
             obj_label = (f"Objective lens ({glass_label})"

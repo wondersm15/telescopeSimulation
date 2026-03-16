@@ -482,6 +482,26 @@ class RefractingTelescope:
                 center=(0.0, lens_y),
             )
             self.corrected_optics = True
+        elif objective_type == "apo-doublet":
+            from telescope_sim.geometry.apo_lenses import ApochromaticDoublet
+            self.objective = ApochromaticDoublet(
+                focal_length=focal_length,
+                diameter=primary_diameter,
+                center=(0.0, lens_y),
+                ed_glass="FPL51",
+                crown_glass="BK7",
+            )
+            self.corrected_optics = True
+        elif objective_type == "apo-triplet":
+            from telescope_sim.geometry.apo_lenses import ApochromaticTriplet
+            self.objective = ApochromaticTriplet(
+                focal_length=focal_length,
+                diameter=primary_diameter,
+                center=(0.0, lens_y),
+                outer_glass="FPL51",
+                middle_glass="F2",
+            )
+            self.corrected_optics = True
         else:
             # Singlet: symmetric biconvex BK7 lens
             # 1/f = (n-1) * 2/R  =>  R = 2*f*(n-1)
@@ -606,6 +626,17 @@ class RefractingTelescope:
         if self.objective_type == "achromat":
             components["interface_surface"] = (
                 self.objective.get_interface_surface_points()
+            )
+        elif self.objective_type == "apo-doublet":
+            components["interface_surface"] = (
+                self.objective.get_interface_surface_points()
+            )
+        elif self.objective_type == "apo-triplet":
+            components["interface1_surface"] = (
+                self.objective.get_interface1_surface_points()
+            )
+            components["interface2_surface"] = (
+                self.objective.get_interface2_surface_points()
             )
         return components
 
