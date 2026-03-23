@@ -140,7 +140,15 @@ class PerformanceTab(QWidget):
         self.telescope_combo.currentTextChanged.connect(self.on_telescope_type_changed)
         controls_layout.addWidget(self.telescope_combo, row, 1)
 
-        # Objective type (for refractors) - same position as telescope type in next column
+        # Primary type (for reflectors) - same position as telescope type
+        self.primary_label = QLabel("Primary Type:")
+        controls_layout.addWidget(self.primary_label, row, 0)
+        self.primary_combo = QComboBox()
+        self.primary_combo.addItems(["Parabolic", "Spherical"])
+        self.primary_combo.setCurrentText("Parabolic")
+        controls_layout.addWidget(self.primary_combo, row, 1)
+
+        # Objective type (for refractors) - same position as telescope type
         self.objective_label = QLabel("Objective Type:")
         controls_layout.addWidget(self.objective_label, row, 0)
         self.objective_combo = QComboBox()
@@ -148,7 +156,7 @@ class PerformanceTab(QWidget):
         self.objective_combo.setCurrentText("Singlet")
         controls_layout.addWidget(self.objective_combo, row, 1)
 
-        # Hide objective controls initially
+        # Hide objective controls initially (show primary instead)
         self.objective_label.hide()
         self.objective_combo.hide()
 
@@ -213,7 +221,9 @@ class PerformanceTab(QWidget):
         """Show/hide appropriate controls based on telescope type."""
         is_refractor = telescope_type == "Refractor"
 
-        # Show objective type for refractors, hide for reflectors
+        # Show objective type for refractors, primary type for reflectors
+        self.primary_label.setVisible(not is_refractor)
+        self.primary_combo.setVisible(not is_refractor)
         self.objective_label.setVisible(is_refractor)
         self.objective_combo.setVisible(is_refractor)
 
@@ -224,16 +234,23 @@ class PerformanceTab(QWidget):
         f_ratio = self.fratio_spin.value()
         focal_length = primary_diameter * f_ratio
 
+        # Determine mirror type for reflectors
+        from telescope_sim.geometry.mirrors import ParabolicMirror, SphericalMirror
+        primary_type = self.primary_combo.currentText().lower()
+        mirror_type = ParabolicMirror if primary_type == "parabolic" else SphericalMirror
+
         if telescope_type == "newtonian":
             telescope = NewtonianTelescope(
                 primary_diameter=primary_diameter,
-                focal_length=focal_length
+                focal_length=focal_length,
+                mirror_type=mirror_type
             )
         elif telescope_type == "cassegrain":
             telescope = CassegrainTelescope(
                 primary_diameter=primary_diameter,
                 primary_focal_length=focal_length,
-                secondary_magnification=3.0
+                secondary_magnification=3.0,
+                mirror_type=mirror_type
             )
         elif telescope_type == "refractor":
             # Map GUI labels to objective_type values
@@ -404,6 +421,7 @@ class PerformanceTab(QWidget):
                 num_rays=21,  # More rays for better spot diagram
                 aperture_diameter=telescope.primary_diameter,
                 entry_height=telescope.tube_length * 1.15,
+                wavelength_nm=wavelength_nm  # Pass wavelength for chromatic effects
             )
             telescope.trace_rays(rays)
 

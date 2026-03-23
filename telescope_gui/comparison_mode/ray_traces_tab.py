@@ -75,11 +75,22 @@ class RayTracesTab(QWidget):
         self.fratio1_spin.setValue(5.0)
         config1_layout.addWidget(self.fratio1_spin, 0, 5)
 
-        # Objective type for telescope 1 (row 1, only shown for refractors)
-        config1_layout.addWidget(QLabel("Objective:"), 1, 0)
+        # Primary type for telescope 1 (row 1, shown for reflectors)
+        self.primary1_label = QLabel("Primary:")
+        config1_layout.addWidget(self.primary1_label, 1, 0)
+        self.primary1_combo = QComboBox()
+        self.primary1_combo.addItems(["Parabolic", "Spherical"])
+        config1_layout.addWidget(self.primary1_combo, 1, 1)
+
+        # Objective type for telescope 1 (row 1, shown for refractors)
+        self.obj1_label = QLabel("Objective:")
+        config1_layout.addWidget(self.obj1_label, 1, 0)
         self.obj1_combo = QComboBox()
         self.obj1_combo.addItems(["Singlet", "Achromat", "APO Doublet", "APO Triplet (air-spaced)"])
         config1_layout.addWidget(self.obj1_combo, 1, 1)
+
+        # Connect telescope type change to update control visibility
+        self.type1_combo.currentTextChanged.connect(self.update_controls_visibility)
 
         controls_layout.addLayout(config1_layout)
 
@@ -104,11 +115,22 @@ class RayTracesTab(QWidget):
         self.fratio2_spin.setValue(10.0)
         config2_layout.addWidget(self.fratio2_spin, 0, 5)
 
-        # Objective type for telescope 2 (row 1, only shown for refractors)
-        config2_layout.addWidget(QLabel("Objective:"), 1, 0)
+        # Primary type for telescope 2 (row 1, shown for reflectors)
+        self.primary2_label = QLabel("Primary:")
+        config2_layout.addWidget(self.primary2_label, 1, 0)
+        self.primary2_combo = QComboBox()
+        self.primary2_combo.addItems(["Parabolic", "Spherical"])
+        config2_layout.addWidget(self.primary2_combo, 1, 1)
+
+        # Objective type for telescope 2 (row 1, shown for refractors)
+        self.obj2_label = QLabel("Objective:")
+        config2_layout.addWidget(self.obj2_label, 1, 0)
         self.obj2_combo = QComboBox()
         self.obj2_combo.addItems(["Singlet", "Achromat", "APO Doublet", "APO Triplet (air-spaced)"])
         config2_layout.addWidget(self.obj2_combo, 1, 1)
+
+        # Connect telescope type change to update control visibility
+        self.type2_combo.currentTextChanged.connect(self.update_controls_visibility)
 
         controls_layout.addLayout(config2_layout)
 
@@ -122,24 +144,49 @@ class RayTracesTab(QWidget):
 
         self.setLayout(main_layout)
 
+        # Set initial control visibility
+        self.update_controls_visibility()
+
         # Initial render
         self.update_view()
 
-    def build_telescope(self, telescope_type, diameter, fratio, objective_type="singlet"):
+    def update_controls_visibility(self):
+        """Show/hide primary/objective controls based on telescope type."""
+        # Telescope 1
+        is_refractor1 = self.type1_combo.currentText() == "Refractor"
+        self.primary1_label.setVisible(not is_refractor1)
+        self.primary1_combo.setVisible(not is_refractor1)
+        self.obj1_label.setVisible(is_refractor1)
+        self.obj1_combo.setVisible(is_refractor1)
+
+        # Telescope 2
+        is_refractor2 = self.type2_combo.currentText() == "Refractor"
+        self.primary2_label.setVisible(not is_refractor2)
+        self.primary2_combo.setVisible(not is_refractor2)
+        self.obj2_label.setVisible(is_refractor2)
+        self.obj2_combo.setVisible(is_refractor2)
+
+    def build_telescope(self, telescope_type, diameter, fratio, objective_type="singlet", primary_type="parabolic"):
         """Build telescope object from configuration."""
         telescope_type = telescope_type.lower().replace("-", "")
         focal_length = diameter * fratio
 
+        # Determine mirror type for reflectors
+        from telescope_sim.geometry.mirrors import ParabolicMirror, SphericalMirror
+        mirror_type = ParabolicMirror if primary_type.lower() == "parabolic" else SphericalMirror
+
         if telescope_type == "newtonian":
             return NewtonianTelescope(
                 primary_diameter=diameter,
-                focal_length=focal_length
+                focal_length=focal_length,
+                mirror_type=mirror_type
             )
         elif telescope_type == "cassegrain":
             return CassegrainTelescope(
                 primary_diameter=diameter,
                 primary_focal_length=focal_length,
-                secondary_magnification=3.0
+                secondary_magnification=3.0,
+                mirror_type=mirror_type
             )
         elif telescope_type == "refractor":
             # Map GUI labels to objective_type values
@@ -183,12 +230,14 @@ class RayTracesTab(QWidget):
                     "diameter": self.diameter1_spin.value(),
                     "fratio": self.fratio1_spin.value(),
                     "objective": self.obj1_combo.currentText(),
+                    "primary": self.primary1_combo.currentText(),
                 },
                 {
                     "type": self.type2_combo.currentText(),
                     "diameter": self.diameter2_spin.value(),
                     "fratio": self.fratio2_spin.value(),
                     "objective": self.obj2_combo.currentText(),
+                    "primary": self.primary2_combo.currentText(),
                 },
             ]
 
@@ -198,7 +247,8 @@ class RayTracesTab(QWidget):
                     config["type"],
                     config["diameter"],
                     config["fratio"],
-                    config["objective"]
+                    config["objective"],
+                    config["primary"]
                 )
 
                 # Create rays
