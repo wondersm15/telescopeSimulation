@@ -77,6 +77,18 @@ class PerformanceTab(QWidget):
         self.metrics_label.setStyleSheet("font-size: 11pt; padding: 10px; background-color: #f0f0f0;")
         main_layout.addWidget(self.metrics_label)
 
+        # Explanation label
+        explanation = QLabel(
+            "<b>PSF (Point Spread Function)</b>: Shows how a point source appears "
+            "due to <i>diffraction</i> (wave optics). | "
+            "<b>Spot Diagram</b>: Shows where rays converge due to <i>mirror/lens geometry</i> "
+            "(geometric optics). | <b>Combined</b>: Final image = geometric spot ⊗ diffraction PSF."
+        )
+        explanation.setWordWrap(True)
+        explanation.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        explanation.setStyleSheet("font-size: 9pt; padding: 8px; background-color: #e8f4f8; color: #004488;")
+        main_layout.addWidget(explanation)
+
         # PSF Display Options
         psf_options_group = QGroupBox("PSF Display Options")
         psf_options_layout = QHBoxLayout()
@@ -188,6 +200,23 @@ class PerformanceTab(QWidget):
 
         row += 1
 
+        # Spider vanes (for Newtonians)
+        controls_layout.addWidget(QLabel("Spider Vanes:"), row, 0)
+        self.spider_vanes_spin = QDoubleSpinBox()
+        self.spider_vanes_spin.setRange(0, 4)
+        self.spider_vanes_spin.setDecimals(0)
+        self.spider_vanes_spin.setValue(0)
+        controls_layout.addWidget(self.spider_vanes_spin, row, 1)
+
+        controls_layout.addWidget(QLabel("Vane Width (mm):"), row, 2)
+        self.vane_width_spin = QDoubleSpinBox()
+        self.vane_width_spin.setRange(0.5, 5.0)
+        self.vane_width_spin.setSingleStep(0.5)
+        self.vane_width_spin.setValue(2.0)
+        controls_layout.addWidget(self.vane_width_spin, row, 3)
+
+        row += 1
+
         # Update button
         self.update_button = QPushButton("Update Analysis")
         self.update_button.clicked.connect(self.update_view)
@@ -243,7 +272,9 @@ class PerformanceTab(QWidget):
             telescope = NewtonianTelescope(
                 primary_diameter=primary_diameter,
                 focal_length=focal_length,
-                mirror_type=mirror_type
+                mirror_type=mirror_type,
+                spider_vanes=int(self.spider_vanes_spin.value()),
+                spider_vane_width=self.vane_width_spin.value()
             )
         elif telescope_type == "cassegrain":
             telescope = CassegrainTelescope(

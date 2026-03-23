@@ -70,6 +70,17 @@ class AnalyticsTab(QWidget):
 
         main_layout.addLayout(charts_layout)
 
+        # PSF Comparison (full width below other charts)
+        psf_container = QVBoxLayout()
+        psf_label = QLabel("Point Spread Function Comparison")
+        psf_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        psf_label.setStyleSheet("font-weight: bold; font-size: 11pt;")
+        psf_container.addWidget(psf_label)
+
+        self.psf_canvas = MatplotlibCanvas(figsize=(12, 5))
+        psf_container.addWidget(self.psf_canvas)
+        main_layout.addLayout(psf_container)
+
         # Controls
         controls_group = QGroupBox("Telescope Configurations")
         controls_layout = QVBoxLayout()
@@ -326,6 +337,47 @@ class AnalyticsTab(QWidget):
         fig.tight_layout()
         return fig
 
+    def plot_psf_comparison(self, telescopes, labels):
+        """Create overlaid 1D PSF profile comparison."""
+        from telescope_sim.physics.diffraction import compute_psf
+        import numpy as np
+
+        fig = Figure(figsize=(12, 5))
+        ax = fig.add_subplot(111)
+
+        wavelength_nm = 550.0
+        wavelength_mm = wavelength_nm * 1e-6
+
+        colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728']
+
+        for i, (telescope, label) in enumerate(zip(telescopes, labels)):
+            aperture = telescope.primary_diameter
+            focal_length = telescope.focal_length
+            f_ratio = focal_length / aperture
+            airy_radius = 1.22 * wavelength_mm * f_ratio
+            obs_ratio = telescope.obstruction_ratio
+
+            # Generate radial profile
+            r_max = airy_radius * 6
+            r = np.linspace(0, r_max, 1000)
+            psf = compute_psf(r, aperture, focal_length, wavelength_mm, obs_ratio)
+
+            # Normalize
+            psf_norm = psf / np.max(psf)
+
+            color = colors[i % len(colors)]
+            ax.plot(r * 1000, psf_norm, label=label, color=color, linewidth=2)
+
+        ax.set_xlabel('Radius (μm)')
+        ax.set_ylabel('Normalized Intensity')
+        ax.set_title('PSF Radial Profile Comparison (550nm)')
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+        ax.set_xlim(left=0)
+
+        fig.tight_layout()
+        return fig
+
     def update_view(self):
         """Update analytics comparison."""
         try:
@@ -351,6 +403,8 @@ class AnalyticsTab(QWidget):
 
             # Build telescopes and calculate metrics
             metrics_list = []
+            telescopes = []
+            labels = []
             for config in configs:
                 telescope = self.build_telescope(
                     config["type"],
@@ -359,6 +413,8 @@ class AnalyticsTab(QWidget):
                     config["objective"],
                     config["primary"]
                 )
+                telescopes.append(telescope)
+                labels.append(config["label"])
                 metrics = self.calculate_metrics(telescope, config["label"])
                 metrics_list.append(metrics)
 
@@ -374,6 +430,11 @@ class AnalyticsTab(QWidget):
             fig_light = self.plot_light_gathering_comparison(metrics_list)
             self.light_canvas.set_figure(fig_light)
             plt.close(fig_light)
+
+            # Update PSF comparison
+            fig_psf = self.plot_psf_comparison(telescopes, labels)
+            self.psf_canvas.set_figure(fig_psf)
+            plt.close(fig_psf)
 
         except Exception as e:
             print(f"Error updating analytics comparison: {e}")

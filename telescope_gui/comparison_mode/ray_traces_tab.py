@@ -241,7 +241,11 @@ class RayTracesTab(QWidget):
                 },
             ]
 
-            # Create and display ray traces
+            # First pass: create all figures and collect axis limits
+            figures = []
+            all_xlims = []
+            all_ylims = []
+
             for config in configs:
                 telescope = self.build_telescope(
                     config["type"],
@@ -263,8 +267,28 @@ class RayTracesTab(QWidget):
                 # Plot
                 title = f"{telescope.primary_diameter:.0f}mm f/{telescope.focal_ratio:.1f} {config['type']}"
                 fig = plot_ray_trace(rays, components, title=title)
+                figures.append(fig)
 
-                # Add to layout
+                # Collect axis limits
+                for ax in fig.axes:
+                    all_xlims.append(ax.get_xlim())
+                    all_ylims.append(ax.get_ylim())
+
+            # Compute shared axis limits
+            if all_xlims and all_ylims:
+                shared_xlim = (min(lim[0] for lim in all_xlims),
+                              max(lim[1] for lim in all_xlims))
+                shared_ylim = (min(lim[0] for lim in all_ylims),
+                              max(lim[1] for lim in all_ylims))
+
+                # Apply shared limits to all figures
+                for fig in figures:
+                    for ax in fig.axes:
+                        ax.set_xlim(shared_xlim)
+                        ax.set_ylim(shared_ylim)
+
+            # Display all figures
+            for fig in figures:
                 canvas = MatplotlibCanvas(figsize=(7, 6))
                 canvas.set_figure(fig)
                 self.plots_layout.addWidget(canvas)
