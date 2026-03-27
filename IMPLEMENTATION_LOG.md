@@ -1,3 +1,63 @@
+# Implementation Log - Comparison Mode Layout Reorganization
+
+**Date:** 2026-03-27
+**Session:** Reorganize comparison mode tab layouts
+
+## Summary
+
+Reworked the Ray Traces comparison tab to a 4-column sidebar layout and added visual separators to the Images and Analytics tabs.
+
+## Changes Made
+
+### Modified: `telescope_gui/comparison_mode/ray_traces_tab.py` — Major rework
+- Replaced VBoxLayout (plots on top, horizontal grid controls at bottom) with a 4-column HBoxLayout: `[T1 sidebar | T1 canvas | T2 canvas | T2 sidebar]`
+- Each sidebar is a `QScrollArea` with fixed 220px width containing vertical label-above-widget controls (matching the single-telescope design tab style)
+- Extracted `_create_sidebar(number)` helper to DRY up sidebar creation for T1 and T2
+- Pre-created `self.canvas1` / `self.canvas2` in the main layout; `update_view()` now updates these directly instead of clearing/recreating canvases
+- Removed the old title label and bottom QGroupBox
+- "Update Comparison" button placed at bottom of T1 sidebar
+- All existing widget attribute names preserved (self.type1_combo, etc.)
+- `update_controls_visibility()`, `build_telescope()`, `update_view()` logic unchanged
+
+### Modified: `telescope_gui/comparison_mode/images_tab.py` — Visual separators
+- Added `QFrame` import
+- Added bold "Telescope 1" header label before config1_layout
+- Added `QFrame(HLine)` separator between T1 and T2 control sections
+- Added bold "Telescope 2" header label before config2_layout
+
+### Modified: `telescope_gui/comparison_mode/analytics_tab.py` — Visual separators
+- Same treatment as images_tab: bold header labels + HLine separator between T1 and T2 control grids
+
+---
+
+# Implementation Log - Parameters & Physics Reference Tab
+
+**Date:** 2026-03-26
+**Session:** Add "Parameters & Physics" reference mode to GUI
+
+## Summary
+
+Added a third top-level mode ("Parameters & Physics") alongside "Single Telescope" and "Comparison". This is a read-only, scrollable reference page covering telescope types, all GUI parameters, plot descriptions, implemented physics with formulas, and known limitations.
+
+## Changes Made
+
+### New File: `telescope_gui/reference_tab.py`
+- `ParametersPhysicsTab(QWidget)` — scrollable reference with 5 `QGroupBox` sections:
+  1. **Telescope Types** — Newtonian, Cassegrain, Refractor, Mak-Cass, SCT with pros/cons
+  2. **Telescope Parameters** — every GUI parameter with physical description
+  3. **Understanding the Plots** — what each analysis/plot shows
+  4. **Implemented Physics** — diffraction, obstruction, spider vanes, chromatic aberration, coma, spherical aberration with key formulas
+  5. **Not Yet Implemented** — astigmatism, field curvature, distortion, thermal, surface errors
+- Uses HTML-formatted `QLabel` widgets inside styled `QGroupBox` containers
+
+### Modified: `telescope_gui/main_window.py`
+- Added `reference_mode_radio` ("Parameters & Physics") radio button to mode selector
+- Added import for `ParametersPhysicsTab`
+- Updated `switch_mode()` with `elif` branch for reference mode — adds single "Reference" tab
+- Connected all three radio buttons to `switch_mode()` (previously only `single_mode_radio` was connected)
+
+---
+
 # Implementation Log - GUI Fixes and Enhancements Round 2
 
 **Date:** 2026-03-22

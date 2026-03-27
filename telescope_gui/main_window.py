@@ -17,6 +17,7 @@ from telescope_gui.single_mode.performance_tab import PerformanceTab
 from telescope_gui.comparison_mode.ray_traces_tab import RayTracesTab
 from telescope_gui.comparison_mode.images_tab import ImagesTab
 from telescope_gui.comparison_mode.analytics_tab import AnalyticsTab
+from telescope_gui.reference_tab import ParametersPhysicsTab
 
 
 class MainWindow(QMainWindow):
@@ -46,15 +47,20 @@ class MainWindow(QMainWindow):
         self.mode_group = QButtonGroup()
         self.single_mode_radio = QRadioButton("Single Telescope")
         self.comparison_mode_radio = QRadioButton("Comparison")
+        self.reference_mode_radio = QRadioButton("Parameters && Physics")
 
         self.mode_group.addButton(self.single_mode_radio)
         self.mode_group.addButton(self.comparison_mode_radio)
+        self.mode_group.addButton(self.reference_mode_radio)
 
         self.single_mode_radio.setChecked(True)
         self.single_mode_radio.toggled.connect(self.switch_mode)
+        self.comparison_mode_radio.toggled.connect(self.switch_mode)
+        self.reference_mode_radio.toggled.connect(self.switch_mode)
 
         mode_layout.addWidget(self.single_mode_radio)
         mode_layout.addWidget(self.comparison_mode_radio)
+        mode_layout.addWidget(self.reference_mode_radio)
         mode_layout.addStretch()
 
         main_layout.addLayout(mode_layout)
@@ -133,7 +139,7 @@ class MainWindow(QMainWindow):
             self.tab_widget.addTab(design_tab, "Design")
             self.tab_widget.addTab(performance_tab, "Performance")
 
-        else:
+        elif self.comparison_mode_radio.isChecked():
             # Comparison mode
             self.status_bar.showMessage("Comparison Mode")
 
@@ -144,3 +150,10 @@ class MainWindow(QMainWindow):
             self.tab_widget.addTab(ray_traces_tab, "Ray Traces")
             self.tab_widget.addTab(images_tab, "Simulated Images")
             self.tab_widget.addTab(analytics_tab, "Analytics")
+
+        elif self.reference_mode_radio.isChecked():
+            # Parameters & Physics reference
+            self.status_bar.showMessage("Parameters & Physics Reference")
+
+            reference_tab = ParametersPhysicsTab()
+            self.tab_widget.addTab(reference_tab, "Reference")

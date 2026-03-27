@@ -6,7 +6,8 @@ Shows side-by-side ray traces of multiple telescope configurations.
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
-    QPushButton, QLabel, QComboBox, QSpinBox, QDoubleSpinBox, QGroupBox, QScrollArea
+    QPushButton, QLabel, QComboBox, QSpinBox, QDoubleSpinBox, QGroupBox, QScrollArea,
+    QSizePolicy
 )
 from PyQt6.QtCore import Qt
 import matplotlib.pyplot as plt
@@ -18,6 +19,8 @@ from telescope_sim.geometry import (
 )
 from telescope_sim.plotting import plot_ray_trace
 from telescope_sim.source.light_source import create_parallel_rays
+
+SIDEBAR_WIDTH = 220
 
 
 class RayTracesTab(QWidget):
@@ -34,170 +37,212 @@ class RayTracesTab(QWidget):
 
         self.init_ui()
 
+    def _create_sidebar(self, number):
+        """Create a vertical sidebar with controls for one telescope.
+
+        Args:
+            number: 1 or 2, identifying which telescope.
+
+        Returns:
+            QScrollArea containing the sidebar widget.
+        """
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFixedWidth(SIDEBAR_WIDTH)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(6, 6, 6, 6)
+        layout.setSpacing(4)
+
+        # Header
+        header = QLabel(f"Telescope {number}")
+        header.setStyleSheet("font-weight: bold; font-size: 12pt; padding-bottom: 4px;")
+        header.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(header)
+
+        # Controls group
+        group = QGroupBox("Controls")
+        grid = QGridLayout()
+        grid.setContentsMargins(4, 8, 4, 4)
+        grid.setVerticalSpacing(2)
+        row = 0
+
+        # Telescope Type
+        grid.addWidget(QLabel("Telescope Type"), row, 0)
+        row += 1
+        type_combo = QComboBox()
+        type_combo.addItems(["Newtonian", "Cassegrain", "Refractor", "Maksutov-Cassegrain", "Schmidt-Cassegrain"])
+        if number == 2:
+            type_combo.setCurrentText("Cassegrain")
+        grid.addWidget(type_combo, row, 0)
+        row += 1
+
+        # Aperture
+        grid.addWidget(QLabel("Aperture (mm)"), row, 0)
+        row += 1
+        diameter_spin = QDoubleSpinBox()
+        diameter_spin.setRange(50.0, 500.0)
+        diameter_spin.setValue(200.0)
+        grid.addWidget(diameter_spin, row, 0)
+        row += 1
+
+        # f-ratio
+        grid.addWidget(QLabel("f-ratio"), row, 0)
+        row += 1
+        fratio_spin = QDoubleSpinBox()
+        fratio_spin.setRange(3.0, 15.0)
+        fratio_spin.setValue(5.0 if number == 1 else 10.0)
+        grid.addWidget(fratio_spin, row, 0)
+        row += 1
+
+        # Focal Length (derived from aperture * f-ratio, editable)
+        focal_length_label = QLabel("Focal Length (mm)")
+        grid.addWidget(focal_length_label, row, 0)
+        row += 1
+        focal_length_spin = QDoubleSpinBox()
+        focal_length_spin.setRange(150.0, 7500.0)
+        focal_length_spin.setDecimals(1)
+        initial_fl = diameter_spin.value() * fratio_spin.value()
+        focal_length_spin.setValue(initial_fl)
+        grid.addWidget(focal_length_spin, row, 0)
+        row += 1
+
+        # Bidirectional sync: aperture or f-ratio → focal length, focal length → f-ratio
+        guard = {"active": False}
+
+        def on_aperture_or_fratio_changed(_=None, d=diameter_spin, f=fratio_spin, fl=focal_length_spin, g=guard):
+            if g["active"]:
+                return
+            g["active"] = True
+            fl.setValue(d.value() * f.value())
+            g["active"] = False
+
+        def on_focal_length_changed(_=None, d=diameter_spin, f=fratio_spin, fl=focal_length_spin, g=guard):
+            if g["active"]:
+                return
+            g["active"] = True
+            if d.value() > 0:
+                f.setValue(fl.value() / d.value())
+            g["active"] = False
+
+        diameter_spin.valueChanged.connect(on_aperture_or_fratio_changed)
+        fratio_spin.valueChanged.connect(on_aperture_or_fratio_changed)
+        focal_length_spin.valueChanged.connect(on_focal_length_changed)
+
+        # Primary type (reflectors only, Newtonian only)
+        primary_label = QLabel("Primary")
+        grid.addWidget(primary_label, row, 0)
+        row += 1
+        primary_combo = QComboBox()
+        primary_combo.addItems(["Parabolic", "Spherical"])
+        grid.addWidget(primary_combo, row, 0)
+        row += 1
+
+        # Objective type (refractors only)
+        obj_label = QLabel("Objective")
+        grid.addWidget(obj_label, row, 0)
+        row += 1
+        obj_combo = QComboBox()
+        obj_combo.addItems(["Singlet", "Achromat", "APO Doublet", "APO Triplet (air-spaced)"])
+        grid.addWidget(obj_combo, row, 0)
+        row += 1
+
+        # Spider Vanes (reflectors only)
+        spider_label = QLabel("Spider Vanes")
+        grid.addWidget(spider_label, row, 0)
+        row += 1
+        spider_spin = QSpinBox()
+        spider_spin.setRange(0, 4)
+        spider_spin.setValue(0)
+        grid.addWidget(spider_spin, row, 0)
+        row += 1
+
+        # Vane Width (reflectors only)
+        vane_width_label = QLabel("Vane Width (mm)")
+        grid.addWidget(vane_width_label, row, 0)
+        row += 1
+        vane_width_spin = QDoubleSpinBox()
+        vane_width_spin.setRange(0.5, 5.0)
+        vane_width_spin.setSingleStep(0.5)
+        vane_width_spin.setValue(2.0)
+        grid.addWidget(vane_width_spin, row, 0)
+        row += 1
+
+        # Obstruction (reflectors only)
+        obstruction_label = QLabel("Obstruction")
+        grid.addWidget(obstruction_label, row, 0)
+        row += 1
+        obstruction_spin = QDoubleSpinBox()
+        obstruction_spin.setRange(0.0, 0.5)
+        obstruction_spin.setSingleStep(0.01)
+        obstruction_spin.setValue(0.20 if number == 1 else 0.30)
+        obstruction_spin.setDecimals(2)
+        obstruction_spin.setToolTip("Secondary diameter / Primary diameter")
+        grid.addWidget(obstruction_spin, row, 0)
+        row += 1
+
+        group.setLayout(grid)
+        layout.addWidget(group)
+        layout.addStretch()
+
+        scroll.setWidget(container)
+
+        # Store widget references using the naming convention: type{N}_combo, etc.
+        suffix = str(number)
+        setattr(self, f"type{suffix}_combo", type_combo)
+        setattr(self, f"diameter{suffix}_spin", diameter_spin)
+        setattr(self, f"fratio{suffix}_spin", fratio_spin)
+        setattr(self, f"focal_length{suffix}_spin", focal_length_spin)
+        setattr(self, f"primary{suffix}_label", primary_label)
+        setattr(self, f"primary{suffix}_combo", primary_combo)
+        setattr(self, f"obj{suffix}_label", obj_label)
+        setattr(self, f"obj{suffix}_combo", obj_combo)
+        setattr(self, f"spider{suffix}_label", spider_label)
+        setattr(self, f"spider{suffix}_spin", spider_spin)
+        setattr(self, f"vane_width{suffix}_label", vane_width_label)
+        setattr(self, f"vane_width{suffix}_spin", vane_width_spin)
+        setattr(self, f"obstruction{suffix}_label", obstruction_label)
+        setattr(self, f"obstruction{suffix}_spin", obstruction_spin)
+
+        # Connect visibility toggle
+        type_combo.currentTextChanged.connect(self.update_controls_visibility)
+
+        return scroll
+
     def init_ui(self):
         """Initialize the user interface."""
-        main_layout = QVBoxLayout()
+        main_layout = QHBoxLayout()
+        main_layout.setContentsMargins(4, 4, 4, 4)
+        main_layout.setSpacing(4)
 
-        # Title
-        title_label = QLabel("Ray Trace Comparison")
-        title_label.setStyleSheet("font-size: 16pt; font-weight: bold; padding: 10px;")
-        title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        main_layout.addWidget(title_label)
+        # T1 sidebar (left)
+        t1_sidebar = self._create_sidebar(1)
+        main_layout.addWidget(t1_sidebar)
 
-        # Scroll area for plots
-        scroll_area = QScrollArea()
-        scroll_area.setWidgetResizable(True)
-        scroll_widget = QWidget()
-        self.plots_layout = QHBoxLayout()
-        scroll_widget.setLayout(self.plots_layout)
-        scroll_area.setWidget(scroll_widget)
+        # T1 ray trace canvas (stretches)
+        self.canvas1 = MatplotlibCanvas(figsize=(8, 6))
+        self.canvas1.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        main_layout.addWidget(self.canvas1, stretch=1)
 
-        main_layout.addWidget(scroll_area)
+        # T2 ray trace canvas (stretches)
+        self.canvas2 = MatplotlibCanvas(figsize=(8, 6))
+        self.canvas2.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        main_layout.addWidget(self.canvas2, stretch=1)
 
-        # Controls
-        controls_group = QGroupBox("Telescope Configurations")
-        controls_layout = QVBoxLayout()
+        # T2 sidebar (right)
+        t2_sidebar = self._create_sidebar(2)
+        main_layout.addWidget(t2_sidebar)
 
-        # Configuration 1
-        config1_layout = QGridLayout()
-        config1_layout.addWidget(QLabel("Telescope 1:"), 0, 0)
-
-        self.type1_combo = QComboBox()
-        self.type1_combo.addItems(["Newtonian", "Cassegrain", "Refractor", "Maksutov-Cassegrain", "Schmidt-Cassegrain"])
-        config1_layout.addWidget(self.type1_combo, 0, 1)
-
-        config1_layout.addWidget(QLabel("Aperture (mm):"), 0, 2)
-        self.diameter1_spin = QDoubleSpinBox()
-        self.diameter1_spin.setRange(50.0, 500.0)
-        self.diameter1_spin.setValue(200.0)
-        config1_layout.addWidget(self.diameter1_spin, 0, 3)
-
-        config1_layout.addWidget(QLabel("f-ratio:"), 0, 4)
-        self.fratio1_spin = QDoubleSpinBox()
-        self.fratio1_spin.setRange(3.0, 15.0)
-        self.fratio1_spin.setValue(5.0)
-        config1_layout.addWidget(self.fratio1_spin, 0, 5)
-
-        # Primary type for telescope 1 (row 1, shown for reflectors)
-        self.primary1_label = QLabel("Primary:")
-        config1_layout.addWidget(self.primary1_label, 1, 0)
-        self.primary1_combo = QComboBox()
-        self.primary1_combo.addItems(["Parabolic", "Spherical"])
-        config1_layout.addWidget(self.primary1_combo, 1, 1)
-
-        # Objective type for telescope 1 (row 1, shown for refractors)
-        self.obj1_label = QLabel("Objective:")
-        config1_layout.addWidget(self.obj1_label, 1, 0)
-        self.obj1_combo = QComboBox()
-        self.obj1_combo.addItems(["Singlet", "Achromat", "APO Doublet", "APO Triplet (air-spaced)"])
-        config1_layout.addWidget(self.obj1_combo, 1, 1)
-
-        # Spider vanes for telescope 1 (row 2, shown for reflectors)
-        self.spider1_label = QLabel("Spider Vanes:")
-        config1_layout.addWidget(self.spider1_label, 2, 0)
-        self.spider1_spin = QSpinBox()
-        self.spider1_spin.setRange(0, 4)
-        self.spider1_spin.setValue(0)
-        config1_layout.addWidget(self.spider1_spin, 2, 1)
-
-        self.vane_width1_label = QLabel("Vane Width (mm):")
-        config1_layout.addWidget(self.vane_width1_label, 2, 2)
-        self.vane_width1_spin = QDoubleSpinBox()
-        self.vane_width1_spin.setRange(0.5, 5.0)
-        self.vane_width1_spin.setSingleStep(0.5)
-        self.vane_width1_spin.setValue(2.0)
-        config1_layout.addWidget(self.vane_width1_spin, 2, 3)
-
-        # Obstruction controls for telescope 1 (row 2, cols 4-5)
-        self.obstruction1_label = QLabel("Obstruction:")
-        config1_layout.addWidget(self.obstruction1_label, 2, 4)
-        self.obstruction1_spin = QDoubleSpinBox()
-        self.obstruction1_spin.setRange(0.0, 0.5)
-        self.obstruction1_spin.setSingleStep(0.01)
-        self.obstruction1_spin.setValue(0.20)
-        self.obstruction1_spin.setDecimals(2)
-        self.obstruction1_spin.setToolTip("Secondary diameter / Primary diameter")
-        config1_layout.addWidget(self.obstruction1_spin, 2, 5)
-
-        # Connect telescope type change to update control visibility
-        self.type1_combo.currentTextChanged.connect(self.update_controls_visibility)
-
-        controls_layout.addLayout(config1_layout)
-
-        # Configuration 2
-        config2_layout = QGridLayout()
-        config2_layout.addWidget(QLabel("Telescope 2:"), 0, 0)
-
-        self.type2_combo = QComboBox()
-        self.type2_combo.addItems(["Newtonian", "Cassegrain", "Refractor", "Maksutov-Cassegrain", "Schmidt-Cassegrain"])
-        self.type2_combo.setCurrentText("Cassegrain")
-        config2_layout.addWidget(self.type2_combo, 0, 1)
-
-        config2_layout.addWidget(QLabel("Aperture (mm):"), 0, 2)
-        self.diameter2_spin = QDoubleSpinBox()
-        self.diameter2_spin.setRange(50.0, 500.0)
-        self.diameter2_spin.setValue(200.0)
-        config2_layout.addWidget(self.diameter2_spin, 0, 3)
-
-        config2_layout.addWidget(QLabel("f-ratio:"), 0, 4)
-        self.fratio2_spin = QDoubleSpinBox()
-        self.fratio2_spin.setRange(3.0, 15.0)
-        self.fratio2_spin.setValue(10.0)
-        config2_layout.addWidget(self.fratio2_spin, 0, 5)
-
-        # Primary type for telescope 2 (row 1, shown for reflectors)
-        self.primary2_label = QLabel("Primary:")
-        config2_layout.addWidget(self.primary2_label, 1, 0)
-        self.primary2_combo = QComboBox()
-        self.primary2_combo.addItems(["Parabolic", "Spherical"])
-        config2_layout.addWidget(self.primary2_combo, 1, 1)
-
-        # Objective type for telescope 2 (row 1, shown for refractors)
-        self.obj2_label = QLabel("Objective:")
-        config2_layout.addWidget(self.obj2_label, 1, 0)
-        self.obj2_combo = QComboBox()
-        self.obj2_combo.addItems(["Singlet", "Achromat", "APO Doublet", "APO Triplet (air-spaced)"])
-        config2_layout.addWidget(self.obj2_combo, 1, 1)
-
-        # Spider vanes for telescope 2 (row 2, shown for reflectors)
-        self.spider2_label = QLabel("Spider Vanes:")
-        config2_layout.addWidget(self.spider2_label, 2, 0)
-        self.spider2_spin = QSpinBox()
-        self.spider2_spin.setRange(0, 4)
-        self.spider2_spin.setValue(0)
-        config2_layout.addWidget(self.spider2_spin, 2, 1)
-
-        self.vane_width2_label = QLabel("Vane Width (mm):")
-        config2_layout.addWidget(self.vane_width2_label, 2, 2)
-        self.vane_width2_spin = QDoubleSpinBox()
-        self.vane_width2_spin.setRange(0.5, 5.0)
-        self.vane_width2_spin.setSingleStep(0.5)
-        self.vane_width2_spin.setValue(2.0)
-        config2_layout.addWidget(self.vane_width2_spin, 2, 3)
-
-        # Obstruction controls for telescope 2 (row 2, cols 4-5)
-        self.obstruction2_label = QLabel("Obstruction:")
-        config2_layout.addWidget(self.obstruction2_label, 2, 4)
-        self.obstruction2_spin = QDoubleSpinBox()
-        self.obstruction2_spin.setRange(0.0, 0.5)
-        self.obstruction2_spin.setSingleStep(0.01)
-        self.obstruction2_spin.setValue(0.30)
-        self.obstruction2_spin.setDecimals(2)
-        self.obstruction2_spin.setToolTip("Secondary diameter / Primary diameter")
-        config2_layout.addWidget(self.obstruction2_spin, 2, 5)
-
-        # Connect telescope type change to update control visibility
-        self.type2_combo.currentTextChanged.connect(self.update_controls_visibility)
-
-        controls_layout.addLayout(config2_layout)
-
-        # Update button
+        # Add update button at the bottom of T1 sidebar
+        # (insert before the stretch in T1's container layout)
+        t1_container = t1_sidebar.widget()
+        t1_layout = t1_container.layout()
         self.update_button = QPushButton("Update Comparison")
         self.update_button.clicked.connect(self.update_view)
-        controls_layout.addWidget(self.update_button)
-
-        controls_group.setLayout(controls_layout)
-        main_layout.addWidget(controls_group)
+        # Insert before the stretch (which is the last item)
+        t1_layout.insertWidget(t1_layout.count() - 1, self.update_button)
 
         self.setLayout(main_layout)
 
@@ -313,12 +358,6 @@ class RayTracesTab(QWidget):
     def update_view(self):
         """Update ray trace comparison."""
         try:
-            # Clear existing plots
-            while self.plots_layout.count():
-                child = self.plots_layout.takeAt(0)
-                if child.widget():
-                    child.widget().deleteLater()
-
             # Get configurations
             configs = [
                 {
@@ -392,11 +431,10 @@ class RayTracesTab(QWidget):
                         ax.set_xlim(shared_xlim)
                         ax.set_ylim(shared_ylim)
 
-            # Display all figures
-            for fig in figures:
-                canvas = MatplotlibCanvas(figsize=(8, 6))
+            # Update the pre-created canvases
+            canvases = [self.canvas1, self.canvas2]
+            for canvas, fig in zip(canvases, figures):
                 canvas.set_figure(fig)
-                self.plots_layout.addWidget(canvas)
                 plt.close(fig)
 
         except Exception as e:

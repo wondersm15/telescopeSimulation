@@ -6,7 +6,8 @@ Shows comparative metrics and charts for multiple telescope configurations.
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
-    QPushButton, QLabel, QComboBox, QDoubleSpinBox, QSpinBox, QGroupBox, QTableWidget, QTableWidgetItem
+    QPushButton, QLabel, QComboBox, QDoubleSpinBox, QSpinBox, QGroupBox, QTableWidget, QTableWidgetItem,
+    QFrame
 )
 from PyQt6.QtCore import Qt
 import matplotlib.pyplot as plt
@@ -88,6 +89,11 @@ class AnalyticsTab(QWidget):
         controls_group = QGroupBox("Telescope Configurations")
         controls_layout = QVBoxLayout()
 
+        # Telescope 1 header
+        t1_header = QLabel("Telescope 1")
+        t1_header.setStyleSheet("font-weight: bold; font-size: 11pt; padding: 2px 0;")
+        controls_layout.addWidget(t1_header)
+
         # Configuration 1
         config1_layout = QGridLayout()
         config1_layout.addWidget(QLabel("Telescope 1:"), 0, 0)
@@ -153,6 +159,19 @@ class AnalyticsTab(QWidget):
         self.type1_combo.currentTextChanged.connect(self.update_controls_visibility)
 
         controls_layout.addLayout(config1_layout)
+
+        # Separator between T1 and T2
+        separator = QFrame()
+        separator.setFrameShape(QFrame.Shape.HLine)
+        separator.setFrameShadow(QFrame.Shadow.Sunken)
+        separator.setLineWidth(2)
+        separator.setStyleSheet("QFrame { color: #555555; }")
+        controls_layout.addWidget(separator)
+
+        # Telescope 2 header
+        t2_header = QLabel("Telescope 2")
+        t2_header.setStyleSheet("font-weight: bold; font-size: 11pt; padding: 2px 0;")
+        controls_layout.addWidget(t2_header)
 
         # Configuration 2
         config2_layout = QGridLayout()
