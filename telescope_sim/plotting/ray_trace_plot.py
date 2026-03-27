@@ -8,7 +8,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from telescope_sim.physics.ray import Ray
-from telescope_sim.physics.diffraction import compute_psf
+from telescope_sim.physics.diffraction import compute_psf, rayleigh_criterion_arcsec
 from telescope_sim.physics.fft_psf import compute_fft_psf
 from telescope_sim.physics.aberrations import (
     compute_coma_spot,
@@ -539,11 +539,22 @@ def _get_focal_offsets(telescope: Telescope,
 def _draw_spot_diagram(ax: plt.Axes, y_offsets: np.ndarray | None,
                        title: str = "Spot Diagram at Focal Plane",
                        show_rms: bool = True,
-                       show_max: bool = True) -> None:
+                       show_max: bool = True,
+                       rays: list[Ray] | None = None,
+                       focal_plane_y: float | None = None) -> None:
     """Draw a spot diagram on the given axes.
 
     This is the core drawing helper used by both plot_spot_diagram and
     the comparison functions.
+
+    Args:
+        ax: Matplotlib axes to draw on.
+        y_offsets: Lateral offsets of rays at focal plane.
+        title: Title for the plot.
+        show_rms: Whether to show RMS circle.
+        show_max: Whether to show max extent circle.
+        rays: Optional list of Ray objects for color-coding by aperture position.
+        focal_plane_y: Optional y-coordinate of focal plane for annotation.
     """
     if y_offsets is None:
         ax.set_title(title)
@@ -554,10 +565,35 @@ def _draw_spot_diagram(ax: plt.Axes, y_offsets: np.ndarray | None,
     rms_spot = np.std(y_offsets)
     max_spot = np.max(np.abs(y_offsets))
 
-    ax.scatter(y_offsets, np.zeros_like(y_offsets), c="gold",
-               edgecolors="darkorange", s=80, zorder=3, label="Ray positions")
+    # Color-code by aperture position if available
+    if rays is not None:
+        aperture_radii = [ray.aperture_position for ray in rays
+                         if ray.aperture_position is not None]
+        if aperture_radii and len(aperture_radii) == len(y_offsets):
+            # Normalize to 0-1 range for colormap
+            aperture_radii = np.array(aperture_radii)
+            max_radius = np.max(aperture_radii) if np.max(aperture_radii) > 0 else 1.0
+            normalized_radii = aperture_radii / max_radius
 
-    margin = max(max_spot * 3, 0.5)
+            scatter = ax.scatter(y_offsets, np.zeros_like(y_offsets),
+                               c=normalized_radii, cmap='viridis',
+                               edgecolors='none', s=40, alpha=0.8, zorder=3,
+                               vmin=0, vmax=1, label="Ray positions")
+
+            # Add colorbar
+            cbar = plt.colorbar(scatter, ax=ax, pad=0.02, fraction=0.046)
+            cbar.set_label('Incident Radial Distance\n(normalized)',
+                          rotation=270, labelpad=20, fontsize=9)
+        else:
+            # Fallback to solid color
+            ax.scatter(y_offsets, np.zeros_like(y_offsets), c="gold",
+                      edgecolors="none", s=40, alpha=0.8, zorder=3, label="Ray positions")
+    else:
+        # No rays provided, use default coloring
+        ax.scatter(y_offsets, np.zeros_like(y_offsets), c="gold",
+                   edgecolors="none", s=40, alpha=0.8, zorder=3, label="Ray positions")
+
+    margin = max(max_spot * 1.5, rms_spot * 4, 0.01)
     ax.axhline(0, color="gray", linewidth=0.5, alpha=0.5)
     ax.axvline(0, color="gray", linewidth=0.5, alpha=0.5)
 
@@ -589,6 +625,13 @@ def _draw_spot_diagram(ax: plt.Axes, y_offsets: np.ndarray | None,
             verticalalignment="bottom",
             bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.8))
 
+    # Add focal plane position annotation if provided
+    if focal_plane_y is not None:
+        ax.text(0.98, 0.98, f"Focal Plane: y = {focal_plane_y:.2f} mm",
+                transform=ax.transAxes, fontsize=9, verticalalignment='top',
+                horizontalalignment='right',
+                bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.7))
+
 
 def plot_spot_diagram(rays: list[Ray],
                       title: str = "Spot Diagram at Focal Plane",
@@ -614,9 +657,17 @@ def plot_spot_diagram(rays: list[Ray],
         The matplotlib Figure object.
     """
     y_offsets = _find_focal_plane_positions(rays)
+
+    # Extract focal plane y position from rays (approximate from last ray position)
+    focal_plane_y = None
+    traced_rays = [r for r in rays if len(r.history) >= 2]
+    if traced_rays:
+        focal_plane_y = traced_rays[0].history[-1][1]
+
     fig, ax = plt.subplots(figsize=figsize)
     _draw_spot_diagram(ax, y_offsets, title=title,
-                       show_rms=show_rms, show_max=show_max)
+                       show_rms=show_rms, show_max=show_max,
+                       rays=rays, focal_plane_y=focal_plane_y)
     plt.tight_layout()
 
     if save_path:
@@ -1094,6 +1145,15 @@ def plot_psf_profile(telescope: Telescope,
     ax1.grid(True, alpha=0.3)
     ax1.set_ylim(-0.05, 1.05)
 
+    # Secondary x-axis in arcseconds (angular distance)
+    plate_scale = 206265.0 / focal_length  # arcsec/mm
+    def _um_to_arcsec(x_um):
+        return x_um * plate_scale / 1000.0
+    def _arcsec_to_um(x_arcsec):
+        return x_arcsec * 1000.0 / plate_scale
+    ax1_top = ax1.secondary_xaxis('top', functions=(_um_to_arcsec, _arcsec_to_um))
+    ax1_top.set_xlabel("Angular distance (arcsec)", fontsize=8)
+
     # Log scale
     if is_perfect_focus:
         ax2.semilogy(r * 1000, np.clip(airy_profile, 1e-6, None), "b-",
@@ -1115,13 +1175,17 @@ def plot_psf_profile(telescope: Telescope,
     ax2.grid(True, alpha=0.3)
     ax2.set_ylim(1e-4, 1.5)
 
+    # Secondary x-axis in arcseconds for log panel too
+    ax2_top = ax2.secondary_xaxis('top', functions=(_um_to_arcsec, _arcsec_to_um))
+    ax2_top.set_xlabel("Angular distance (arcsec)", fontsize=8)
+
     # --- Formula & metrics panel ---
     ax3.axis("off")
 
     method_label = ("Analytical" if method == "analytical"
                     else f"Traced ({num_trace_rays} rays)")
-    rayleigh_arcsec = (1.22 * wavelength_nm * 1e-9
-                       / (aperture_diameter * 1e-3) * 206265)
+    rayleigh_arcsec = rayleigh_criterion_arcsec(
+        wavelength_nm * 1e-9, aperture_diameter * 1e-3, obs_ratio)
     strehl = _estimate_strehl(rms_spot, airy_radius)
 
     # Metrics block
@@ -1364,7 +1428,9 @@ def plot_polychromatic_ray_trace(
     if wavelengths is None:
         wavelengths = CHROMATIC_WAVELENGTHS
 
+    # Single full-width axes; legend & focal inset float as overlays
     fig, ax = plt.subplots(figsize=figsize)
+    fig.subplots_adjust(left=0.06, right=0.98, top=0.95, bottom=0.05)
 
     # Draw optics using the green (design) wavelength rays first
     green_wl = wavelengths.get("G", 550.0)
@@ -1382,9 +1448,24 @@ def plot_polychromatic_ray_trace(
                     title="Polychromatic Ray Trace",
                     ray_color="gold", show_tube=True)
 
-    # Trace and draw rays for each wavelength
-    for label, wl in wavelengths.items():
+    # Tighten x-limits to the telescope aperture (remove excess whitespace)
+    pad = telescope.primary_diameter * 0.15
+    ax.set_xlim(-telescope.primary_diameter / 2 - pad,
+                telescope.primary_diameter / 2 + pad)
+    ax.margins(x=0, y=0.02)
+
+    # Trace and draw rays for each wavelength.
+    # Draw B first, G next, R last so longer wavelengths (red) are on top
+    # and visible — otherwise blue (drawn last) hides the others because
+    # ray paths overlap almost perfectly until near the focal plane.
+    draw_order = sorted(wavelengths.items(), key=lambda kv: kv[1])  # short λ first
+    linewidths = {"B": 1.8, "G": 1.2, "R": 0.8}  # wider underneath, thinner on top
+
+    all_focal_points = {}  # label -> (x, y) for inset calculation
+
+    for label, wl in draw_order:
         color = wavelength_to_color(wl)
+        lw = linewidths.get(label, 1.0)
         rays = create_parallel_rays(
             num_rays=num_display_rays,
             aperture_diameter=telescope.primary_diameter,
@@ -1398,18 +1479,67 @@ def plot_polychromatic_ray_trace(
                 continue
             path = np.array(ray.history)
             ax.plot(path[:, 0], path[:, 1],
-                    color=color, alpha=0.7, linewidth=1.0)
+                    color=color, alpha=0.8, linewidth=lw)
 
         # Mark focal point for this wavelength
         end_points = [r.history[-1] for r in rays if len(r.history) >= 3]
         if end_points:
             focal = np.mean(end_points, axis=0)
+            all_focal_points[label] = focal
             ax.plot(focal[0], focal[1], "*", color=color,
                     markersize=10, label=f"{label} ({wl:.0f}nm)",
                     zorder=5)
 
-    ax.legend(loc="upper right", fontsize="small")
-    plt.tight_layout()
+    # Remove any auto-legend that _draw_ray_trace may have added
+    if ax.get_legend() is not None:
+        ax.get_legend().remove()
+
+    # Place legend directly on the main axes (upper-right, inside the plot)
+    ax.legend(fontsize="small", loc="upper right", frameon=True,
+              fancybox=True, framealpha=0.9)
+
+    # Focal-region inset embedded inside the main axes (lower-right corner)
+    if len(all_focal_points) >= 2:
+        ax_inset = ax.inset_axes([0.65, 0.02, 0.33, 0.35])
+        ax_inset.patch.set_facecolor("white")
+        ax_inset.patch.set_alpha(0.9)
+
+        focals = np.array(list(all_focal_points.values()))
+        center_x = focals[:, 0].mean()
+        center_y = focals[:, 1].mean()
+        spread_x = max(np.ptp(focals[:, 0]), telescope.primary_diameter * 0.05)
+        spread_y = max(np.ptp(focals[:, 1]), telescope.primary_diameter * 0.05)
+        margin = 3.0  # zoom out 3× beyond the spread
+
+        ax_inset.set_xlim(center_x - spread_x * margin,
+                          center_x + spread_x * margin)
+        ax_inset.set_ylim(center_y - spread_y * margin,
+                          center_y + spread_y * margin)
+        ax_inset.set_title("Focal region", fontsize=8)
+        ax_inset.tick_params(labelsize=6)
+
+        # Redraw rays in the inset
+        for label, wl in draw_order:
+            color = wavelength_to_color(wl)
+            lw = linewidths.get(label, 1.0)
+            rays = create_parallel_rays(
+                num_rays=num_display_rays,
+                aperture_diameter=telescope.primary_diameter,
+                entry_height=telescope.tube_length * 1.15,
+                wavelength_nm=wl,
+            )
+            telescope.trace_rays(rays)
+            for ray in rays:
+                if len(ray.history) < 2:
+                    continue
+                path = np.array(ray.history)
+                ax_inset.plot(path[:, 0], path[:, 1],
+                              color=color, alpha=0.8, linewidth=lw)
+
+            if label in all_focal_points:
+                fp = all_focal_points[label]
+                ax_inset.plot(fp[0], fp[1], "*", color=color,
+                              markersize=12, zorder=5)
 
     if save_path:
         fig.savefig(save_path, dpi=150, bbox_inches="tight")
@@ -1549,21 +1679,23 @@ def plot_spot_diagram_comparison(
         panel_method = pp.get("method", method)
         panel_obstruction = pp.get("include_obstruction", include_obstruction)
 
-        offsets = _get_focal_offsets(
-            telescope, method=panel_method, num_trace_rays=num_display_rays,
-            include_obstruction=panel_obstruction,
+        # Always create rays for color-coding
+        rays = create_parallel_rays(
+            num_rays=num_display_rays,
+            aperture_diameter=telescope.primary_diameter,
+            entry_height=telescope.tube_length * 1.15,
         )
-        if offsets is None:
-            # Fallback: ray-trace as before
-            rays = create_parallel_rays(
-                num_rays=num_display_rays,
-                aperture_diameter=telescope.primary_diameter,
-                entry_height=telescope.tube_length * 1.15,
-            )
-            telescope.trace_rays(rays)
-            offsets = _find_focal_plane_positions(rays)
+        telescope.trace_rays(rays)
+        offsets = _find_focal_plane_positions(rays)
 
-        _draw_spot_diagram(ax, offsets, title=label)
+        # Extract focal plane y position
+        focal_plane_y = None
+        traced_rays = [r for r in rays if len(r.history) >= 2]
+        if traced_rays:
+            focal_plane_y = traced_rays[0].history[-1][1]
+
+        _draw_spot_diagram(ax, offsets, title=label, rays=rays,
+                          focal_plane_y=focal_plane_y)
 
     fig.suptitle("Spot Diagram Comparison", fontsize=14)
     plt.tight_layout()
@@ -2081,6 +2213,7 @@ def plot_psf_2d(
     figsize: tuple[float, float] = (7, 7),
     colormap: str = "inferno",
     include_obstruction: bool = True,
+    autoscale: bool = False,
     save_path: str | None = None,
 ) -> plt.Figure:
     """Show the 2D PSF image on a log scale, revealing diffraction spikes.
@@ -2097,6 +2230,8 @@ def plot_psf_2d(
         figsize: Figure size in inches.
         colormap: Matplotlib colormap.
         include_obstruction: Include central obstruction.
+        autoscale: If True, auto-scale the color range to show full dynamic range.
+                  If False, use fixed vmin=-4, vmax=0 for consistency.
         save_path: If provided, save the figure to this path.
 
     Returns:
@@ -2128,10 +2263,18 @@ def plot_psf_2d(
 
     # Display on log scale for dynamic range
     psf_display = np.clip(psf_2d, 1e-6, None)
-    ax.imshow(np.log10(psf_display),
+    psf_log = np.log10(psf_display)
+
+    # Set color scale range
+    if autoscale:
+        vmin, vmax = np.min(psf_log), np.max(psf_log)
+    else:
+        vmin, vmax = -4, 0
+
+    ax.imshow(psf_log,
               extent=[-half_size, half_size, -half_size, half_size],
               origin="lower", cmap=colormap,
-              vmin=-4, vmax=0)
+              vmin=vmin, vmax=vmax)
     ax.set_xlim(-image_scale, image_scale)
     ax.set_ylim(-image_scale, image_scale)
 
@@ -2679,6 +2822,66 @@ def chromatic_psf_kernel(
     return psf
 
 
+def _compute_spherical_aberration_spot(telescope: Telescope,
+                                        num_pixels: int,
+                                        half_size_mm: float,
+                                        wavelength_nm: float = 550.0,
+                                        num_rays: int = 21) -> np.ndarray:
+    """Compute geometric spot pattern from spherical aberration.
+
+    For parabolic mirrors: returns None (no spherical aberration).
+    For spherical mirrors: traces rays and creates spot diagram.
+
+    Args:
+        telescope: Telescope object.
+        num_pixels: Size of the output array.
+        half_size_mm: Half-width of the region in mm.
+        wavelength_nm: Wavelength for ray tracing.
+        num_rays: Number of rays to trace.
+
+    Returns:
+        2D array representing the geometric spot, or None if no spherical aberration.
+    """
+    # Only compute for spherical primaries
+    primary_type = getattr(telescope, 'primary_type', 'parabolic')
+    if primary_type != 'spherical':
+        return None
+
+    # Trace rays through the telescope
+    from telescope_sim.source.light_source import create_parallel_rays
+    rays = create_parallel_rays(
+        num_rays=num_rays,
+        aperture_diameter=telescope.primary_diameter,
+        entry_height=telescope.tube_length * 1.15,
+        wavelength_nm=wavelength_nm,
+    )
+    telescope.trace_rays(rays)
+
+    # Find focal plane positions
+    y_offsets = _find_focal_plane_positions(rays)
+    if y_offsets is None or len(y_offsets) == 0:
+        return None
+
+    # Build 2D spot image
+    pixel_size = 2.0 * half_size_mm / num_pixels
+    spot_image = np.zeros((num_pixels, num_pixels))
+    center = num_pixels // 2
+
+    for y_offset in y_offsets:
+        # Place each ray's position in the image
+        iy = center + int(round(y_offset / pixel_size))
+        # x is always 0 for our 2D ray tracing
+        ix = center
+        if 0 <= ix < num_pixels and 0 <= iy < num_pixels:
+            spot_image[iy, ix] += 1.0
+
+    # Smooth slightly for stability
+    from scipy.ndimage import gaussian_filter
+    spot_image = gaussian_filter(spot_image, sigma=0.5)
+
+    return spot_image
+
+
 def _compute_psf_at_field_angle(telescope: Telescope,
                                 field_angle_arcsec: float,
                                 wavelength_nm: float,
@@ -2686,10 +2889,14 @@ def _compute_psf_at_field_angle(telescope: Telescope,
                                 half_size_mm: float,
                                 include_obstruction: bool = True,
                                 ) -> np.ndarray:
-    """Compute the PSF at a given field angle, including coma.
+    """Compute the PSF at a given field angle, including coma and spherical aberration.
 
-    For on-axis (field_angle_arcsec ~ 0), returns the diffraction PSF.
-    For off-axis, convolves the coma spot pattern with the Airy kernel.
+    For on-axis (field_angle_arcsec ~ 0):
+        - Parabolic primary: pure diffraction PSF
+        - Spherical primary: diffraction PSF convolved with spherical aberration spot
+
+    For off-axis: convolves coma spot pattern with Airy kernel, and also includes
+    spherical aberration if present.
 
     Returns:
         2D PSF array of shape (num_pixels, num_pixels), peak-normalized.
@@ -2704,7 +2911,7 @@ def _compute_psf_at_field_angle(telescope: Telescope,
     use_fft = telescope.spider_vanes > 0
 
     if abs(field_angle_arcsec) < 1e-6:
-        # On-axis: pure diffraction PSF
+        # On-axis: diffraction PSF, plus spherical aberration if present
         if use_fft:
             base_pitch = wavelength_mm * f_ratio
             pixels_per_airy = airy_radius / base_pitch
@@ -2716,16 +2923,29 @@ def _compute_psf_at_field_angle(telescope: Telescope,
                 telescope.spider_vanes, telescope.spider_vane_width,
                 grid_size=256, oversample=oversample,
             )
-            return _resample_fft_psf(fft_psf, fft_half, half_size_mm,
-                                     num_pixels)
+            diffraction_psf = _resample_fft_psf(fft_psf, fft_half, half_size_mm,
+                                                 num_pixels)
         else:
             coords = np.linspace(-half_size_mm, half_size_mm, num_pixels)
             xx, yy = np.meshgrid(coords, coords)
             rr = np.sqrt(xx ** 2 + yy ** 2)
-            psf = compute_psf(rr, telescope.primary_diameter,
-                              telescope.focal_length, wavelength_mm,
-                              obs_ratio)
+            diffraction_psf = compute_psf(rr, telescope.primary_diameter,
+                                          telescope.focal_length, wavelength_mm,
+                                          obs_ratio)
+
+        # Add spherical aberration if spherical primary
+        sph_spot = _compute_spherical_aberration_spot(
+            telescope, num_pixels, half_size_mm, wavelength_nm
+        )
+        if sph_spot is not None:
+            # Convolve diffraction PSF with geometric spherical aberration
+            sph_spot = sph_spot / sph_spot.sum()
+            psf = fftconvolve(diffraction_psf, sph_spot, mode="same")
+            if psf.max() > 0:
+                psf /= psf.max()
             return psf
+        else:
+            return diffraction_psf
     else:
         # Off-axis: compute coma spot and convolve with Airy kernel
         x_off, y_off = compute_coma_spot(
@@ -2774,7 +2994,17 @@ def _compute_psf_at_field_angle(telescope: Telescope,
                                  obs_ratio)
         kernel = kernel / kernel.sum()
 
+        # Convolve coma with diffraction
         psf = fftconvolve(coma_image, kernel, mode="same")
+
+        # Add spherical aberration if present
+        sph_spot = _compute_spherical_aberration_spot(
+            telescope, num_pixels, half_size_mm, wavelength_nm
+        )
+        if sph_spot is not None:
+            sph_spot = sph_spot / sph_spot.sum()
+            psf = fftconvolve(psf, sph_spot, mode="same")
+
         if psf.max() > 0:
             psf /= psf.max()
         return psf
@@ -2969,7 +3199,8 @@ def _render_source_through_telescope(
                 telescope, 0.0, wavelength_nm, psf_n_img,
                 psf_half_for_kernel, include_obstruction,
             )
-            psf_kernel = psf / psf.sum()
+            psf_sum = psf.sum()
+            psf_kernel = psf / psf_sum if psf_sum > 0 else psf
 
             image = fftconvolve(ideal, psf_kernel, mode="same") * vignetting
 
@@ -2988,7 +3219,8 @@ def _render_source_through_telescope(
             telescope, 0.0, wavelength_nm, psf_n,
             psf_half_mm, include_obstruction,
         )
-        psf_kernel = psf / psf.sum()
+        psf_sum = psf.sum()
+        psf_kernel = psf / psf_sum if psf_sum > 0 else psf
         image = fftconvolve(ideal, psf_kernel, mode="same")
 
     # Optional atmospheric seeing
@@ -3195,6 +3427,7 @@ def plot_source_image(telescope: Telescope,
                       save_path: str | None = None,
                       eyepiece=None,
                       polychromatic: bool = False,
+                      eyepiece_view_figsize: tuple[float, float] | None = None,
                       ) -> plt.Figure | list[plt.Figure]:
     """Plot a simulated image of an astronomical source through the telescope.
 
@@ -3363,6 +3596,14 @@ def plot_source_image(telescope: Telescope,
                       alpha=0.6),
             color="white")
 
+    # NOTE: Obstruction overlay removed — the secondary obstruction effect
+    # is already correctly modeled in the PSF computation. Drawing a black
+    # circle on the image plane is physically incorrect.
+
+    # NOTE: AFOV circle/mask removed from enhanced view (Figure 1).
+    # The enhanced view is an enlarged view for detail inspection, not at TFOV scale.
+    # The true-size view (Figure 2) has the correctly-scaled field stop circle.
+
     plt.tight_layout()
     if save_path:
         fig.savefig(save_path, dpi=150, bbox_inches="tight")
@@ -3468,4 +3709,71 @@ def plot_source_image(telescope: Telescope,
 
     plt.tight_layout()
     figures.append(fig2)
+
+    # ── Figure 3: Eyepiece View (fixed-size, circular field) ─────────
+    # A screen-friendly view at fixed figsize with correct proportions
+    # (source size relative to FOV is accurate) but no angular
+    # perception matching.
+    if eyepiece_view_figsize is not None:
+        ev_w, ev_h = eyepiece_view_figsize
+        fig3, ax3 = plt.subplots(
+            figsize=(ev_w, ev_h),
+            subplot_kw={"aspect": "equal"},
+        )
+        fig3.patch.set_facecolor("black")
+        ax3.set_facecolor("black")
+
+        # Draw the source image at TFOV scale
+        _draw_source_on_axes(ax3, tfov_image, tfov_rgb,
+                             tfov_display_half, log_scale, colormap, fig3)
+
+        # Draw circular eyepiece field stop
+        theta_ev = np.linspace(0, 2 * np.pi, 200)
+        ax3.plot(tfov_display_half * np.cos(theta_ev),
+                 tfov_display_half * np.sin(theta_ev),
+                 color="gray", linewidth=1.5, alpha=0.6)
+
+        # Clip image to circular field stop
+        from matplotlib.patches import Circle as _Circle
+        clip_circle_ev = _Circle((0, 0), tfov_display_half,
+                                 transform=ax3.transData)
+        for child in ax3.get_children():
+            if hasattr(child, 'set_clip_path'):
+                child.set_clip_path(clip_circle_ev)
+
+        ax3.set_xlim(-tfov_display_half * 1.05, tfov_display_half * 1.05)
+        ax3.set_ylim(-tfov_display_half * 1.05, tfov_display_half * 1.05)
+        ax3.set_xlabel("")
+        ax3.set_ylabel("")
+        ax3.set_xticks([])
+        ax3.set_yticks([])
+
+        source_diam_arcsec_ev = source.field_extent_arcsec
+        apparent_source_deg_ev = source_diam_arcsec_ev / 3600.0 * mag
+
+        ax3.set_title(
+            f"Eyepiece View — {eyepiece.focal_length_mm:.0f}mm "
+            f"({mag:.0f}\u00d7, {tfov_arcmin:.1f}' TFOV)",
+            fontsize=10, color="white",
+        )
+
+        ev_ann = [
+            f"TFOV: {tfov_arcmin:.1f}' "
+            f"({eyepiece.apparent_fov_deg:.0f}\u00b0 AFOV)",
+            f"Source apparent size: {apparent_source_deg_ev:.1f}\u00b0",
+            f"Exit pupil: {exit_pupil:.1f}mm",
+        ]
+        if washout_strength > 0.01:
+            ev_ann.append(f"Washout: {washout_strength:.0%}")
+
+        ax3.text(0.02, 0.98, "\n".join(ev_ann),
+                 transform=ax3.transAxes, fontsize=7,
+                 verticalalignment="top",
+                 bbox=dict(boxstyle="round,pad=0.3", facecolor="black",
+                           alpha=0.6),
+                 color="white")
+
+        plt.tight_layout()
+        figures.append(fig3)
+
     return figures

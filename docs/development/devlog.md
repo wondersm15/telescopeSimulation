@@ -1505,3 +1505,20 @@ multi-element visualization in ray tracing.
 - Ray trace visualization now accurately represents actual optical design
 - All 215 tests still passing (no breaking changes to existing code)
 - User can now compare chromatic aberration: singlet vs achromat vs APO in GUI
+
+---
+
+## Bug Fixes & Layout Improvements Round 3.2 — 2026-03-23
+
+### What was done
+1. **Removed misleading obstruction overlay** (`ray_trace_plot.py`): Deleted the black circle drawn on simulated images — obstruction is already modeled in the PSF, not on the image plane.
+2. **Fixed zero-obstruction crash**: Added safety guards (`psf_sum > 0`) to PSF normalization at two locations that previously caused division-by-zero when obstruction was 0 or disabled.
+3. **Performance tab layout overhaul** (`performance_tab.py`): Moved metrics, explanation, physics info, and PSF display options into a right sidebar (max 260px). Compacted controls grid with tighter spacing and merged rows (wavelength + obstruction, focal length + effective f/ratio on same row).
+4. **Analytics tab — 3 charts in one row** (`analytics_tab.py`): Moved PSF comparison chart from a separate full-width row into the same horizontal layout as resolution and light gathering charts. Reduced figure sizes and table max height.
+5. **AFOV tooltip** (`design_tab.py`): Added descriptive tooltip to the Apparent FOV spinner explaining typical eyepiece types.
+
+### Files modified
+- `telescope_sim/plotting/ray_trace_plot.py` — overlay removal + PSF normalization guards
+- `telescope_gui/single_mode/performance_tab.py` — sidebar layout + compact controls
+- `telescope_gui/comparison_mode/analytics_tab.py` — 3 charts in one row
+- `telescope_gui/single_mode/design_tab.py` — AFOV tooltip

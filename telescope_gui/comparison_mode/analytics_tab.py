@@ -6,14 +6,17 @@ Shows comparative metrics and charts for multiple telescope configurations.
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
-    QPushButton, QLabel, QComboBox, QDoubleSpinBox, QGroupBox, QTableWidget, QTableWidgetItem
+    QPushButton, QLabel, QComboBox, QDoubleSpinBox, QSpinBox, QGroupBox, QTableWidget, QTableWidgetItem
 )
 from PyQt6.QtCore import Qt
 import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 
 from telescope_gui.widgets.matplotlib_canvas import MatplotlibCanvas
-from telescope_sim.geometry import NewtonianTelescope, CassegrainTelescope, RefractingTelescope, MaksutovCassegrainTelescope
+from telescope_sim.geometry import (
+    NewtonianTelescope, CassegrainTelescope, RefractingTelescope,
+    MaksutovCassegrainTelescope, SchmidtCassegrainTelescope
+)
 
 
 class AnalyticsTab(QWidget):
@@ -40,46 +43,46 @@ class AnalyticsTab(QWidget):
         main_layout.addWidget(table_label)
 
         self.metrics_table = QTableWidget()
-        self.metrics_table.setMaximumHeight(200)
+        self.metrics_table.setMaximumHeight(150)
         main_layout.addWidget(self.metrics_table)
 
-        # Bottom: Charts
+        # Charts: all 3 in one row
         charts_layout = QHBoxLayout()
 
-        # Left: Resolution comparison chart
+        # Resolution comparison chart
         resolution_container = QVBoxLayout()
         resolution_label = QLabel("Resolution Limits")
         resolution_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         resolution_label.setStyleSheet("font-weight: bold; font-size: 11pt;")
         resolution_container.addWidget(resolution_label)
 
-        self.resolution_canvas = MatplotlibCanvas(figsize=(6, 5))
+        self.resolution_canvas = MatplotlibCanvas(figsize=(5, 4))
         resolution_container.addWidget(self.resolution_canvas)
         charts_layout.addLayout(resolution_container)
 
-        # Right: Light gathering comparison chart
+        # Light gathering comparison chart
         light_container = QVBoxLayout()
         light_label = QLabel("Light Gathering Power")
         light_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         light_label.setStyleSheet("font-weight: bold; font-size: 11pt;")
         light_container.addWidget(light_label)
 
-        self.light_canvas = MatplotlibCanvas(figsize=(6, 5))
+        self.light_canvas = MatplotlibCanvas(figsize=(5, 4))
         light_container.addWidget(self.light_canvas)
         charts_layout.addLayout(light_container)
 
-        main_layout.addLayout(charts_layout)
-
-        # PSF Comparison (full width below other charts)
+        # PSF Comparison (same row)
         psf_container = QVBoxLayout()
-        psf_label = QLabel("Point Spread Function Comparison")
+        psf_label = QLabel("PSF Comparison")
         psf_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         psf_label.setStyleSheet("font-weight: bold; font-size: 11pt;")
         psf_container.addWidget(psf_label)
 
-        self.psf_canvas = MatplotlibCanvas(figsize=(12, 5))
+        self.psf_canvas = MatplotlibCanvas(figsize=(5, 4))
         psf_container.addWidget(self.psf_canvas)
-        main_layout.addLayout(psf_container)
+        charts_layout.addLayout(psf_container)
+
+        main_layout.addLayout(charts_layout)
 
         # Controls
         controls_group = QGroupBox("Telescope Configurations")
@@ -90,7 +93,7 @@ class AnalyticsTab(QWidget):
         config1_layout.addWidget(QLabel("Telescope 1:"), 0, 0)
 
         self.type1_combo = QComboBox()
-        self.type1_combo.addItems(["Newtonian", "Cassegrain", "Refractor", "Maksutov-Cassegrain"])
+        self.type1_combo.addItems(["Newtonian", "Cassegrain", "Refractor", "Maksutov-Cassegrain", "Schmidt-Cassegrain"])
         config1_layout.addWidget(self.type1_combo, 0, 1)
 
         config1_layout.addWidget(QLabel("Aperture (mm):"), 0, 2)
@@ -119,6 +122,33 @@ class AnalyticsTab(QWidget):
         self.obj1_combo.addItems(["Singlet", "Achromat", "APO Doublet", "APO Triplet (air-spaced)"])
         config1_layout.addWidget(self.obj1_combo, 1, 1)
 
+        # Spider vanes for telescope 1 (row 2, shown for reflectors)
+        self.spider1_label = QLabel("Spider Vanes:")
+        config1_layout.addWidget(self.spider1_label, 2, 0)
+        self.spider1_spin = QSpinBox()
+        self.spider1_spin.setRange(0, 4)
+        self.spider1_spin.setValue(0)
+        config1_layout.addWidget(self.spider1_spin, 2, 1)
+
+        self.vane_width1_label = QLabel("Vane Width (mm):")
+        config1_layout.addWidget(self.vane_width1_label, 2, 2)
+        self.vane_width1_spin = QDoubleSpinBox()
+        self.vane_width1_spin.setRange(0.5, 5.0)
+        self.vane_width1_spin.setSingleStep(0.5)
+        self.vane_width1_spin.setValue(2.0)
+        config1_layout.addWidget(self.vane_width1_spin, 2, 3)
+
+        # Obstruction controls for telescope 1 (row 2, cols 4-5)
+        self.obstruction1_label = QLabel("Obstruction:")
+        config1_layout.addWidget(self.obstruction1_label, 2, 4)
+        self.obstruction1_spin = QDoubleSpinBox()
+        self.obstruction1_spin.setRange(0.0, 0.5)
+        self.obstruction1_spin.setSingleStep(0.01)
+        self.obstruction1_spin.setValue(0.20)
+        self.obstruction1_spin.setDecimals(2)
+        self.obstruction1_spin.setToolTip("Secondary diameter / Primary diameter")
+        config1_layout.addWidget(self.obstruction1_spin, 2, 5)
+
         # Connect telescope type change to update control visibility
         self.type1_combo.currentTextChanged.connect(self.update_controls_visibility)
 
@@ -129,7 +159,7 @@ class AnalyticsTab(QWidget):
         config2_layout.addWidget(QLabel("Telescope 2:"), 0, 0)
 
         self.type2_combo = QComboBox()
-        self.type2_combo.addItems(["Newtonian", "Cassegrain", "Refractor", "Maksutov-Cassegrain"])
+        self.type2_combo.addItems(["Newtonian", "Cassegrain", "Refractor", "Maksutov-Cassegrain", "Schmidt-Cassegrain"])
         self.type2_combo.setCurrentText("Cassegrain")
         config2_layout.addWidget(self.type2_combo, 0, 1)
 
@@ -159,6 +189,33 @@ class AnalyticsTab(QWidget):
         self.obj2_combo.addItems(["Singlet", "Achromat", "APO Doublet", "APO Triplet (air-spaced)"])
         config2_layout.addWidget(self.obj2_combo, 1, 1)
 
+        # Spider vanes for telescope 2 (row 2, shown for reflectors)
+        self.spider2_label = QLabel("Spider Vanes:")
+        config2_layout.addWidget(self.spider2_label, 2, 0)
+        self.spider2_spin = QSpinBox()
+        self.spider2_spin.setRange(0, 4)
+        self.spider2_spin.setValue(0)
+        config2_layout.addWidget(self.spider2_spin, 2, 1)
+
+        self.vane_width2_label = QLabel("Vane Width (mm):")
+        config2_layout.addWidget(self.vane_width2_label, 2, 2)
+        self.vane_width2_spin = QDoubleSpinBox()
+        self.vane_width2_spin.setRange(0.5, 5.0)
+        self.vane_width2_spin.setSingleStep(0.5)
+        self.vane_width2_spin.setValue(2.0)
+        config2_layout.addWidget(self.vane_width2_spin, 2, 3)
+
+        # Obstruction controls for telescope 2 (row 2, cols 4-5)
+        self.obstruction2_label = QLabel("Obstruction:")
+        config2_layout.addWidget(self.obstruction2_label, 2, 4)
+        self.obstruction2_spin = QDoubleSpinBox()
+        self.obstruction2_spin.setRange(0.0, 0.5)
+        self.obstruction2_spin.setSingleStep(0.01)
+        self.obstruction2_spin.setValue(0.30)
+        self.obstruction2_spin.setDecimals(2)
+        self.obstruction2_spin.setToolTip("Secondary diameter / Primary diameter")
+        config2_layout.addWidget(self.obstruction2_spin, 2, 5)
+
         # Connect telescope type change to update control visibility
         self.type2_combo.currentTextChanged.connect(self.update_controls_visibility)
 
@@ -181,45 +238,70 @@ class AnalyticsTab(QWidget):
         self.update_view()
 
     def update_controls_visibility(self):
-        """Show/hide primary/objective controls based on telescope type."""
+        """Show/hide primary/objective/spider/obstruction controls based on telescope type."""
         # Telescope 1
-        is_refractor1 = self.type1_combo.currentText() == "Refractor"
-        self.primary1_label.setVisible(not is_refractor1)
-        self.primary1_combo.setVisible(not is_refractor1)
+        type1 = self.type1_combo.currentText()
+        is_refractor1 = type1 == "Refractor"
+        is_newtonian1 = type1 == "Newtonian"
+        is_reflector1 = not is_refractor1
+
+        self.primary1_label.setVisible(is_newtonian1)
+        self.primary1_combo.setVisible(is_newtonian1)
         self.obj1_label.setVisible(is_refractor1)
         self.obj1_combo.setVisible(is_refractor1)
+        self.spider1_label.setVisible(is_reflector1)
+        self.spider1_spin.setVisible(is_reflector1)
+        self.vane_width1_label.setVisible(is_reflector1)
+        self.vane_width1_spin.setVisible(is_reflector1)
+        self.obstruction1_label.setVisible(is_reflector1)
+        self.obstruction1_spin.setVisible(is_reflector1)
 
         # Telescope 2
-        is_refractor2 = self.type2_combo.currentText() == "Refractor"
-        self.primary2_label.setVisible(not is_refractor2)
-        self.primary2_combo.setVisible(not is_refractor2)
+        type2 = self.type2_combo.currentText()
+        is_refractor2 = type2 == "Refractor"
+        is_newtonian2 = type2 == "Newtonian"
+        is_reflector2 = not is_refractor2
+
+        self.primary2_label.setVisible(is_newtonian2)
+        self.primary2_combo.setVisible(is_newtonian2)
         self.obj2_label.setVisible(is_refractor2)
         self.obj2_combo.setVisible(is_refractor2)
+        self.spider2_label.setVisible(is_reflector2)
+        self.spider2_spin.setVisible(is_reflector2)
+        self.vane_width2_label.setVisible(is_reflector2)
+        self.vane_width2_spin.setVisible(is_reflector2)
+        self.obstruction2_label.setVisible(is_reflector2)
+        self.obstruction2_spin.setVisible(is_reflector2)
 
-    def build_telescope(self, telescope_type, diameter, fratio, objective_type="singlet", primary_type="parabolic"):
+    def build_telescope(self, telescope_type, diameter, fratio, objective_type="singlet",
+                       primary_type="parabolic", spider_vanes=0, spider_vane_width=2.0,
+                       obstruction_ratio=0.20):
         """Build telescope object from configuration."""
         telescope_type = telescope_type.lower().replace("-", "")
         focal_length = diameter * fratio
-
-        # Determine mirror type for reflectors
-        from telescope_sim.geometry.mirrors import ParabolicMirror, SphericalMirror
-        mirror_type = ParabolicMirror if primary_type.lower() == "parabolic" else SphericalMirror
+        secondary_diameter = diameter * obstruction_ratio
 
         if telescope_type == "newtonian":
             return NewtonianTelescope(
                 primary_diameter=diameter,
                 focal_length=focal_length,
-                mirror_type=mirror_type
+                primary_type=primary_type.lower(),
+                spider_vanes=spider_vanes,
+                spider_vane_width=spider_vane_width,
+                secondary_minor_axis=secondary_diameter,
+                enable_obstruction=obstruction_ratio > 0
             )
         elif telescope_type == "cassegrain":
             return CassegrainTelescope(
                 primary_diameter=diameter,
                 primary_focal_length=focal_length,
                 secondary_magnification=3.0,
-                mirror_type=mirror_type
+                spider_vanes=spider_vanes,
+                spider_vane_width=spider_vane_width,
+                secondary_minor_axis=secondary_diameter,
+                enable_obstruction=obstruction_ratio > 0
             )
         elif telescope_type == "refractor":
-            # Map GUI labels to objective_type values
             objective_map = {
                 "singlet": "singlet",
                 "achromat": "achromat",
@@ -236,12 +318,26 @@ class AnalyticsTab(QWidget):
             return MaksutovCassegrainTelescope(
                 primary_diameter=diameter,
                 primary_focal_length=focal_length,
-                secondary_magnification=3.0
+                secondary_magnification=3.0,
+                spider_vanes=spider_vanes,
+                spider_vane_width=spider_vane_width,
+                secondary_minor_axis=secondary_diameter,
+                enable_obstruction=obstruction_ratio > 0
+            )
+        elif telescope_type == "schmidtcassegrain":
+            return SchmidtCassegrainTelescope(
+                primary_diameter=diameter,
+                primary_focal_length=focal_length,
+                secondary_magnification=3.0,
+                spider_vanes=spider_vanes,
+                spider_vane_width=spider_vane_width
             )
         else:
             return NewtonianTelescope(
                 primary_diameter=diameter,
-                focal_length=focal_length
+                focal_length=focal_length,
+                spider_vanes=spider_vanes,
+                spider_vane_width=spider_vane_width
             )
 
     def calculate_metrics(self, telescope, label):
@@ -297,7 +393,7 @@ class AnalyticsTab(QWidget):
 
     def plot_resolution_comparison(self, metrics_list):
         """Create resolution comparison bar chart."""
-        fig = Figure(figsize=(6, 5))
+        fig = Figure(figsize=(5, 4))
         ax = fig.add_subplot(111)
 
         labels = [m["label"] for m in metrics_list]
@@ -322,7 +418,7 @@ class AnalyticsTab(QWidget):
 
     def plot_light_gathering_comparison(self, metrics_list):
         """Create light gathering comparison bar chart."""
-        fig = Figure(figsize=(6, 5))
+        fig = Figure(figsize=(5, 4))
         ax = fig.add_subplot(111)
 
         labels = [m["label"] for m in metrics_list]
@@ -342,7 +438,7 @@ class AnalyticsTab(QWidget):
         from telescope_sim.physics.diffraction import compute_psf
         import numpy as np
 
-        fig = Figure(figsize=(12, 5))
+        fig = Figure(figsize=(5, 4))
         ax = fig.add_subplot(111)
 
         wavelength_nm = 550.0
@@ -390,6 +486,9 @@ class AnalyticsTab(QWidget):
                     "fratio": self.fratio1_spin.value(),
                     "objective": self.obj1_combo.currentText(),
                     "primary": self.primary1_combo.currentText(),
+                    "spider_vanes": self.spider1_spin.value(),
+                    "spider_vane_width": self.vane_width1_spin.value(),
+                    "obstruction_ratio": self.obstruction1_spin.value(),
                 },
                 {
                     "label": f"{self.type2_combo.currentText()} 2",
@@ -398,6 +497,9 @@ class AnalyticsTab(QWidget):
                     "fratio": self.fratio2_spin.value(),
                     "objective": self.obj2_combo.currentText(),
                     "primary": self.primary2_combo.currentText(),
+                    "spider_vanes": self.spider2_spin.value(),
+                    "spider_vane_width": self.vane_width2_spin.value(),
+                    "obstruction_ratio": self.obstruction2_spin.value(),
                 },
             ]
 
@@ -411,7 +513,10 @@ class AnalyticsTab(QWidget):
                     config["diameter"],
                     config["fratio"],
                     config["objective"],
-                    config["primary"]
+                    config["primary"],
+                    config["spider_vanes"],
+                    config["spider_vane_width"],
+                    config["obstruction_ratio"]
                 )
                 telescopes.append(telescope)
                 labels.append(config["label"])

@@ -39,6 +39,8 @@ class Ray:
         origin: Starting point as numpy array [x, y].
         direction: Unit direction vector as numpy array [dx, dy].
         wavelength_nm: Wavelength of light in nanometers (default 550.0 green).
+        aperture_position: Radial distance from aperture center in mm (optional).
+                          Used for color-coding spot diagrams by incident position.
         history: List of (x, y) points the ray has visited,
                  used for plotting the ray path.
     """
@@ -46,6 +48,7 @@ class Ray:
     origin: np.ndarray
     direction: np.ndarray
     wavelength_nm: float = 550.0
+    aperture_position: float | None = None
     history: list = field(default_factory=list)
 
     def __post_init__(self):

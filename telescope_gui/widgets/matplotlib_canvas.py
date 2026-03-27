@@ -21,6 +21,10 @@ class MatplotlibCanvas(QWidget):
         self.canvas = FigureCanvasQTAgg(self.figure)
         self.toolbar = NavigationToolbar2QT(self.canvas, self)
 
+        # Stored data-space limits for preserve_limits (not pixel-space)
+        self._preserved_xlim = None
+        self._preserved_ylim = None
+
         # Layout
         layout = QVBoxLayout()
         layout.addWidget(self.toolbar)
@@ -28,15 +32,32 @@ class MatplotlibCanvas(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         self.setLayout(layout)
 
-    def set_figure(self, fig):
+    def set_figure(self, fig, preserve_limits=False):
         """Replace the current figure with a new one.
 
         Converts the provided figure to an image and displays it.
-        This approach is simple and reliable.
+        When preserve_limits is True, applies stored data-space axes limits
+        to the source figure before rendering (not pixel-space limits from
+        the rasterized image).
         """
+        # Apply preserved data-space limits to the source figure before rendering
+        if preserve_limits and self._preserved_xlim is not None and fig.axes:
+            fig.axes[0].set_xlim(self._preserved_xlim)
+            fig.axes[0].set_ylim(self._preserved_ylim)
+
+        # Save data-space limits BEFORE rasterizing
+        if fig.axes:
+            self._preserved_xlim = fig.axes[0].get_xlim()
+            self._preserved_ylim = fig.axes[0].get_ylim()
+
         # Save the figure to a buffer
+        # When preserving limits, skip bbox_inches='tight' so the figure layout
+        # stays fixed — tight crop changes when data limits change, causing shifts.
         buf = io.BytesIO()
-        fig.savefig(buf, format='png', bbox_inches='tight', dpi=100)
+        if preserve_limits:
+            fig.savefig(buf, format='png', dpi=100)
+        else:
+            fig.savefig(buf, format='png', bbox_inches='tight', dpi=100)
         buf.seek(0)
 
         # Read as image

@@ -4,6 +4,28 @@ import numpy as np
 from scipy.special import j1
 
 
+def rayleigh_criterion_arcsec(wavelength_m: float, aperture_m: float,
+                              obstruction_ratio: float = 0.0) -> float:
+    """Rayleigh criterion angular resolution in arcseconds.
+
+    For an annular aperture with obstruction ratio epsilon, the first
+    zero of the diffraction pattern shifts inward, slightly improving
+    angular resolution: theta = 1.22 * lambda / D / (1 + epsilon^2).
+
+    Args:
+        wavelength_m: Wavelength of light in meters.
+        aperture_m: Aperture diameter in meters.
+        obstruction_ratio: Central obstruction ratio (0.0 to <1.0).
+
+    Returns:
+        Angular resolution in arcseconds.
+    """
+    base = 1.22 * wavelength_m / aperture_m * 206265
+    if obstruction_ratio > 0:
+        base *= 1.0 / (1.0 + obstruction_ratio ** 2)
+    return base
+
+
 def compute_psf(r: np.ndarray, aperture_diameter: float,
                 focal_length: float,
                 wavelength_mm: float,

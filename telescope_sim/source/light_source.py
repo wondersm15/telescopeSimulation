@@ -55,6 +55,7 @@ def create_parallel_rays(num_rays: int, aperture_diameter: float,
     for x in x_positions:
         origin = np.array([x, entry_height])
         rays.append(Ray(origin=origin, direction=direction.copy(),
-                        wavelength_nm=wavelength_nm))
+                        wavelength_nm=wavelength_nm,
+                        aperture_position=abs(x)))
 
     return rays

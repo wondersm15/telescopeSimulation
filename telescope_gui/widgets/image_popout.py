@@ -16,7 +16,7 @@ class ImagePopoutWindow(QDialog):
     This window simply displays it without additional scaling.
     """
 
-    def __init__(self, figure, title="Simulated View", parent=None):
+    def __init__(self, figure, title="Simulated View", display_mode="scaled", parent=None):
         super().__init__(parent)
 
         self.setWindowTitle(title)
@@ -39,11 +39,13 @@ class ImagePopoutWindow(QDialog):
         # Layout
         layout = QVBoxLayout()
 
-        # Info header
-        info_label = QLabel(
-            "Perceived Angular Size View — "
-            "Figure sized by CLI logic for ~50cm viewing distance"
-        )
+        # Info header (varies by display mode)
+        header_text = {
+            "scaled": "Standardized View — Enhanced detail, not at true angular scale",
+            "true_size": "Perceived Angular Size View — Figure sized for ~50cm viewing distance",
+            "eyepiece_view": "Eyepiece View — Fixed-size circular field with correct proportions",
+        }.get(display_mode, "Simulated View")
+        info_label = QLabel(header_text)
         info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         info_label.setStyleSheet("padding: 10px; background-color: #f0f0f0; font-weight: bold;")
         layout.addWidget(info_label)

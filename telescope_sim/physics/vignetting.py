@@ -95,6 +95,12 @@ def compute_vignetting(field_angle_arcsec, primary_diameter: float,
     # Secondary mirror radius
     r_sec = secondary_minor_axis / 2.0
 
+    # No secondary mirror means full illumination everywhere
+    if r_sec <= 0:
+        if scalar_input:
+            return 1.0
+        return np.ones_like(field_angle_arcsec)
+
     # Lateral shift of the beam center at the secondary plane
     delta = np.abs(theta_rad) * secondary_offset
 

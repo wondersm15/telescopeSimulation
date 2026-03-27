@@ -44,12 +44,14 @@ class NewtonianTelescope:
                  secondary_minor_axis: float | None = None,
                  primary_type: str = "parabolic",
                  spider_vanes: int = 0,
-                 spider_vane_width: float = 1.0):
+                 spider_vane_width: float = 1.0,
+                 enable_obstruction: bool = True):
         self.primary_diameter = primary_diameter
         self.focal_length = focal_length
         self.primary_type = primary_type
         self.spider_vanes = spider_vanes
         self.spider_vane_width = spider_vane_width
+        self.enable_obstruction = enable_obstruction
 
         if secondary_offset is None:
             secondary_offset = focal_length - primary_diameter * 0.1
@@ -57,6 +59,11 @@ class NewtonianTelescope:
 
         if secondary_minor_axis is None:
             secondary_minor_axis = primary_diameter * 0.2
+
+        # Allow disabling obstruction by setting secondary to zero
+        if not enable_obstruction:
+            secondary_minor_axis = 0.0
+
         self.secondary_minor_axis = secondary_minor_axis
 
         # Build primary mirror
@@ -236,14 +243,17 @@ class CassegrainTelescope:
                  primary_focal_length: float,
                  secondary_magnification: float = 4.0,
                  back_focal_distance: float | None = None,
+                 secondary_minor_axis: float | None = None,
                  spider_vanes: int = 0,
-                 spider_vane_width: float = 1.0):
+                 spider_vane_width: float = 1.0,
+                 enable_obstruction: bool = True):
         self.primary_diameter = primary_diameter
         self.primary_focal_length = primary_focal_length
         self.secondary_magnification = secondary_magnification
         self.primary_type = "parabolic"
         self.spider_vanes = spider_vanes
         self.spider_vane_width = spider_vane_width
+        self.enable_obstruction = enable_obstruction
 
         # Effective focal length of the whole system
         self.focal_length = primary_focal_length * secondary_magnification
@@ -280,9 +290,14 @@ class CassegrainTelescope:
         # Secondary mirror diameter: determined by the light cone from
         # the primary. At the secondary's position, the beam from the
         # primary edge subtends:
-        self.secondary_minor_axis = (
-            primary_diameter * d / f
-        )
+        if secondary_minor_axis is None:
+            secondary_minor_axis = primary_diameter * d / f
+
+        # Allow disabling obstruction by setting secondary to zero
+        if not enable_obstruction:
+            secondary_minor_axis = 0.0
+
+        self.secondary_minor_axis = secondary_minor_axis
 
         # --- Hyperbolic secondary parameters ---
         # The two foci of the hyperbola are at:
@@ -679,9 +694,11 @@ class MaksutovCassegrainTelescope:
                  primary_focal_length: float,
                  secondary_magnification: float = 4.0,
                  back_focal_distance: float | None = None,
+                 secondary_minor_axis: float | None = None,
                  meniscus_thickness: float | None = None,
                  spider_vanes: int = 0,
-                 spider_vane_width: float = 1.0):
+                 spider_vane_width: float = 1.0,
+                 enable_obstruction: bool = True):
         self.primary_diameter = primary_diameter
         self.primary_focal_length = primary_focal_length
         self.secondary_magnification = secondary_magnification
@@ -689,6 +706,8 @@ class MaksutovCassegrainTelescope:
         self.corrected_optics = True
         self.spider_vanes = spider_vanes
         self.spider_vane_width = spider_vane_width
+        self.enable_obstruction = enable_obstruction
+        self._user_secondary_minor_axis = secondary_minor_axis
 
         # Effective focal length of the whole system
         self.focal_length = primary_focal_length * secondary_magnification
@@ -774,7 +793,18 @@ class MaksutovCassegrainTelescope:
 
         # Store final geometry
         self.secondary_offset = sec_off
-        self.secondary_minor_axis = primary_diameter * d / f_eff
+
+        # Use user-provided secondary size or calculate from geometry
+        if self._user_secondary_minor_axis is None:
+            calculated_secondary = primary_diameter * d / f_eff
+        else:
+            calculated_secondary = self._user_secondary_minor_axis
+
+        # Allow disabling obstruction by setting secondary to zero
+        if not self.enable_obstruction:
+            calculated_secondary = 0.0
+
+        self.secondary_minor_axis = calculated_secondary
 
         # Build the spherical primary mirror
         self.primary: Mirror = SphericalMirror(
@@ -1000,8 +1030,10 @@ class SchmidtCassegrainTelescope:
                  primary_focal_length: float,
                  secondary_magnification: float = 4.0,
                  back_focal_distance: float | None = None,
+                 secondary_minor_axis: float | None = None,
                  spider_vanes: int = 0,
-                 spider_vane_width: float = 1.0):
+                 spider_vane_width: float = 1.0,
+                 enable_obstruction: bool = True):
         self.primary_diameter = primary_diameter
         self.primary_focal_length = primary_focal_length
         self.secondary_magnification = secondary_magnification
@@ -1009,6 +1041,7 @@ class SchmidtCassegrainTelescope:
         self.corrected_optics = True
         self.spider_vanes = spider_vanes
         self.spider_vane_width = spider_vane_width
+        self.enable_obstruction = enable_obstruction
 
         self.focal_length = primary_focal_length * secondary_magnification
 
@@ -1023,7 +1056,18 @@ class SchmidtCassegrainTelescope:
 
         d = (b + f) / (m + 1.0)
         self.secondary_offset = f - d
-        self.secondary_minor_axis = primary_diameter * d / f
+
+        # Use user-provided secondary size or calculate from geometry
+        if secondary_minor_axis is None:
+            calculated_secondary = primary_diameter * d / f
+        else:
+            calculated_secondary = secondary_minor_axis
+
+        # Allow disabling obstruction by setting secondary to zero
+        if not enable_obstruction:
+            calculated_secondary = 0.0
+
+        self.secondary_minor_axis = calculated_secondary
 
         # Convex spherical secondary
         r_secondary = 2.0 * (f + b) * m / (m * m - 1.0)
