@@ -4,7 +4,7 @@ A comprehensive guide to the codebase architecture, underlying physics,
 how to run analyses, coding patterns used, and how to apply the simulation
 to real telescope design decisions.
 
-**Last updated**: March 2026 | **Tests**: 215 passing | **Code**: ~7,200 lines
+**Last updated**: March 2026 | **Tests**: 291 passing | **Code**: ~7,200 lines
 
 > **Getting Started**: See [README.md](../../README.md) for installation and quick start. Always activate the virtual environment before working: `source venv/bin/activate`. Run `deactivate` when done.
 

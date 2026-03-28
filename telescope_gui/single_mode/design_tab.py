@@ -15,13 +15,11 @@ import numpy as np
 
 from telescope_gui.widgets.matplotlib_canvas import MatplotlibCanvas
 from telescope_gui.widgets.image_popout import ImagePopoutWindow
-from telescope_sim.geometry import (
-    NewtonianTelescope, CassegrainTelescope, RefractingTelescope,
-    MaksutovCassegrainTelescope, SchmidtCassegrainTelescope
-)
+from telescope_gui.widgets.telescope_controls import TelescopeControlPanel
+from telescope_gui.widgets.source_controls import get_source, get_seeing
+from telescope_gui.telescope_builder import build_telescope
 from telescope_sim.geometry.eyepiece import Eyepiece
 from telescope_sim.plotting import plot_ray_trace, plot_source_image, plot_polychromatic_ray_trace
-from telescope_sim.source.sources import Jupiter, Moon, Saturn, StarField, PointSource
 from telescope_sim.source.light_source import create_parallel_rays
 from telescope_sim.physics.diffraction import rayleigh_criterion_arcsec
 
@@ -35,12 +33,6 @@ class DesignTab(QWidget):
         super().__init__(parent)
 
         # Default configuration
-        self.telescope_type = "newtonian"
-        self.primary_diameter = 200.0
-        self.focal_length = 1000.0
-        self.primary_type = "parabolic"
-        self.source_type = "jupiter"
-        self.seeing = "good"
         self.current_figure = None  # Store current figure for pop-out
         self.true_size_figure = None  # Store true angular size figure (with eyepiece)
         self.eyepiece_view_figure = None  # Store eyepiece view figure
@@ -129,225 +121,49 @@ class DesignTab(QWidget):
         self.eyepiece_label.setStyleSheet("color: #0066cc; padding: 5px;")
         sidebar_layout.addWidget(self.eyepiece_label)
 
-        # Controls — 2-column grid (label | widget), one control per row
-        controls_group = QGroupBox("Controls")
-        controls_layout = QGridLayout()
+        # Shared telescope control panel
+        self.telescope_panel = TelescopeControlPanel(
+            number=1, layout_mode="sidebar", show_group_box=True
+        )
+        sidebar_layout.addWidget(self.telescope_panel)
 
+        # Additional design-tab-specific controls
+        extra_group = QGroupBox("Source & Display")
+        extra_layout = QGridLayout()
         row = 0
 
-        # Telescope type
-        controls_layout.addWidget(QLabel("Telescope Type:"), row, 0)
-        row += 1
-        self.telescope_combo = QComboBox()
-        self.telescope_combo.addItems([
-            "Newtonian", "Cassegrain", "Refractor",
-            "Maksutov-Cassegrain", "Schmidt-Cassegrain"
-        ])
-        self.telescope_combo.setCurrentText("Newtonian")
-        self.telescope_combo.currentTextChanged.connect(self.on_telescope_type_changed)
-        controls_layout.addWidget(self.telescope_combo, row, 0)
-
-        row += 1
-
-        # Aperture
-        controls_layout.addWidget(QLabel("Aperture (mm):"), row, 0)
-        row += 1
-        self.aperture_spin = QDoubleSpinBox()
-        self.aperture_spin.setRange(50.0, 500.0)
-        self.aperture_spin.setSingleStep(10.0)
-        self.aperture_spin.setValue(200.0)
-        controls_layout.addWidget(self.aperture_spin, row, 0)
-
-        row += 1
-
-        # Primary type (for reflectors)
-        self.primary_label = QLabel("Primary Type:")
-        controls_layout.addWidget(self.primary_label, row, 0)
-        row += 1
-        self.primary_combo = QComboBox()
-        self.primary_combo.addItems(["Parabolic", "Spherical"])
-        self.primary_combo.setCurrentText("Parabolic")
-        controls_layout.addWidget(self.primary_combo, row, 0)
-
-        # Objective type (for refractors) — shares same rows, toggled by visibility
-        self.objective_label = QLabel("Objective Type:")
-        controls_layout.addWidget(self.objective_label, row - 1, 0)
-        self.objective_combo = QComboBox()
-        self.objective_combo.addItems([
-            "Singlet", "Achromat", "APO Doublet",
-            "APO Triplet (air-spaced)"
-        ])
-        self.objective_combo.setCurrentText("Singlet")
-        controls_layout.addWidget(self.objective_combo, row, 0)
-
-        # Hide objective controls initially (shown when refractor selected)
-        self.objective_label.hide()
-        self.objective_combo.hide()
-
-        row += 1
-
-        # Secondary magnification (for Cassegrain variants)
-        self.sec_mag_label = QLabel("Secondary Magnification:")
-        self.sec_mag_label.setToolTip("System focal length = primary FL × this value")
-        controls_layout.addWidget(self.sec_mag_label, row, 0)
-        row += 1
-        self.sec_mag_spin = QDoubleSpinBox()
-        self.sec_mag_spin.setRange(1.5, 6.0)
-        self.sec_mag_spin.setSingleStep(0.5)
-        self.sec_mag_spin.setValue(3.0)
-        self.sec_mag_spin.setToolTip("System focal length = primary FL × this value")
-        controls_layout.addWidget(self.sec_mag_spin, row, 0)
-        # Hidden by default (shown for Cassegrain variants)
-        self.sec_mag_label.hide()
-        self.sec_mag_spin.hide()
-
-        row += 1
-
-        # f-ratio
-        controls_layout.addWidget(QLabel("f-ratio:"), row, 0)
-        row += 1
-        self.fratio_spin = QDoubleSpinBox()
-        self.fratio_spin.setRange(3.0, 15.0)
-        self.fratio_spin.setSingleStep(0.1)
-        self.fratio_spin.setValue(5.0)
-        controls_layout.addWidget(self.fratio_spin, row, 0)
-        row += 1
-        self.lock_fratio_check = QCheckBox("Lock f-ratio")
-        self.lock_fratio_check.setToolTip("Lock f-ratio when changing aperture")
-        self.lock_fratio_check.setChecked(True)  # Default to locking f-ratio
-        controls_layout.addWidget(self.lock_fratio_check, row, 0)
-
-        row += 1
-
-        # Focal length
-        controls_layout.addWidget(QLabel("Focal Length (mm):"), row, 0)
-        row += 1
-        self.focal_length_spin = QDoubleSpinBox()
-        self.focal_length_spin.setRange(150.0, 3000.0)
-        self.focal_length_spin.setSingleStep(10.0)
-        self.focal_length_spin.setValue(1000.0)  # Default: 200mm × f/5
-        controls_layout.addWidget(self.focal_length_spin, row, 0)
-        row += 1
-        self.lock_focal_length_check = QCheckBox("Lock focal length")
-        self.lock_focal_length_check.setToolTip("Lock focal length when changing aperture")
-        controls_layout.addWidget(self.lock_focal_length_check, row, 0)
-
-        row += 1
-
-        # Effective f/ratio display
-        self.effective_fratio_label = QLabel("Effective f/ratio: (build telescope to see)")
-        self.effective_fratio_label.setWordWrap(True)
-        self.effective_fratio_label.setStyleSheet("font-style: italic; color: #666;")
-        controls_layout.addWidget(self.effective_fratio_label, row, 0)
-
-        row += 1
-
-        # Secondary obstruction controls (for reflectors)
-        self.obstruction_label = QLabel("Secondary Obstruction:")
-        controls_layout.addWidget(self.obstruction_label, row, 0)
-        row += 1
-        self.enable_obstruction_check = QCheckBox("Enable")
-        self.enable_obstruction_check.setChecked(True)
-        self.enable_obstruction_check.setToolTip(
-            "Enable/disable secondary mirror obstruction effects on PSF and resolution"
-        )
-        controls_layout.addWidget(self.enable_obstruction_check, row, 0)
-        row += 1
-        self.obstruction_ratio_label = QLabel("Obstruction Ratio:")
-        controls_layout.addWidget(self.obstruction_ratio_label, row, 0)
-        row += 1
-        self.obstruction_spin = QDoubleSpinBox()
-        self.obstruction_spin.setRange(0.0, 0.5)  # 0% to 50%
-        self.obstruction_spin.setSingleStep(0.01)
-        self.obstruction_spin.setValue(0.20)  # Default 20% for Newtonian
-        self.obstruction_spin.setDecimals(2)
-        self.obstruction_spin.setToolTip(
-            "Secondary diameter / Primary diameter (0.2 = 20% obstruction)"
-        )
-        controls_layout.addWidget(self.obstruction_spin, row, 0)
-
-        row += 1
-
-        # Spider vanes (for reflectors)
-        self.spider_vanes_label = QLabel("Spider Vanes:")
-        controls_layout.addWidget(self.spider_vanes_label, row, 0)
-        row += 1
-        self.spider_vanes_spin = QDoubleSpinBox()
-        self.spider_vanes_spin.setRange(0, 6)
-        self.spider_vanes_spin.setDecimals(0)
-        self.spider_vanes_spin.setValue(0)
-        controls_layout.addWidget(self.spider_vanes_spin, row, 0)
-
-        row += 1
-        self.vane_width_label = QLabel("Vane Width (mm):")
-        controls_layout.addWidget(self.vane_width_label, row, 0)
-        row += 1
-        self.vane_width_spin = QDoubleSpinBox()
-        self.vane_width_spin.setRange(0.5, 5.0)
-        self.vane_width_spin.setSingleStep(0.5)
-        self.vane_width_spin.setValue(2.0)
-        controls_layout.addWidget(self.vane_width_spin, row, 0)
-
-        row += 1
-
         # Source
-        controls_layout.addWidget(QLabel("Source:"), row, 0)
-        row += 1
+        extra_layout.addWidget(QLabel("Source:"), row, 0); row += 1
         self.source_combo = QComboBox()
         self.source_combo.addItems([
             "Jupiter", "Saturn", "Moon", "Star Field",
             "Point Source (Star)", "None"
         ])
         self.source_combo.setCurrentText("Jupiter")
-        controls_layout.addWidget(self.source_combo, row, 0)
-
-        row += 1
+        extra_layout.addWidget(self.source_combo, row, 0); row += 1
 
         # Seeing
-        controls_layout.addWidget(QLabel("Seeing:"), row, 0)
-        row += 1
+        extra_layout.addWidget(QLabel("Seeing:"), row, 0); row += 1
         self.seeing_combo = QComboBox()
         self.seeing_combo.addItems(["Excellent", "Good", "Average", "Poor", "None"])
         self.seeing_combo.setCurrentText("Good")
-        controls_layout.addWidget(self.seeing_combo, row, 0)
-
-        row += 1
-
-        # Meniscus thickness (Maksutov-Cassegrain only)
-        self.meniscus_label = QLabel("Meniscus (mm):")
-        self.meniscus_label.setToolTip("Meniscus corrector thickness. Default = aperture/10.")
-        controls_layout.addWidget(self.meniscus_label, row, 0)
-        row += 1
-        self.meniscus_spin = QDoubleSpinBox()
-        self.meniscus_spin.setRange(5.0, 50.0)
-        self.meniscus_spin.setSingleStep(1.0)
-        self.meniscus_spin.setValue(self.aperture_spin.value() / 10.0)
-        self.meniscus_spin.setToolTip("Meniscus corrector thickness. Default = aperture/10.")
-        controls_layout.addWidget(self.meniscus_spin, row, 0)
-        self.meniscus_label.hide()
-        self.meniscus_spin.hide()
-
-        row += 1
+        extra_layout.addWidget(self.seeing_combo, row, 0); row += 1
 
         # Eyepiece controls
         self.eyepiece_check = QCheckBox("Use Eyepiece")
         self.eyepiece_check.setChecked(False)
         self.eyepiece_check.toggled.connect(self.toggle_eyepiece)
-        controls_layout.addWidget(self.eyepiece_check, row, 0)
+        extra_layout.addWidget(self.eyepiece_check, row, 0); row += 1
 
-        row += 1
-        controls_layout.addWidget(QLabel("Eyepiece FL (mm):"), row, 0)
-        row += 1
+        extra_layout.addWidget(QLabel("Eyepiece FL (mm):"), row, 0); row += 1
         self.eyepiece_spin = QDoubleSpinBox()
         self.eyepiece_spin.setRange(3.0, 40.0)
         self.eyepiece_spin.setSingleStep(1.0)
         self.eyepiece_spin.setValue(10.0)
         self.eyepiece_spin.setEnabled(False)
-        controls_layout.addWidget(self.eyepiece_spin, row, 0)
+        extra_layout.addWidget(self.eyepiece_spin, row, 0); row += 1
 
-        row += 1
-        controls_layout.addWidget(QLabel("Apparent FOV (\u00b0):"), row, 0)
-        row += 1
+        extra_layout.addWidget(QLabel("Apparent FOV (\u00b0):"), row, 0); row += 1
         self.afov_spin = QDoubleSpinBox()
         self.afov_spin.setRange(30.0, 100.0)
         self.afov_spin.setSingleStep(5.0)
@@ -358,9 +174,7 @@ class DesignTab(QWidget):
             "Higher = larger visual 'window' through the eyepiece.\n"
             "(50\u00b0 Pl\u00f6ssl, 68\u00b0 wide-angle, 82\u00b0 ultra-wide)"
         )
-        controls_layout.addWidget(self.afov_spin, row, 0)
-
-        row += 1
+        extra_layout.addWidget(self.afov_spin, row, 0); row += 1
 
         # Polychromatic ray trace toggle
         self.polychromatic_check = QCheckBox("Polychromatic Ray Trace")
@@ -368,22 +182,19 @@ class DesignTab(QWidget):
             "Show R/G/B colored rays to visualize chromatic aberration.\n"
             "Most useful for refractors (singlet, achromat, etc)."
         )
-        controls_layout.addWidget(self.polychromatic_check, row, 0)
-        row += 1
+        extra_layout.addWidget(self.polychromatic_check, row, 0); row += 1
         self.polychromatic_desc = QLabel("(R/G/B rays — chromatic aberration)")
         self.polychromatic_desc.setWordWrap(True)
         self.polychromatic_desc.setStyleSheet("font-size: 8pt; color: #666;")
-        controls_layout.addWidget(self.polychromatic_desc, row, 0)
-
-        row += 1
+        extra_layout.addWidget(self.polychromatic_desc, row, 0); row += 1
 
         # Update button
         self.update_button = QPushButton("Update View")
         self.update_button.clicked.connect(self.update_view)
-        controls_layout.addWidget(self.update_button, row, 0)
+        extra_layout.addWidget(self.update_button, row, 0)
 
-        controls_group.setLayout(controls_layout)
-        sidebar_layout.addWidget(controls_group)
+        extra_group.setLayout(extra_layout)
+        sidebar_layout.addWidget(extra_group)
         sidebar_layout.addStretch()
 
         scroll_area = QScrollArea()
@@ -399,13 +210,6 @@ class DesignTab(QWidget):
 
         self.setLayout(main_layout)
 
-        # Connect focal length synchronization signals
-        self.aperture_spin.valueChanged.connect(self.on_aperture_changed)
-        self.fratio_spin.valueChanged.connect(self.on_fratio_changed)
-        self.focal_length_spin.valueChanged.connect(self.on_focal_length_changed)
-        self.lock_fratio_check.toggled.connect(self.on_lock_fratio_toggled)
-        self.lock_focal_length_check.toggled.connect(self.on_lock_focal_length_toggled)
-
         # Initial render
         self.update_view()
 
@@ -413,105 +217,6 @@ class DesignTab(QWidget):
         """Enable/disable eyepiece controls."""
         self.eyepiece_spin.setEnabled(checked)
         self.afov_spin.setEnabled(checked)
-
-    def on_telescope_type_changed(self, telescope_type):
-        """Show/hide appropriate controls based on telescope type."""
-        is_refractor = telescope_type == "Refractor"
-        is_newtonian = telescope_type == "Newtonian"
-
-        # Primary type (spherical/parabolic) only for Newtonian
-        self.primary_label.setVisible(is_newtonian)
-        self.primary_combo.setVisible(is_newtonian)
-
-        # Objective type only for refractors
-        self.objective_label.setVisible(is_refractor)
-        self.objective_combo.setVisible(is_refractor)
-
-        # Obstruction controls only for reflectors
-        self.obstruction_label.setVisible(not is_refractor)
-        self.enable_obstruction_check.setVisible(not is_refractor)
-        self.obstruction_ratio_label.setVisible(not is_refractor)
-        self.obstruction_spin.setVisible(not is_refractor)
-
-        # Spider vanes only for reflectors
-        self.spider_vanes_label.setVisible(not is_refractor)
-        self.spider_vanes_spin.setVisible(not is_refractor)
-        self.vane_width_label.setVisible(not is_refractor)
-        self.vane_width_spin.setVisible(not is_refractor)
-
-        # Secondary magnification only for Cassegrain variants
-        is_cassegrain_variant = telescope_type in ("Cassegrain", "Maksutov-Cassegrain", "Schmidt-Cassegrain")
-        self.sec_mag_label.setVisible(is_cassegrain_variant)
-        self.sec_mag_spin.setVisible(is_cassegrain_variant)
-
-        # Meniscus thickness only for Maksutov-Cassegrain
-        is_mak = telescope_type == "Maksutov-Cassegrain"
-        self.meniscus_label.setVisible(is_mak)
-        self.meniscus_spin.setVisible(is_mak)
-
-        # Set default obstruction ratios by type
-        if telescope_type == "Newtonian":
-            self.obstruction_spin.setValue(0.20)  # 20% typical
-        elif telescope_type == "Cassegrain":
-            self.obstruction_spin.setValue(0.30)  # 30% typical
-        elif telescope_type == "Maksutov-Cassegrain":
-            self.obstruction_spin.setValue(0.33)  # 33% typical
-        elif telescope_type == "Schmidt-Cassegrain":
-            self.obstruction_spin.setValue(0.35)  # 35% typical
-
-    def on_lock_fratio_toggled(self, checked):
-        """Ensure only one lock is active at a time."""
-        if checked:
-            self.lock_focal_length_check.setChecked(False)
-
-    def on_lock_focal_length_toggled(self, checked):
-        """Ensure only one lock is active at a time."""
-        if checked:
-            self.lock_fratio_check.setChecked(False)
-
-    def on_aperture_changed(self, aperture):
-        """Update f/ratio or focal length when aperture changes."""
-        if self.lock_fratio_check.isChecked():
-            # Lock f/ratio, update focal length
-            fratio = self.fratio_spin.value()
-            new_focal_length = aperture * fratio
-            self.focal_length_spin.blockSignals(True)
-            self.focal_length_spin.setValue(new_focal_length)
-            self.focal_length_spin.blockSignals(False)
-        elif self.lock_focal_length_check.isChecked():
-            # Lock focal length, update f/ratio
-            focal_length = self.focal_length_spin.value()
-            new_fratio = focal_length / aperture if aperture > 0 else 5.0
-            self.fratio_spin.blockSignals(True)
-            self.fratio_spin.setValue(new_fratio)
-            self.fratio_spin.blockSignals(False)
-        else:
-            # Default: lock f/ratio, update focal length
-            fratio = self.fratio_spin.value()
-            new_focal_length = aperture * fratio
-            self.focal_length_spin.blockSignals(True)
-            self.focal_length_spin.setValue(new_focal_length)
-            self.focal_length_spin.blockSignals(False)
-
-        # Update meniscus thickness default (aperture/10)
-        if self.meniscus_spin.isVisible():
-            self.meniscus_spin.setValue(aperture / 10.0)
-
-    def on_fratio_changed(self, fratio):
-        """Update focal length when f/ratio changes."""
-        aperture = self.aperture_spin.value()
-        new_focal_length = aperture * fratio
-        self.focal_length_spin.blockSignals(True)
-        self.focal_length_spin.setValue(new_focal_length)
-        self.focal_length_spin.blockSignals(False)
-
-    def on_focal_length_changed(self, focal_length):
-        """Update f/ratio when focal length changes."""
-        aperture = self.aperture_spin.value()
-        new_fratio = focal_length / aperture if aperture > 0 else 5.0
-        self.fratio_spin.blockSignals(True)
-        self.fratio_spin.setValue(new_fratio)
-        self.fratio_spin.blockSignals(False)
 
     def show_true_size(self):
         """Switch to true angular size display mode."""
@@ -550,144 +255,12 @@ class DesignTab(QWidget):
             self.image_canvas.figure.clear()
             self.image_canvas.canvas.draw()
 
-    def build_telescope(self):
-        """Build telescope object from current configuration."""
-        telescope_type = self.telescope_combo.currentText().lower().replace("-", "")
-        primary_diameter = self.aperture_spin.value()
-        f_ratio = self.fratio_spin.value()
-        focal_length = self.focal_length_spin.value()  # Use spinner value directly
-
-        # Get obstruction settings (for reflectors)
-        enable_obstruction = self.enable_obstruction_check.isChecked()
-        obstruction_ratio = self.obstruction_spin.value()
-        secondary_diameter = primary_diameter * obstruction_ratio
-
-        # Secondary magnification for Cassegrain variants
-        sec_mag = self.sec_mag_spin.value()
-
-        # Spider vane settings
-        spider_vanes = int(self.spider_vanes_spin.value())
-        spider_vane_width = self.vane_width_spin.value()
-
-        if telescope_type == "newtonian":
-            primary_type = self.primary_combo.currentText().lower()
-            telescope = NewtonianTelescope(
-                primary_diameter=primary_diameter,
-                focal_length=focal_length,
-                primary_type=primary_type,
-                spider_vanes=spider_vanes,
-                spider_vane_width=spider_vane_width,
-                secondary_minor_axis=secondary_diameter,
-                enable_obstruction=enable_obstruction
-            )
-        elif telescope_type == "cassegrain":
-            telescope = CassegrainTelescope(
-                primary_diameter=primary_diameter,
-                primary_focal_length=focal_length,
-                secondary_magnification=sec_mag,
-                spider_vanes=spider_vanes,
-                spider_vane_width=spider_vane_width,
-                secondary_minor_axis=secondary_diameter,
-                enable_obstruction=enable_obstruction
-            )
-        elif telescope_type == "refractor":
-            # Map GUI labels to objective_type values
-            objective_map = {
-                "singlet": "singlet",
-                "achromat": "achromat",
-                "apo doublet": "apo-doublet",
-                "apo triplet (air-spaced)": "apo-triplet"
-            }
-            objective_type = objective_map.get(
-                self.objective_combo.currentText().lower(),
-                "singlet"
-            )
-            telescope = RefractingTelescope(
-                primary_diameter=primary_diameter,
-                focal_length=focal_length,
-                objective_type=objective_type
-            )
-        elif telescope_type == "maksutovcassegrain":
-            telescope = MaksutovCassegrainTelescope(
-                primary_diameter=primary_diameter,
-                primary_focal_length=focal_length,
-                secondary_magnification=sec_mag,
-                meniscus_thickness=self.meniscus_spin.value(),
-                spider_vanes=spider_vanes,
-                spider_vane_width=spider_vane_width,
-                secondary_minor_axis=secondary_diameter,
-                enable_obstruction=enable_obstruction
-            )
-        elif telescope_type == "schmidtcassegrain":
-            telescope = SchmidtCassegrainTelescope(
-                primary_diameter=primary_diameter,
-                primary_focal_length=focal_length,
-                secondary_magnification=sec_mag,
-                spider_vanes=spider_vanes,
-                spider_vane_width=spider_vane_width,
-                secondary_minor_axis=secondary_diameter,
-                enable_obstruction=enable_obstruction
-            )
-        else:
-            # Default to Newtonian
-            telescope = NewtonianTelescope(
-                primary_diameter=primary_diameter,
-                focal_length=focal_length,
-                spider_vanes=spider_vanes,
-                spider_vane_width=spider_vane_width,
-                secondary_minor_axis=secondary_diameter,
-                enable_obstruction=enable_obstruction
-            )
-
-        return telescope
-
-    def build_source(self):
-        """Build source object from current configuration."""
-        source_type = self.source_combo.currentText().lower().replace(" ", "")
-
-        if source_type == "jupiter":
-            return Jupiter()
-        elif source_type == "saturn":
-            return Saturn()
-        elif source_type == "moon":
-            return Moon()
-        elif source_type == "starfield":
-            return StarField()
-        elif source_type == "pointsource(star)":
-            return PointSource()
-        else:
-            return None
-
-    def get_seeing_value(self):
-        """Convert seeing dropdown to numeric value."""
-        seeing_presets = {
-            "excellent": 0.8,
-            "good": 1.5,
-            "average": 2.5,
-            "poor": 4.0,
-            "none": None
-        }
-        seeing = self.seeing_combo.currentText().lower()
-        return seeing_presets.get(seeing, None)
-
-    def get_eyepiece(self, telescope):
-        """Build eyepiece object if enabled."""
-        if self.eyepiece_check.isChecked():
-            eyepiece_fl = self.eyepiece_spin.value()
-            afov = self.afov_spin.value()
-            return Eyepiece(
-                focal_length_mm=eyepiece_fl,
-                apparent_fov_deg=afov
-            )
-        return None
-
     def calculate_diffraction_limit(self, aperture_mm, wavelength_nm=550.0):
         """Calculate diffraction limit in arcseconds."""
-        # Rayleigh criterion: θ = 1.22 * λ / D
         wavelength_m = wavelength_nm * 1e-9
         aperture_m = aperture_mm * 1e-3
         theta_rad = 1.22 * wavelength_m / aperture_m
-        theta_arcsec = theta_rad * 206265  # radians to arcseconds
+        theta_arcsec = theta_rad * 206265
         return theta_arcsec
 
     def update_performance_label(self, telescope, seeing_arcsec):
@@ -760,11 +333,22 @@ class DesignTab(QWidget):
             true_fov = eyepiece.apparent_fov_deg / mag
 
             self.eyepiece_label.setText(
-                f"Eyepiece: {eyepiece.focal_length_mm:.0f}mm ({eyepiece.apparent_fov_deg:.0f}° AFOV) → "
-                f"{mag:.0f}× magnification, {exit_pupil:.1f}mm exit pupil, {true_fov:.2f}° true FOV"
+                f"Eyepiece: {eyepiece.focal_length_mm:.0f}mm ({eyepiece.apparent_fov_deg:.0f}\u00b0 AFOV) \u2192 "
+                f"{mag:.0f}\u00d7 magnification, {exit_pupil:.1f}mm exit pupil, {true_fov:.2f}\u00b0 true FOV"
             )
         else:
             self.eyepiece_label.setText("Direct focal plane view (no eyepiece)")
+
+    def get_eyepiece(self, telescope):
+        """Build eyepiece object if enabled."""
+        if self.eyepiece_check.isChecked():
+            eyepiece_fl = self.eyepiece_spin.value()
+            afov = self.afov_spin.value()
+            return Eyepiece(
+                focal_length_mm=eyepiece_fl,
+                apparent_fov_deg=afov
+            )
+        return None
 
     def popout_image(self):
         """Pop out the simulated image based on current display mode."""
@@ -778,16 +362,16 @@ class DesignTab(QWidget):
         if figure_to_show is None:
             return
 
-        telescope = self.build_telescope()
+        telescope = self.telescope_panel.build()
         eyepiece = self.get_eyepiece(telescope)
 
         # Build title
         title = f"{telescope.primary_diameter:.0f}mm f/{telescope.focal_ratio:.1f}"
         if eyepiece:
             mag = telescope.focal_length / eyepiece.focal_length_mm
-            title += f" with {eyepiece.focal_length_mm:.0f}mm eyepiece ({mag:.0f}× magnification)"
+            title += f" with {eyepiece.focal_length_mm:.0f}mm eyepiece ({mag:.0f}\u00d7 magnification)"
         else:
-            title += " — Direct Focal Plane"
+            title += " \u2014 Direct Focal Plane"
 
         window = ImagePopoutWindow(
             figure_to_show,
@@ -800,11 +384,14 @@ class DesignTab(QWidget):
     def update_view(self):
         """Update both ray trace and simulated image."""
         try:
-            # Build telescope and source
-            telescope = self.build_telescope()
-            source = self.build_source()
-            seeing = self.get_seeing_value()
+            # Build telescope and source using shared components
+            telescope = self.telescope_panel.build()
+            source = get_source(self.source_combo.currentText())
+            seeing = get_seeing(self.seeing_combo.currentText())
             eyepiece = self.get_eyepiece(telescope)
+
+            # Update effective f/ratio display
+            self.telescope_panel.update_effective_fratio(telescope)
 
             # Update performance label
             self.update_performance_label(telescope, seeing)
@@ -812,31 +399,14 @@ class DesignTab(QWidget):
             # Update eyepiece label
             self.update_eyepiece_label(telescope, eyepiece)
 
-            # Update effective f/ratio display
-            actual_fratio = telescope.focal_ratio
-            user_fratio = self.fratio_spin.value()
-
-            if abs(actual_fratio - user_fratio) > 0.1:
-                # Telescope overrode f/ratio (e.g., Maksutov with secondary magnification)
-                self.effective_fratio_label.setText(
-                    f"⚠ Effective f/ratio: f/{actual_fratio:.1f} "
-                    f"(telescope uses {actual_fratio:.1f}, not input {user_fratio:.1f})"
-                )
-                self.effective_fratio_label.setStyleSheet("font-style: italic; color: #cc6600; font-weight: bold;")
-            else:
-                self.effective_fratio_label.setText(f"✓ Effective f/ratio: f/{actual_fratio:.1f}")
-                self.effective_fratio_label.setStyleSheet("font-style: italic; color: #666;")
-
             # Update ray trace
-            telescope_type = self.telescope_combo.currentText()
+            telescope_type = self.telescope_panel.type_combo.currentText()
 
             if self.polychromatic_check.isChecked():
-                # Polychromatic ray trace (R/G/B colored rays)
                 fig_ray_trace = plot_polychromatic_ray_trace(
                     telescope, num_display_rays=11
                 )
             else:
-                # Standard monochromatic ray trace
                 rays = create_parallel_rays(
                     num_rays=11,
                     aperture_diameter=telescope.primary_diameter,
@@ -844,11 +414,11 @@ class DesignTab(QWidget):
                 )
                 telescope.trace_rays(rays)
                 components = telescope.get_components_for_plotting()
-                title = f"{telescope.primary_diameter:.0f}mm f/{telescope.focal_ratio:.1f} (FL: {telescope.focal_length:.0f}mm) {telescope_type} — Ray Trace"
+                title = f"{telescope.primary_diameter:.0f}mm f/{telescope.focal_ratio:.1f} (FL: {telescope.focal_length:.0f}mm) {telescope_type} \u2014 Ray Trace"
                 fig_ray_trace = plot_ray_trace(rays, components, title=title)
 
             self.ray_trace_canvas.set_figure(fig_ray_trace)
-            plt.close(fig_ray_trace)  # Close to free memory
+            plt.close(fig_ray_trace)
 
             # Update simulated image (if source selected)
             if source is not None:
@@ -868,14 +438,11 @@ class DesignTab(QWidget):
                     eyepiece_view_figsize=(8, 8) if eyepiece is not None else None,
                 )
 
-                # plot_source_image returns a list if eyepiece is used, single figure otherwise
                 if isinstance(result, list):
-                    # With eyepiece: [normal_view, true_angular_size_view, eyepiece_view]
-                    self.current_figure = result[0]  # Standardized size
+                    self.current_figure = result[0]
                     self.true_size_figure = result[1] if len(result) > 1 else None
                     self.eyepiece_view_figure = result[2] if len(result) > 2 else None
                 else:
-                    # Without eyepiece: single figure
                     self.current_figure = result
                     self.true_size_figure = None
                     self.eyepiece_view_figure = None
@@ -884,7 +451,6 @@ class DesignTab(QWidget):
                 self.scaled_button.setEnabled(True)
                 self.popout_button.setEnabled(True)
 
-                # Enable eyepiece-dependent buttons
                 has_eyepiece_figs = self.true_size_figure is not None
                 self.true_size_button.setEnabled(has_eyepiece_figs)
                 self.eyepiece_view_button.setEnabled(self.eyepiece_view_figure is not None)
@@ -900,12 +466,9 @@ class DesignTab(QWidget):
                     self.scaled_button.setChecked(True)
                     self.eyepiece_view_button.setChecked(False)
 
-                # Display based on current mode
                 self.refresh_image_display()
 
-                # Don't close these - we need them for display/pop-out
             else:
-                # Clear image canvas
                 self.image_canvas.figure.clear()
                 self.image_canvas.canvas.draw()
                 self.current_figure = None

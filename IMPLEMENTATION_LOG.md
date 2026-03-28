@@ -1,3 +1,112 @@
+# Implementation Log - Major Codebase Refactor (DRY Extraction)
+
+**Date:** 2026-03-27
+**Session:** Major codebase review & refactor — eliminate duplication, add tests
+
+## Summary
+
+Extracted 5 duplicated `build_telescope()` implementations and 5 duplicated `update_controls_visibility()` implementations into shared modules. Created a reusable `TelescopeControlPanel` widget and shared source/seeing helpers. Rewrote all 5 GUI tabs to use the shared components. Added 76 new tests (291 total, up from 215).
+
+## Phase 1: Extract Shared Utilities
+
+### New File: `telescope_gui/telescope_builder.py`
+- Single `build_telescope()` function replacing 5 duplicated copies across all tabs
+- Handles all 5 telescope types: Newtonian, Cassegrain, Refractor, Maksutov-Cassegrain, Schmidt-Cassegrain
+- Fixes pre-existing bug: Schmidt-Cassegrain in comparison tabs was missing `secondary_minor_axis` and hardcoded `secondary_magnification=3.0`
+- Includes `OBJECTIVE_TYPE_MAP` for mapping GUI labels to internal values
+
+### New File: `telescope_gui/widgets/telescope_controls.py`
+- `TelescopeControlPanel(QWidget)` — composite widget with all telescope controls
+- Two layout modes: `"sidebar"` (vertical, label-above-widget) and `"grid"` (compact multi-column)
+- `get_config()` returns dict matching `build_telescope()` kwargs
+- `build()` convenience method: `build_telescope(**self.get_config())`
+- Single `update_controls_visibility()` replacing 5 duplicated implementations
+- Bidirectional focal length / f-ratio sync with lock checkboxes and reentrancy guard
+- `config_changed` signal emitted on any control change
+- `DEFAULT_OBSTRUCTION` dict for per-type defaults (Newtonian 20%, Cassegrain 30%, Mak-Cass 33%, SCT 35%)
+- Spider vane range standardized to 0-6 across all tabs (was 0-4 in some comparison tabs)
+
+### New File: `telescope_gui/widgets/source_controls.py`
+- `get_source(source_name)` — returns AstronomicalSource from combo-box label
+- `get_seeing(seeing_name)` — converts seeing preset to numeric arcsecond value
+- Replaces duplicate implementations in design_tab and images_tab
+
+## Phase 2: Rewrite All 5 Tabs
+
+### Modified: `telescope_gui/single_mode/design_tab.py`
+- Uses `TelescopeControlPanel(number=1, layout_mode="sidebar")` instead of ~120 lines of inline controls
+- Uses shared `get_source()` and `get_seeing()`
+- Uses `self.telescope_panel.build()` instead of local `build_telescope()`
+- All tab-specific features preserved: eyepiece, polychromatic toggle, display modes, pop-out
+
+### Modified: `telescope_gui/single_mode/performance_tab.py`
+- Uses `TelescopeControlPanel(number=1, layout_mode="grid")` at bottom
+- All analysis features preserved: PSF options, analysis view combo, metrics
+
+### Modified: `telescope_gui/comparison_mode/ray_traces_tab.py`
+- Uses two `TelescopeControlPanel` instances with `layout_mode="sidebar"`
+- Layout preserved: `[T1 sidebar | T1 canvas | T2 canvas | T2 sidebar]`
+
+### Modified: `telescope_gui/comparison_mode/images_tab.py`
+- Uses two `TelescopeControlPanel` instances with `layout_mode="grid"`, `show_group_box=False`
+- Uses shared `get_source()` and `get_seeing()`
+
+### Modified: `telescope_gui/comparison_mode/analytics_tab.py`
+- Uses two `TelescopeControlPanel` instances with `layout_mode="grid"`, `show_group_box=False`
+
+## Phase 3: New Tests
+
+### New File: `tests/test_telescope_builder.py` (40 tests)
+- `TestBuildTelescopeTypes` — correct class returned for each type, fallback, case insensitivity
+- `TestBuildTelescopeParameters` — diameter, focal length, primary type, spider vanes, obstruction, SCT secondary_minor_axis regression test
+- `TestBuildTelescopeRayTracing` — all 5 types can trace rays and produce plot components
+- `TestBuildTelescopeEdgeCases` — extreme f-ratios, apertures, max obstruction
+
+### New File: `tests/test_gui_controls.py` (36 tests)
+- `TestTelescopeControlPanelCreation` — both layout modes, custom defaults
+- `TestGetConfig` — default values, keys match build_telescope() signature
+- `TestBuildConvenience` — build() returns valid telescope for all types
+- `TestControlsVisibility` — correct show/hide for each telescope type, type change
+- `TestFocalLengthSync` — initial FL, f-ratio sync, aperture with locked f-ratio/FL, mutex locks
+- `TestDefaultObstruction` — per-type defaults, type change updates obstruction
+- `TestGetSource` — all sources + None + unknown
+- `TestGetSeeing` — all presets + case insensitivity
+
+**Test results:** 291 passed (215 existing + 76 new), 0 failed
+
+## Bugs Fixed By This Refactor
+
+1. **Schmidt-Cassegrain missing `secondary_minor_axis`** — comparison tabs hardcoded `secondary_magnification=3.0` and didn't pass `secondary_minor_axis` or `enable_obstruction`. Now fixed in shared builder.
+2. **Spider vane range inconsistency** — comparison tabs allowed 0-4, design tab allowed 0-6. Now standardized to 0-6.
+3. **Missing controls in comparison tabs** — focal length, secondary magnification, meniscus thickness were absent from comparison tabs. Now automatically included via shared TelescopeControlPanel.
+
+## Files Created/Modified
+
+| File | Action |
+|------|--------|
+| `telescope_gui/telescope_builder.py` | **NEW** — shared build_telescope() |
+| `telescope_gui/widgets/telescope_controls.py` | **NEW** — shared TelescopeControlPanel |
+| `telescope_gui/widgets/source_controls.py` | **NEW** — shared source/seeing helpers |
+| `telescope_gui/single_mode/design_tab.py` | REWRITE — uses shared components |
+| `telescope_gui/single_mode/performance_tab.py` | REWRITE — uses shared components |
+| `telescope_gui/comparison_mode/ray_traces_tab.py` | REWRITE — uses shared components |
+| `telescope_gui/comparison_mode/images_tab.py` | REWRITE — uses shared components |
+| `telescope_gui/comparison_mode/analytics_tab.py` | REWRITE — uses shared components |
+| `tests/test_telescope_builder.py` | **NEW** — 40 tests |
+| `tests/test_gui_controls.py` | **NEW** — 36 tests |
+| `IMPLEMENTATION_LOG.md` | Updated with this session |
+| `docs/development/GUI_PLAN.md` | Updated file structure |
+
+## Code Reduction
+
+- Eliminated ~5 copies of `build_telescope()` (~60 lines each = ~300 lines removed)
+- Eliminated ~5 copies of `update_controls_visibility()` (~30 lines each = ~150 lines removed)
+- Eliminated ~5 copies of control widget creation (~80 lines each = ~400 lines removed)
+- Net reduction: ~850 lines of duplicated code replaced by 3 shared modules (~600 lines total)
+
+---
+---
+
 # Implementation Log - Comparison Mode Layout Reorganization
 
 **Date:** 2026-03-27
@@ -878,6 +987,48 @@ Added 7 new GUI features exposing existing engine capabilities: secondary magnif
 | `telescope_gui/single_mode/performance_tab.py` | Analysis view dropdown, coma/vignetting plots, sec mag, meniscus |
 | `telescope_sim/plotting/ray_trace_plot.py` | `eyepiece_view_figsize` parameter in `plot_source_image` |
 | `telescope_gui/widgets/image_popout.py` | `display_mode` parameter, dynamic header text |
+
+## Nothing Installed
+No new packages installed.
+
+---
+---
+
+# Implementation Log - Comparison Tab Sizing & Performance Tab PSF Options
+
+**Date:** 2026-03-27
+**Session:** Fix layout/sizing issues in comparison and performance tabs
+
+## Summary
+
+Fixed 4 layout/sizing issues that appeared after the DRY refactor: comparison Images and Analytics tabs had controls stacked below plots consuming too much vertical space, grid-mode TelescopeControlPanel wasted vertical space with f-ratio and focal length on separate rows, and the PSF Display Options in the performance tab sidebar clipped radio button text.
+
+## Changes Made
+
+### Modified: `telescope_gui/comparison_mode/images_tab.py` — Major layout rewrite
+- Replaced VBoxLayout (title + scrollable plots + controls group at bottom) with 4-column HBoxLayout: `[T1 sidebar 220px | T1 canvas | T2 canvas | T2 sidebar 220px]`
+- Each sidebar is a `QScrollArea` with fixed 220px width containing vertical controls (matching ray_traces_tab pattern)
+- Panels switched from `layout_mode="grid"` to `layout_mode="sidebar"` with `show_group_box=True`
+- Source and seeing combos moved into T1 sidebar
+- Pre-created `self.canvas1` / `self.canvas2` reused on update instead of clearing/recreating canvases
+
+### Modified: `telescope_gui/comparison_mode/analytics_tab.py` — Major layout rewrite
+- Replaced VBoxLayout (title + table + charts + controls group at bottom) with 3-column HBoxLayout: `[T1 sidebar 220px | center content | T2 sidebar 220px]`
+- Center area contains title, metrics table, and 3 charts in a horizontal row — all get full available height
+- Panels switched from `layout_mode="grid"` to `layout_mode="sidebar"` with `show_group_box=True`
+
+### Modified: `telescope_gui/widgets/telescope_controls.py` — Grid layout compaction
+- In `_build_grid()`, merged f-ratio and focal length onto a single row: `f/: [spin] FL: [spin]`
+- Lock checkboxes and effective f/ratio label moved to a compact row below
+- Saves one full row of vertical space in all grid-mode usages
+
+### Modified: `telescope_gui/single_mode/performance_tab.py` — PSF options fix
+- Widened sidebar from `setMaximumWidth(260)` to `setMaximumWidth(300)`
+- Replaced nested `QHBoxLayout`s in PSF Display Options with `QGridLayout` (3 columns: label, radio1, radio2)
+- Radio button text ("1D", "2D", "Log", "Linear") no longer clipped
+
+## Test Results
+- All 291 tests pass (no changes to test code or backend)
 
 ## Nothing Installed
 No new packages installed.

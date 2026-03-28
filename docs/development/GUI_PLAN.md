@@ -307,19 +307,25 @@ User first configures 2-4 telescope configs (via dialog or sidebar panel), then 
 ### File Structure
 ```python
 telescope_gui/
-├── main_window.py           # QMainWindow, mode toggle, tab management
+├── __init__.py
+├── main_window.py              # QMainWindow, mode toggle (Single/Comparison/Reference), tab management
+├── telescope_builder.py        # Shared build_telescope() — single implementation for all tabs
+├── reference_tab.py            # Parameters & Physics reference (read-only)
 ├── single_mode/
-│   ├── design_tab.py        # Ray trace + image side-by-side
-│   └── performance_tab.py   # PSF analysis + metrics
+│   ├── __init__.py
+│   ├── design_tab.py           # Ray trace + simulated image side-by-side (sidebar controls)
+│   └── performance_tab.py      # PSF analysis + spot diagram + metrics (grid controls at bottom)
 ├── comparison_mode/
-│   ├── ray_trace_tab.py     # Side-by-side ray traces
-│   ├── image_tab.py         # Side-by-side images
-│   └── analytics_tab.py     # Comparison table + plots
-├── widgets/
-│   ├── telescope_controls.py
-│   ├── matplotlib_canvas.py
-│   └── config_manager.py    # Add/remove/edit comparison configs
-└── config.py                # Config save/load (JSON)
+│   ├── __init__.py
+│   ├── ray_traces_tab.py       # Side-by-side ray traces [T1 sidebar | T1 canvas | T2 canvas | T2 sidebar]
+│   ├── images_tab.py           # Side-by-side simulated images [T1 sidebar | T1 canvas | T2 canvas | T2 sidebar]
+│   └── analytics_tab.py        # Comparison table + charts [T1 sidebar | center content | T2 sidebar]
+└── widgets/
+    ├── __init__.py
+    ├── telescope_controls.py   # TelescopeControlPanel — reusable composite widget (sidebar/grid modes)
+    ├── source_controls.py      # get_source(), get_seeing() — shared helpers
+    ├── matplotlib_canvas.py    # MatplotlibCanvas — embed matplotlib figures in Qt
+    └── image_popout.py         # Pop-out window for full-size image viewing
 ```
 
 ### Mode Switching Logic

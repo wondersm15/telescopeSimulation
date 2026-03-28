@@ -1522,3 +1522,28 @@ multi-element visualization in ray tracing.
 - `telescope_gui/single_mode/performance_tab.py` — sidebar layout + compact controls
 - `telescope_gui/comparison_mode/analytics_tab.py` — 3 charts in one row
 - `telescope_gui/single_mode/design_tab.py` — AFOV tooltip
+
+---
+
+## Comparison Tab Sizing & Performance Tab PSF Options — 2026-03-27
+
+### What was done
+Fixed 4 layout/sizing issues that appeared after the DRY refactor:
+
+1. **Images tab → 4-column sidebar layout** (`images_tab.py`): Rewrote from VBoxLayout (controls below plots) to HBoxLayout: `[T1 sidebar 220px | T1 canvas | T2 canvas | T2 sidebar 220px]`. Panels switched to `layout_mode="sidebar"`. Source/seeing combos moved into T1 sidebar. Pre-created canvases reused on update.
+
+2. **Analytics tab → sidebar + center layout** (`analytics_tab.py`): Rewrote to `[T1 sidebar 220px | center content | T2 sidebar 220px]`. Charts and metrics table fill center area with full height. Panels switched to `layout_mode="sidebar"`.
+
+3. **Grid-mode f-ratio + FL merged** (`telescope_controls.py`): In `_build_grid()`, merged f-ratio and focal length onto one row (`f/: [spin] FL: [spin]`), with lock checkboxes on a compact row below. Saves one full row of vertical space.
+
+4. **PSF Display Options fix** (`performance_tab.py`): Widened sidebar 260→300px. Replaced nested HBoxLayouts with QGridLayout so radio button text is not clipped.
+
+### Files modified
+- `telescope_gui/comparison_mode/images_tab.py` — rewrite to 4-column sidebar layout
+- `telescope_gui/comparison_mode/analytics_tab.py` — rewrite to sidebar + center layout
+- `telescope_gui/widgets/telescope_controls.py` — merge f-ratio + FL rows in grid mode
+- `telescope_gui/single_mode/performance_tab.py` — widen sidebar, grid layout for PSF options
+
+### Notes
+- All 291 tests pass
+- Nothing installed
