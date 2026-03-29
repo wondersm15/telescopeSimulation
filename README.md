@@ -40,17 +40,30 @@ This project simulates optical telescope systems from first principles, enabling
 
 ### Running the Simulation
 
+**GUI Application (Recommended):**
+
 With the virtual environment active:
+```bash
+python gui.py
+```
+
+This opens an interactive GUI with:
+- **Single Telescope Mode**: Design and performance analysis tabs
+  - Design tab: Ray trace + simulated images side-by-side
+  - Performance tab: PSF analysis, spot diagrams, metrics
+- **Comparison Mode**: Compare multiple telescope configurations
+  - Ray traces, simulated images, and analytics charts side-by-side
+- Interactive controls for telescope type, aperture, f-ratio, sources, seeing conditions
+- Real-time updates and eyepiece simulation
+
+**Command-Line Script (Advanced):**
+
+For scripting or batch analysis:
 ```bash
 python main.py
 ```
 
-This opens matplotlib windows showing:
-- 2D ray trace through the telescope optical system
-- Point spread function (PSF) analysis
-- Simulated astronomical images (if a source is configured)
-
-Edit `main.py` to configure telescope parameters, source objects, and visualization options. The file includes detailed comments and examples.
+This opens matplotlib windows showing ray traces, PSF analysis, and simulated images. Edit `main.py` to configure telescope parameters, source objects, and visualization options. The file includes detailed comments and examples.
 
 ### Running Tests
 
@@ -70,14 +83,19 @@ python -m pytest tests/ -v
 
 ```
 telescopeSimulationProject/
-├── main.py                # Entry point — configure and run simulations
+├── gui.py                 # GUI entry point (recommended)
+├── main.py                # CLI entry point — configure and run simulations
 ├── requirements.txt       # Python dependencies
-├── telescope_sim/         # Main package
-│   ├── physics/          # Ray class, reflection, refraction
+├── telescope_sim/         # Main simulation package
+│   ├── physics/          # Ray class, reflection, refraction, diffraction
 │   ├── geometry/         # Mirror/lens types, telescope assembly
 │   ├── source/           # Light source and astronomical object definitions
 │   └── plotting/         # Visualization and image rendering
-├── tests/                # Unit and integration tests
+├── telescope_gui/         # GUI application
+│   ├── single_mode/      # Design and performance tabs
+│   ├── comparison_mode/  # Comparison analysis tabs
+│   └── widgets/          # Reusable UI components
+├── tests/                # Unit and integration tests (291 passing)
 └── docs/                 # Documentation (see above)
 ```
 
