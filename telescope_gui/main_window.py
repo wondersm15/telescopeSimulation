@@ -18,6 +18,7 @@ from telescope_gui.comparison_mode.ray_traces_tab import RayTracesTab
 from telescope_gui.comparison_mode.images_tab import ImagesTab
 from telescope_gui.comparison_mode.analytics_tab import AnalyticsTab
 from telescope_gui.reference_tab import ParametersPhysicsTab
+from telescope_gui.tutorial_mode.tutorial_tab import TutorialTab
 
 
 class MainWindow(QMainWindow):
@@ -49,18 +50,23 @@ class MainWindow(QMainWindow):
         self.comparison_mode_radio = QRadioButton("Comparison")
         self.reference_mode_radio = QRadioButton("Parameters && Physics")
 
+        self.tutorial_mode_radio = QRadioButton("Tutorial && Testing")
+
         self.mode_group.addButton(self.single_mode_radio)
         self.mode_group.addButton(self.comparison_mode_radio)
         self.mode_group.addButton(self.reference_mode_radio)
+        self.mode_group.addButton(self.tutorial_mode_radio)
 
         self.single_mode_radio.setChecked(True)
         self.single_mode_radio.toggled.connect(self.switch_mode)
         self.comparison_mode_radio.toggled.connect(self.switch_mode)
         self.reference_mode_radio.toggled.connect(self.switch_mode)
+        self.tutorial_mode_radio.toggled.connect(self.switch_mode)
 
         mode_layout.addWidget(self.single_mode_radio)
         mode_layout.addWidget(self.comparison_mode_radio)
         mode_layout.addWidget(self.reference_mode_radio)
+        mode_layout.addWidget(self.tutorial_mode_radio)
         mode_layout.addStretch()
 
         main_layout.addLayout(mode_layout)
@@ -157,3 +163,10 @@ class MainWindow(QMainWindow):
 
             reference_tab = ParametersPhysicsTab()
             self.tab_widget.addTab(reference_tab, "Reference")
+
+        elif self.tutorial_mode_radio.isChecked():
+            # Tutorial & Testing mode
+            self.status_bar.showMessage("Tutorial & Testing Mode")
+
+            tutorial_tab = TutorialTab()
+            self.tab_widget.addTab(tutorial_tab, "Tutorial")

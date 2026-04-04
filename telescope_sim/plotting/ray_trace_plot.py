@@ -2888,6 +2888,7 @@ def _compute_psf_at_field_angle(telescope: Telescope,
                                 num_pixels: int,
                                 half_size_mm: float,
                                 include_obstruction: bool = True,
+                                apply_coma: bool = True,
                                 ) -> np.ndarray:
     """Compute the PSF at a given field angle, including coma and spherical aberration.
 
@@ -2946,7 +2947,7 @@ def _compute_psf_at_field_angle(telescope: Telescope,
             return psf
         else:
             return diffraction_psf
-    else:
+    elif apply_coma:
         # Off-axis: compute coma spot and convolve with Airy kernel
         x_off, y_off = compute_coma_spot(
             field_angle_arcsec, telescope.focal_length,
@@ -3008,6 +3009,12 @@ def _compute_psf_at_field_angle(telescope: Telescope,
         if psf.max() > 0:
             psf /= psf.max()
         return psf
+    else:
+        # apply_coma=False: treat off-axis as on-axis (diffraction only, no coma)
+        return _compute_psf_at_field_angle(
+            telescope, 0.0, wavelength_nm, num_pixels, half_size_mm,
+            include_obstruction, apply_coma=True,
+        )
 
 
 def _render_source_through_telescope(
@@ -3018,6 +3025,8 @@ def _render_source_through_telescope(
         include_obstruction: bool = True,
         method: str = "analytical",
         polychromatic: bool = False,
+        apply_coma: bool = True,
+        apply_vignetting: bool = True,
 ) -> tuple[np.ndarray, float, dict]:
     """Render an astronomical source as seen through the telescope.
 
@@ -3097,12 +3106,12 @@ def _render_source_through_telescope(
             intensity = 10.0 ** (-0.4 * (mag - min_mag))
 
             # Vignetting at this field angle
-            vignetting = telescope.compute_vignetting(field_r)
+            vignetting = telescope.compute_vignetting(field_r) if apply_vignetting else 1.0
 
             # Compute PSF at this field angle
             psf = _compute_psf_at_field_angle(
                 telescope, field_r, wavelength_nm, psf_n,
-                psf_half_mm, include_obstruction,
+                psf_half_mm, include_obstruction, apply_coma,
             )
 
             # Star position in the image (pixel coords)
@@ -3147,7 +3156,7 @@ def _render_source_through_telescope(
         psf_half_for_kernel = psf_angular_half / plate_scale
 
         # Apply vignetting (uniform across small Jupiter disk)
-        vignetting = telescope.compute_vignetting(0.0)
+        vignetting = telescope.compute_vignetting(0.0) if apply_vignetting else 1.0
 
         # Polychromatic mode: use per-channel chromatic PSFs for
         # refractors to show color fringing.
@@ -3197,7 +3206,7 @@ def _render_source_through_telescope(
         else:
             psf = _compute_psf_at_field_angle(
                 telescope, 0.0, wavelength_nm, psf_n_img,
-                psf_half_for_kernel, include_obstruction,
+                psf_half_for_kernel, include_obstruction, apply_coma,
             )
             psf_sum = psf.sum()
             psf_kernel = psf / psf_sum if psf_sum > 0 else psf
@@ -3217,7 +3226,7 @@ def _render_source_through_telescope(
         ideal = source.render_ideal(half_fov_arcsec, num_pixels)
         psf = _compute_psf_at_field_angle(
             telescope, 0.0, wavelength_nm, psf_n,
-            psf_half_mm, include_obstruction,
+            psf_half_mm, include_obstruction, apply_coma,
         )
         psf_sum = psf.sum()
         psf_kernel = psf / psf_sum if psf_sum > 0 else psf
@@ -3428,6 +3437,8 @@ def plot_source_image(telescope: Telescope,
                       eyepiece=None,
                       polychromatic: bool = False,
                       eyepiece_view_figsize: tuple[float, float] | None = None,
+                      apply_coma: bool = True,
+                      apply_vignetting: bool = True,
                       ) -> plt.Figure | list[plt.Figure]:
     """Plot a simulated image of an astronomical source through the telescope.
 
@@ -3488,6 +3499,8 @@ def plot_source_image(telescope: Telescope,
         include_obstruction=include_obstruction,
         method=method,
         polychromatic=polychromatic,
+        apply_coma=apply_coma,
+        apply_vignetting=apply_vignetting,
     )
 
     image_rgb = info.get("image_rgb")

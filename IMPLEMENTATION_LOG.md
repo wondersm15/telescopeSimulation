@@ -1,4 +1,73 @@
-# Implementation Log - Major Codebase Refactor (DRY Extraction)
+# Implementation Log
+
+---
+
+## Tutorial & Testing Tab (v1)
+
+**Date:** 2026-04-04
+**Branch:** `feature/tutorial-testing-tab`
+**Session:** New "Tutorial & Testing" GUI mode — guided optical physics scenarios with theory validation
+
+### Summary
+
+Added a new "Tutorial & Testing" mode to the GUI with 13 scenario definitions (5 fully implemented, 8 placeholders). Each scenario shows before/after simulated images with a live tweakable "after" side, theory-vs-simulation numeric comparison, theory overlay on figures, and a Python API terminal panel. Added 31 new tests (322 total, up from 291).
+
+### New Files
+
+**`telescope_gui/tutorial_mode/`**
+- `__init__.py` — package init
+- `tutorial_tab.py` — `TutorialTab(QWidget)`: main tab assembling all widgets, wiring scenario loading, before/after rendering, theory readout, terminal panel
+- `scenario_registry.py` — `TelescopeConfig`, `SourceConfig`, `ScenarioDefinition` dataclasses; all 13 scenario definitions; `get_scenarios_by_act()`, `get_scenario_by_id()`, `get_first_implemented()`
+- `scenario_runner.py` — `run_scenario_side()`, `compute_theory_for_scenario()`, `apply_theory_overlay()`, `build_terminal_command()`, `build_source()`
+- `theory_computations.py` — local theory functions (NOT part of telescope_sim): `compute_airy_disk_theory()`, `compute_rayleigh_theory()`, `compute_central_obstruction_theory()`, `compute_aperture_vs_seeing_theory()`, `compute_coma_fratio_theory()`; `overlay_airy_ring()` for figure overlays; `THEORY_FUNCTIONS` and `OVERLAY_FUNCTIONS` registries
+
+**`telescope_gui/tutorial_mode/widgets/`**
+- `scenario_sidebar.py` — `ScenarioSidebar(QWidget)`: act-grouped clickable scenario list, highlights active, disables placeholders
+- `before_after_panel.py` — `BeforeAfterPanel(QWidget)`: side-by-side `MatplotlibCanvas` pair with labels
+- `theory_readout.py` — `TheoryReadoutPanel(QWidget)`: "Theory: X  Sim: Y  Δ: Z%" display with colour-coded delta
+- `terminal_panel.py` — `TerminalPanel(QWidget)`: dark-themed read-only code display with Copy button
+- `effect_toggles.py` — `EffectTogglesPanel(QWidget)`: per-effect checkboxes for Act 3 scenarios
+
+**`tests/test_tutorial_tab.py`** — 31 tests covering DoubleStar, scenario registry, theory computations, scenario runner, and effect toggles
+
+### Modified Files
+
+**`telescope_sim/source/sources.py`** — Added `DoubleStar(AstronomicalSource)`: two point sources at configurable angular separation, used for Rayleigh criterion scenario
+
+**`telescope_sim/source/__init__.py`** — Exported `DoubleStar`
+
+**`telescope_sim/plotting/ray_trace_plot.py`**
+- Added `apply_coma: bool = True` parameter to `_compute_psf_at_field_angle()` — when False, off-axis sources are treated as on-axis (diffraction-only PSF)
+- Added `apply_coma: bool = True` and `apply_vignetting: bool = True` parameters to `_render_source_through_telescope()` — allows tutorial Act 3 to toggle individual effects
+- Added same parameters to `plot_source_image()` (public API) — both default to True so existing code is unaffected
+
+**`telescope_gui/main_window.py`** — Added "Tutorial && Testing" radio button and `elif` branch in `switch_mode()` instantiating `TutorialTab`
+
+### Implemented v1 Scenarios
+
+| # | ID | Act | Theory comparison |
+|---|---|---|---|
+| 1 | `airy_disk` | 1 — Isolated | Airy radius θ = 1.22λ/D; cyan ring overlay on PSF |
+| 2 | `central_obstruction` | 1 — Isolated | Strehl ≈ (1−ε²)² |
+| 3 | `aperture_vs_seeing` | 2 — Compounding | Critical aperture D = 1.22λ/θ_seeing; seeing-limited warning |
+| 4 | `fratio_coma` | 2 — Compounding | Coma-free field ∝ f²; delegates to `coma_free_field()` |
+| 5 | `jupiter_full` | 3 — Real Objects | Effect toggles: obstruction, spider vanes, coma, vignetting, seeing |
+
+### Placeholder Scenarios (8)
+
+Rayleigh Criterion, Spider Vane Diffraction, Chromatic Aberration, Coma, Obstruction+Spiders, Chromatic+Seeing, Saturn with Rings, Star Field Resolution — shown as "coming soon" in sidebar.
+
+### Tests Added
+
+- `TestDoubleStar` (6 tests) — rendering, normalization, field extent, magnitude ratio, export
+- `TestScenarioRegistry` (8 tests) — count, act grouping, implemented set, lookups, terminal templates
+- `TestTheoryComputations` (8 tests) — Airy formula, obstruction Strehl, aperture-vs-seeing, coma theory, registry completeness
+- `TestScenarioRunner` (6 tests) — all 5 implemented scenarios render without error, terminal command generation
+- `TestEffectToggles` (3 tests) — apply_coma=False, apply_vignetting=False, defaults unchanged
+
+---
+
+## Major Codebase Refactor (DRY Extraction)
 
 **Date:** 2026-03-27
 **Session:** Major codebase review & refactor — eliminate duplication, add tests

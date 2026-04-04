@@ -3,6 +3,7 @@
 from telescope_sim.source.light_source import create_parallel_rays
 from telescope_sim.source.sources import (
     AstronomicalSource,
+    DoubleStar,
     Jupiter,
     Moon,
     PointSource,
@@ -13,6 +14,7 @@ from telescope_sim.source.sources import (
 __all__ = [
     "create_parallel_rays",
     "AstronomicalSource",
+    "DoubleStar",
     "Jupiter",
     "Moon",
     "PointSource",

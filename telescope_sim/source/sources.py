@@ -82,6 +82,52 @@ class PointSource(AstronomicalSource):
         return self.field_angle_arcsec * 2.5
 
 
+class DoubleStar(AstronomicalSource):
+    """Two point sources at a configurable angular separation.
+
+    Primarily used for Rayleigh criterion demonstrations. The two stars
+    are placed symmetrically about the optical axis along the x-axis.
+
+    Args:
+        separation_arcsec: Angular separation between the two stars.
+        magnitude_primary: Apparent magnitude of the primary (brighter) star.
+        magnitude_secondary: Apparent magnitude of the secondary star.
+    """
+
+    def __init__(self, separation_arcsec: float = 1.0,
+                 magnitude_primary: float = 0.0,
+                 magnitude_secondary: float = 0.0):
+        self.separation_arcsec = separation_arcsec
+        self.magnitude_primary = magnitude_primary
+        self.magnitude_secondary = magnitude_secondary
+
+    def render_ideal(self, half_fov_arcsec: float,
+                     num_pixels: int) -> np.ndarray:
+        image = np.zeros((num_pixels, num_pixels))
+        pixel_scale = 2.0 * half_fov_arcsec / num_pixels
+        center = num_pixels // 2
+
+        half_sep_px = (self.separation_arcsec / 2.0) / pixel_scale
+        ix_a = int(round(center - half_sep_px))
+        ix_b = int(round(center + half_sep_px))
+
+        intensity_a = 10.0 ** (-0.4 * self.magnitude_primary)
+        intensity_b = 10.0 ** (-0.4 * self.magnitude_secondary)
+
+        if 0 <= ix_a < num_pixels:
+            image[center, ix_a] = intensity_a
+        if 0 <= ix_b < num_pixels:
+            image[center, ix_b] = intensity_b
+
+        if image.max() > 0:
+            image /= image.max()
+        return image
+
+    @property
+    def field_extent_arcsec(self) -> float:
+        return max(self.separation_arcsec * 10.0, 10.0)
+
+
 class StarField(AstronomicalSource):
     """A random field of stars at various field angles and magnitudes.
 
