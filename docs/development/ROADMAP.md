@@ -178,41 +178,40 @@ Add constellation visualization and identification to help users learn the night
 
 ## 5. Educational Features
 
-**Priority**: Medium | **Complexity**: Low-Medium | **Impact**: High (educational)
+**Priority**: High | **Complexity**: Medium | **Impact**: High (educational)
 
-Transform the simulator into a comprehensive learning tool with integrated explanations and reference material.
+Transform the simulator into a comprehensive learning tool with integrated explanations, guided experiments, and physics validation.
 
-### Features
+### Tutorial & Testing Tab (In Progress)
+
+**Status**: Actively implementing on `feature/tutorial-testing-tab` branch. See [NEXT_STEPS.md](../../NEXT_STEPS.md) for full plan.
+
+A new GUI mode with guided scenarios that:
+- **Teach optical physics** through before/after image comparisons with tweakable parameters
+- **Validate simulation physics** with "Theory: X, Sim: Y" quantitative comparisons
+- **Show the Python API** in a scoped terminal panel for learning the programmatic interface
+
+Three-act progression:
+1. **Isolated Effects** — Airy disk, obstruction, spider vanes, chromatic aberration, coma (one variable at a time, test objects)
+2. **Compounding Effects** — aperture vs seeing, f-ratio + coma, combined effects
+3. **Real Objects** — Jupiter, Saturn with per-effect toggle on/off
+
+### Additional Educational Features (Future)
 
 | Feature | Priority | Complexity | Impact | Description |
 |---------|----------|------------|--------|-------------|
 | **Constellation notes** | Medium | Low | High | Mythology, bright stars, notable DSOs in each constellation |
-| **Telescope design explanations** | High | Low | High | "Why Cassegrain vs Newtonian?" with diagrams and tradeoffs |
 | **Physics tooltips** | Medium | Low | Medium | Hover over "Airy disk" → see definition and formula |
-| **Guided tutorials** | Medium | Medium | High | Step-by-step lessons: "Understanding diffraction limits" |
-| **Comparison explanations** | High | Low | High | Auto-generated text: "The achromat shows less color fringing because..." |
-
-### Implementation (GUI Context)
-
-- **Educational tab**: Dedicated GUI panel with:
-  - Telescope design reference (types, tradeoffs, typical uses)
-  - Constellation guide (notes, mythology, DSO highlights)
-  - Physics primer (optics concepts, formulas, intuition)
-- **Contextual help**: Right-click on any element → "Learn more"
-- **Interactive diagrams**: Click on ray trace → highlight and explain that optical element
-
-### Content Organization
-
-- **Beginner**: "What is an f-ratio?" "Why can't I see nebula colors?"
-- **Intermediate**: "Cassegrain vs Ritchey-Chrétien" "How does coma affect imaging?"
-- **Advanced**: "Wavefront error analysis" "Optimizing secondary obstruction"
+| **Comparison explanations** | Medium | Low | High | Auto-generated text: "The achromat shows less color fringing because..." |
+| **Interactive diagrams** | Low | Medium | Medium | Click on ray trace → highlight and explain that optical element |
 
 ### Why This Matters
 
-The simulator already models realistic physics. Adding explanations transforms it from a **tool** into a **teacher**:
+The simulator already models realistic physics. Adding explanations and guided experiments transforms it from a **tool** into a **teacher**:
 - Users understand *why* a 6\" achromat shows less color than a 6\" singlet
 - Learners connect ray diagrams to actual performance
 - Design decisions become informed rather than trial-and-error
+- Developer can verify physics correctness against known theoretical predictions
 
 ---
 
@@ -241,10 +240,10 @@ The simulator already models realistic physics. Adding explanations transforms i
 3. **Constellation overlay** (star patterns in FOV)
 
 ### Phase 3: GUI (High Impact, High Effort)
-1. Basic GUI with parameter controls
-2. Terminal integration
-3. Tabbed interface
-4. Educational tab
+1. ~~Basic GUI with parameter controls~~ ✅ Complete
+2. ~~Tabbed interface~~ ✅ Complete (Single, Comparison, Parameters & Physics modes)
+3. Tutorial & Testing tab (in progress)
+4. Terminal integration (scoped to tutorial tab)
 
 ### Phase 4: Advanced Physics (Medium Priority)
 1. Kolmogorov/Moffat seeing
