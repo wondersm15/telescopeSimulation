@@ -74,6 +74,10 @@ class ScenarioDefinition:
     # Each entry is a param name from TelescopeConfig or "seeing" / "wavelength_nm"
     tweakable_params: tuple[str, ...] = field(default_factory=tuple)
 
+    # Override effect application on the "before" side (e.g. vignetting off)
+    before_apply_vignetting: bool = True
+    before_apply_coma: bool = True
+
     # For Act 3: which effects can be individually toggled on/off
     effect_toggles: tuple[str, ...] = field(default_factory=tuple)
 
@@ -189,7 +193,19 @@ SCENARIOS: list[ScenarioDefinition] = [
         plot_function="plot_source_image",
         theory_function="compute_rayleigh_theory",
         tweakable_params=("diameter", "separation_arcsec"),
-        implemented=False,
+        implemented=True,
+        terminal_template=(
+            "from telescope_sim.geometry import NewtonianTelescope\n"
+            "from telescope_sim.source.sources import DoubleStar\n"
+            "from telescope_sim.plotting import plot_source_image\n\n"
+            "telescope = NewtonianTelescope(\n"
+            "    primary_diameter={diameter},\n"
+            "    focal_length=1000,\n"
+            "    enable_obstruction=False,\n"
+            ")\n"
+            "source = DoubleStar(separation_arcsec={separation_arcsec})\n"
+            "fig = plot_source_image(telescope, source, wavelength_nm={wavelength_nm})"
+        ),
     ),
 
     ScenarioDefinition(
@@ -224,7 +240,7 @@ SCENARIOS: list[ScenarioDefinition] = [
             "# After: {obstruction_ratio:.0%} obstruction\n"
             "t_obstructed = NewtonianTelescope(\n"
             "    primary_diameter=200, focal_length=1000,\n"
-            "    enable_obstruction=True,\n"
+            "    enable_obstruction=True, obstruction_ratio={obstruction_ratio:.2f},\n"
             ")\n"
             "fig = plot_psf_2d(t_obstructed, wavelength_nm={wavelength_nm})"
         ),
@@ -249,7 +265,18 @@ SCENARIOS: list[ScenarioDefinition] = [
         plot_function="plot_psf_2d",
         theory_function=None,
         tweakable_params=("spider_vanes", "spider_vane_width"),
-        implemented=False,
+        implemented=True,
+        terminal_template=(
+            "from telescope_sim.geometry import NewtonianTelescope\n"
+            "from telescope_sim.plotting import plot_psf_2d\n\n"
+            "telescope = NewtonianTelescope(\n"
+            "    primary_diameter=200, focal_length=1000,\n"
+            "    enable_obstruction=True, obstruction_ratio=0.20,\n"
+            "    spider_vanes={spider_vanes},\n"
+            "    spider_vane_width={spider_vane_width},\n"
+            ")\n"
+            "fig = plot_psf_2d(telescope, wavelength_nm={wavelength_nm})"
+        ),
     ),
 
     ScenarioDefinition(
@@ -273,29 +300,56 @@ SCENARIOS: list[ScenarioDefinition] = [
         plot_function="plot_polychromatic_ray_trace",
         theory_function=None,
         tweakable_params=("objective_type",),
-        implemented=False,
+        implemented=True,
+        terminal_template=(
+            "from telescope_gui.telescope_builder import build_telescope\n"
+            "from telescope_sim.plotting.ray_trace_plot import plot_polychromatic_ray_trace\n\n"
+            "telescope = build_telescope(\n"
+            "    telescope_type='Refractor',\n"
+            "    diameter=80, focal_length=640,\n"
+            "    objective_type='{objective_type}',\n"
+            ")\n"
+            "fig = plot_polychromatic_ray_trace(telescope)"
+        ),
     ),
 
     ScenarioDefinition(
-        id="coma",
-        title="Coma",
+        id="vignetting",
+        title="Vignetting",
         act=1, act_label="Isolated Effects",
         description=(
-            "Off-axis point sources through a fast parabolic mirror produce comet-shaped "
-            "blurs (coma). The coma-free field scales as f\u00b2: slower telescopes have "
-            "wider usable fields. Compare f/4 vs f/8."
+            "Off-axis light in a Newtonian is clipped by the secondary mirror, dimming "
+            "stars near the field edge. The fully-illuminated field depends on f-ratio "
+            "and secondary size. Compare uniform illumination to the vignetted result."
         ),
-        learn_more_section="Coma",
-        before_telescope=_FAST_200MM,
-        before_source=_POINT,
-        before_label="f/4 (fast)",
-        after_telescope=_SLOW_200MM,
-        after_source=_POINT,
-        after_label="f/8 (slow) \u2192",
-        plot_function="plot_coma_field_analysis",
-        theory_function="compute_coma_fratio_theory",
-        tweakable_params=("focal_length",),
-        implemented=False,
+        learn_more_section="Vignetting",
+        before_telescope=_SPIDER_200MM,
+        before_source=_STARFIELD,
+        before_apply_vignetting=False,
+        before_label="No vignetting",
+        after_telescope=_SPIDER_200MM,
+        after_source=_STARFIELD,
+        after_label="With vignetting \u2192",
+        plot_function="plot_source_image",
+        theory_function="compute_vignetting_theory",
+        tweakable_params=("diameter", "focal_length"),
+        implemented=True,
+        terminal_template=(
+            "from telescope_sim.geometry import NewtonianTelescope\n"
+            "from telescope_sim.source.sources import StarField\n"
+            "from telescope_sim.plotting import plot_source_image\n\n"
+            "telescope = NewtonianTelescope(\n"
+            "    primary_diameter={diameter},\n"
+            "    focal_length={focal_length},\n"
+            "    enable_obstruction=True,\n"
+            ")\n"
+            "source = StarField()\n"
+            "# With vignetting (default)\n"
+            "fig = plot_source_image(telescope, source, wavelength_nm={wavelength_nm})\n\n"
+            "# Without vignetting\n"
+            "fig = plot_source_image(telescope, source, wavelength_nm={wavelength_nm},\n"
+            "                       apply_vignetting=False)"
+        ),
     ),
 
     # ------------------------------------------------------------------
@@ -309,7 +363,7 @@ SCENARIOS: list[ScenarioDefinition] = [
         description=(
             "Combine central obstruction and spider vanes to see how the enhanced secondary "
             "rings interact with diffraction spikes. The PSF is now the product of both effects "
-            "simultaneously — not simply the sum."
+            "simultaneously \u2014 not simply the sum."
         ),
         learn_more_section="Central Obstruction",
         before_telescope=_OBSTRUCTED_200MM,
@@ -321,7 +375,18 @@ SCENARIOS: list[ScenarioDefinition] = [
         plot_function="plot_psf_2d",
         theory_function=None,
         tweakable_params=("obstruction_ratio", "spider_vanes", "spider_vane_width"),
-        implemented=False,
+        implemented=True,
+        terminal_template=(
+            "from telescope_sim.geometry import NewtonianTelescope\n"
+            "from telescope_sim.plotting import plot_psf_2d\n\n"
+            "telescope = NewtonianTelescope(\n"
+            "    primary_diameter=200, focal_length=1000,\n"
+            "    enable_obstruction=True, obstruction_ratio={obstruction_ratio:.2f},\n"
+            "    spider_vanes={spider_vanes},\n"
+            "    spider_vane_width={spider_vane_width},\n"
+            ")\n"
+            "fig = plot_psf_2d(telescope, wavelength_nm={wavelength_nm})"
+        ),
     ),
 
     ScenarioDefinition(
@@ -345,8 +410,25 @@ SCENARIOS: list[ScenarioDefinition] = [
         after_label="With seeing \u2192",
         plot_function="plot_source_image",
         theory_function=None,
-        tweakable_params=("seeing",),
-        implemented=False,
+        tweakable_params=("seeing", "objective_type"),
+        implemented=True,
+        terminal_template=(
+            "from telescope_gui.telescope_builder import build_telescope\n"
+            "from telescope_sim.source.sources import PointSource\n"
+            "from telescope_sim.plotting import plot_source_image\n\n"
+            "telescope = build_telescope(\n"
+            "    telescope_type='Refractor',\n"
+            "    diameter=80, focal_length=640,\n"
+            "    objective_type='{objective_type}',\n"
+            ")\n"
+            "source = PointSource()\n"
+            "fig = plot_source_image(\n"
+            "    telescope, source,\n"
+            "    seeing_arcsec={seeing_arcsec},\n"
+            "    polychromatic=True,\n"
+            "    wavelength_nm={wavelength_nm},\n"
+            ")"
+        ),
     ),
 
     ScenarioDefinition(
@@ -463,6 +545,7 @@ SCENARIOS: list[ScenarioDefinition] = [
             "telescope = NewtonianTelescope(\n"
             "    primary_diameter={diameter},\n"
             "    focal_length={focal_length},\n"
+            "    obstruction_ratio={obstruction_ratio:.2f},\n"
             "    spider_vanes={spider_vanes},\n"
             "    spider_vane_width={spider_vane_width},\n"
             "    enable_obstruction={enable_obstruction},\n"
@@ -491,16 +574,36 @@ SCENARIOS: list[ScenarioDefinition] = [
             enable_obstruction=False, spider_vanes=0,
         ),
         before_source=_SATURN,
-        before_label="Ideal",
+        before_label="Ideal (no aberrations)",
         after_telescope=_JUPITER_200MM,
         after_source=_SATURN,
         after_seeing_arcsec=1.5,
-        after_label="Realistic \u2192",
+        after_label="Realistic 200 mm Newtonian \u2192",
         plot_function="plot_source_image",
         theory_function=None,
-        tweakable_params=("diameter", "focal_length", "seeing"),
+        tweakable_params=("diameter", "focal_length", "obstruction_ratio",
+                          "spider_vanes", "spider_vane_width", "seeing"),
         effect_toggles=("obstruction", "spider_vanes", "coma", "vignetting", "seeing"),
-        implemented=False,
+        implemented=True,
+        terminal_template=(
+            "from telescope_sim.geometry import NewtonianTelescope\n"
+            "from telescope_sim.source.sources import Saturn\n"
+            "from telescope_sim.plotting import plot_source_image\n\n"
+            "telescope = NewtonianTelescope(\n"
+            "    primary_diameter={diameter},\n"
+            "    focal_length={focal_length},\n"
+            "    obstruction_ratio={obstruction_ratio:.2f},\n"
+            "    spider_vanes={spider_vanes},\n"
+            "    spider_vane_width={spider_vane_width},\n"
+            "    enable_obstruction={enable_obstruction},\n"
+            ")\n"
+            "source = Saturn()\n"
+            "fig = plot_source_image(\n"
+            "    telescope, source,\n"
+            "    seeing_arcsec={seeing_arcsec},\n"
+            "    wavelength_nm={wavelength_nm},\n"
+            ")"
+        ),
     ),
 
     ScenarioDefinition(
@@ -518,16 +621,36 @@ SCENARIOS: list[ScenarioDefinition] = [
             enable_obstruction=False, spider_vanes=0,
         ),
         before_source=_STARFIELD,
-        before_label="Ideal",
+        before_label="Ideal (no aberrations)",
         after_telescope=_SPIDER_200MM,
         after_source=_STARFIELD,
         after_seeing_arcsec=1.5,
-        after_label="Realistic \u2192",
+        after_label="Realistic 200 mm Newtonian \u2192",
         plot_function="plot_source_image",
         theory_function=None,
-        tweakable_params=("diameter", "seeing"),
-        effect_toggles=("obstruction", "spider_vanes", "seeing"),
-        implemented=False,
+        tweakable_params=("diameter", "focal_length", "obstruction_ratio",
+                          "spider_vanes", "spider_vane_width", "seeing"),
+        effect_toggles=("obstruction", "spider_vanes", "coma", "vignetting", "seeing"),
+        implemented=True,
+        terminal_template=(
+            "from telescope_sim.geometry import NewtonianTelescope\n"
+            "from telescope_sim.source.sources import StarField\n"
+            "from telescope_sim.plotting import plot_source_image\n\n"
+            "telescope = NewtonianTelescope(\n"
+            "    primary_diameter={diameter},\n"
+            "    focal_length={focal_length},\n"
+            "    obstruction_ratio={obstruction_ratio:.2f},\n"
+            "    spider_vanes={spider_vanes},\n"
+            "    spider_vane_width={spider_vane_width},\n"
+            "    enable_obstruction={enable_obstruction},\n"
+            ")\n"
+            "source = StarField()\n"
+            "fig = plot_source_image(\n"
+            "    telescope, source,\n"
+            "    seeing_arcsec={seeing_arcsec},\n"
+            "    wavelength_nm={wavelength_nm},\n"
+            ")"
+        ),
     ),
 ]
 

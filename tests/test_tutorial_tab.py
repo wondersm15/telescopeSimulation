@@ -80,13 +80,18 @@ class TestScenarioRegistry:
         assert len(by_act[2]) == 4
         assert len(by_act[3]) == 3
 
-    def test_five_implemented(self):
+    def test_all_scenarios_implemented(self):
         from telescope_gui.tutorial_mode.scenario_registry import SCENARIOS
         implemented = [s for s in SCENARIOS if s.implemented]
-        assert len(implemented) == 5
+        assert len(implemented) == 13
         ids = {s.id for s in implemented}
-        assert ids == {"airy_disk", "central_obstruction", "aperture_vs_seeing",
-                       "fratio_coma", "jupiter_full"}
+        assert ids == {
+            "airy_disk", "rayleigh_criterion", "central_obstruction",
+            "spider_vanes", "chromatic_aberration", "vignetting",
+            "obstruction_plus_spiders", "chromatic_plus_seeing",
+            "aperture_vs_seeing", "fratio_coma",
+            "jupiter_full", "saturn_rings", "starfield_resolution",
+        }
 
     def test_get_scenario_by_id(self):
         from telescope_gui.tutorial_mode.scenario_registry import get_scenario_by_id
@@ -178,6 +183,16 @@ class TestTheoryComputations:
         assert result["theory_value"] > 0
         assert result["unit"] == "arcsec"
 
+    def test_vignetting_theory_returns_positive(self):
+        from telescope_gui.tutorial_mode.theory_computations import compute_vignetting_theory
+        from telescope_gui.telescope_builder import build_telescope
+        t = build_telescope("Newtonian", 200.0, 1000.0, obstruction_ratio=0.20,
+                            enable_obstruction=True)
+        result = compute_vignetting_theory(t)
+        assert result["theory_value"] > 0
+        assert result["unit"] == "arcsec"
+        assert result["label"] == "Fully illuminated field"
+
     def test_theory_functions_registry_complete(self):
         from telescope_gui.tutorial_mode.theory_computations import THEORY_FUNCTIONS
         from telescope_gui.tutorial_mode.scenario_registry import SCENARIOS
@@ -234,6 +249,93 @@ class TestScenarioRunner:
         from telescope_gui.tutorial_mode.scenario_registry import get_scenario_by_id
         from telescope_gui.tutorial_mode.scenario_runner import run_scenario_side
         s = get_scenario_by_id("jupiter_full")
+        fig, info, err = run_scenario_side(
+            s.after_telescope, s.after_source, s.plot_function,
+            seeing_arcsec=s.after_seeing_arcsec)
+        assert err is None
+        plt.close(fig)
+
+    def test_run_rayleigh_criterion(self):
+        from telescope_gui.tutorial_mode.scenario_registry import get_scenario_by_id
+        from telescope_gui.tutorial_mode.scenario_runner import run_scenario_side
+        s = get_scenario_by_id("rayleigh_criterion")
+        fig, info, err = run_scenario_side(
+            s.after_telescope, s.after_source, s.plot_function)
+        assert err is None
+        plt.close(fig)
+
+    def test_run_spider_vanes(self):
+        from telescope_gui.tutorial_mode.scenario_registry import get_scenario_by_id
+        from telescope_gui.tutorial_mode.scenario_runner import run_scenario_side
+        s = get_scenario_by_id("spider_vanes")
+        fig, info, err = run_scenario_side(
+            s.after_telescope, s.after_source, s.plot_function)
+        assert err is None
+        plt.close(fig)
+
+    def test_run_chromatic_aberration(self):
+        from telescope_gui.tutorial_mode.scenario_registry import get_scenario_by_id
+        from telescope_gui.tutorial_mode.scenario_runner import run_scenario_side
+        s = get_scenario_by_id("chromatic_aberration")
+        fig, info, err = run_scenario_side(
+            s.after_telescope, s.after_source, s.plot_function,
+            polychromatic=s.after_polychromatic)
+        assert err is None
+        plt.close(fig)
+
+    def test_run_vignetting(self):
+        from telescope_gui.tutorial_mode.scenario_registry import get_scenario_by_id
+        from telescope_gui.tutorial_mode.scenario_runner import run_scenario_side
+        s = get_scenario_by_id("vignetting")
+        fig, info, err = run_scenario_side(
+            s.after_telescope, s.after_source, s.plot_function)
+        assert err is None
+        plt.close(fig)
+
+    def test_run_vignetting_before_no_vignetting(self):
+        from telescope_gui.tutorial_mode.scenario_registry import get_scenario_by_id
+        from telescope_gui.tutorial_mode.scenario_runner import run_scenario_side
+        s = get_scenario_by_id("vignetting")
+        fig, info, err = run_scenario_side(
+            s.before_telescope, s.before_source, s.plot_function,
+            apply_vignetting=False)
+        assert err is None
+        plt.close(fig)
+
+    def test_run_obstruction_plus_spiders(self):
+        from telescope_gui.tutorial_mode.scenario_registry import get_scenario_by_id
+        from telescope_gui.tutorial_mode.scenario_runner import run_scenario_side
+        s = get_scenario_by_id("obstruction_plus_spiders")
+        fig, info, err = run_scenario_side(
+            s.after_telescope, s.after_source, s.plot_function)
+        assert err is None
+        plt.close(fig)
+
+    def test_run_chromatic_plus_seeing(self):
+        from telescope_gui.tutorial_mode.scenario_registry import get_scenario_by_id
+        from telescope_gui.tutorial_mode.scenario_runner import run_scenario_side
+        s = get_scenario_by_id("chromatic_plus_seeing")
+        fig, info, err = run_scenario_side(
+            s.after_telescope, s.after_source, s.plot_function,
+            seeing_arcsec=s.after_seeing_arcsec,
+            polychromatic=s.after_polychromatic)
+        assert err is None
+        plt.close(fig)
+
+    def test_run_saturn_rings(self):
+        from telescope_gui.tutorial_mode.scenario_registry import get_scenario_by_id
+        from telescope_gui.tutorial_mode.scenario_runner import run_scenario_side
+        s = get_scenario_by_id("saturn_rings")
+        fig, info, err = run_scenario_side(
+            s.after_telescope, s.after_source, s.plot_function,
+            seeing_arcsec=s.after_seeing_arcsec)
+        assert err is None
+        plt.close(fig)
+
+    def test_run_starfield_resolution(self):
+        from telescope_gui.tutorial_mode.scenario_registry import get_scenario_by_id
+        from telescope_gui.tutorial_mode.scenario_runner import run_scenario_side
+        s = get_scenario_by_id("starfield_resolution")
         fig, info, err = run_scenario_side(
             s.after_telescope, s.after_source, s.plot_function,
             seeing_arcsec=s.after_seeing_arcsec)

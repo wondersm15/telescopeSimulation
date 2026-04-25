@@ -97,6 +97,21 @@ def compute_central_obstruction_theory(telescope,
     }
 
 
+def compute_vignetting_theory(telescope) -> dict:
+    """Fully-illuminated field radius — angle where vignetting begins.
+
+    Beyond this angle, the converging beam from the primary is clipped by
+    the secondary mirror, reducing illumination toward the field edge.
+    """
+    fif_arcsec = telescope.fully_illuminated_field()
+    return {
+        "theory_value": fif_arcsec,
+        "label": "Fully illuminated field",
+        "unit": "arcsec",
+        "formula": "θ_fif = (r_sec − r_beam) / d_sec × 206265",
+    }
+
+
 # ---------------------------------------------------------------------------
 # Act 2 — Compounding Effects
 # ---------------------------------------------------------------------------
@@ -166,6 +181,7 @@ THEORY_FUNCTIONS: dict[str, callable] = {
     "compute_airy_disk_theory": compute_airy_disk_theory,
     "compute_rayleigh_theory": compute_rayleigh_theory,
     "compute_central_obstruction_theory": compute_central_obstruction_theory,
+    "compute_vignetting_theory": compute_vignetting_theory,
     "compute_aperture_vs_seeing_theory": compute_aperture_vs_seeing_theory,
     "compute_coma_fratio_theory": compute_coma_fratio_theory,
 }
