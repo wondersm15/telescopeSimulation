@@ -66,7 +66,8 @@ class TutorialTab(QWidget):
         self._current_after_config: TelescopeConfig | None = None
         self._current_seeing: float | None = None
         self._tweak_widgets: dict[str, QWidget] = {}
-        self._before_axis_limits: tuple | None = None
+        # Per-axis (xlim, ylim) captured from the before-side figure
+        self._before_axis_limits: list[tuple] | None = None
         self._psf_view_combo: QComboBox | None = None
         self._build_ui()
         # Load the first implemented scenario automatically
@@ -281,7 +282,8 @@ class TutorialTab(QWidget):
                 self._add_objective_combo(after.objective_type)
 
         # PSF view toggle for scenarios that render a 2D PSF
-        if is_psf_scenario:
+        # (disabled for spider/obstruction scenarios where azimuthal pattern matters)
+        if is_psf_scenario and scenario.show_psf_toggle:
             self._add_psf_view_combo()
 
         self.controls_layout.addStretch()
@@ -376,9 +378,17 @@ class TutorialTab(QWidget):
         """Render and display the static baseline image."""
         self.status_label.setText("Rendering baseline…")
         plot_fn = self._effective_plot_function(scenario)
+
+        # For both_sides_dynamic scenarios, use current widget values so the
+        # before side also reflects the live tweakable params (e.g. separation).
+        before_source = scenario.before_source
+        if scenario.both_sides_dynamic and self._tweak_widgets:
+            params = self._collect_params(scenario)
+            before_source = self._params_to_source_config(scenario, params)
+
         fig, info, err = run_scenario_side(
             scenario.before_telescope,
-            scenario.before_source,
+            before_source,
             plot_fn,
             wavelength_nm=scenario.before_wavelength_nm,
             seeing_arcsec=scenario.before_seeing_arcsec,
@@ -407,10 +417,12 @@ class TutorialTab(QWidget):
                     formula=theory.get("formula", ""),
                 )
 
-        # Capture axis limits for locking the after-side axes
+        # Capture per-axis limits for locking the after-side (works for
+        # single-plot and multi-subplot figures such as coma field analysis)
         if fig.axes:
-            ax = fig.axes[0]
-            self._before_axis_limits = (ax.get_xlim(), ax.get_ylim())
+            self._before_axis_limits = [
+                (ax.get_xlim(), ax.get_ylim()) for ax in fig.axes
+            ]
         else:
             self._before_axis_limits = None
 
@@ -491,13 +503,17 @@ class TutorialTab(QWidget):
                     if theory["is_seeing_limited"]:
                         self.theory_readout.show_extra("⚠ Seeing-limited")
 
-        # Apply before-side axis limits to after-side for visual comparison
+        # Apply per-axis limits from before-side for visual comparison.
+        # Iterates all axes so multi-subplot figures (e.g. coma field analysis)
+        # are locked correctly per subplot.
         if (self.lock_axes_check.isChecked()
                 and self._before_axis_limits is not None
                 and fig.axes):
-            xlim, ylim = self._before_axis_limits
-            fig.axes[0].set_xlim(xlim)
-            fig.axes[0].set_ylim(ylim)
+            for i, ax in enumerate(fig.axes):
+                if i < len(self._before_axis_limits):
+                    xlim, ylim = self._before_axis_limits[i]
+                    ax.set_xlim(xlim)
+                    ax.set_ylim(ylim)
 
         self.before_after.set_after(fig, scenario.after_label)
         plt.close(fig)
@@ -632,6 +648,11 @@ class TutorialTab(QWidget):
     # ------------------------------------------------------------------
 
     def _on_update_clicked(self):
+        # For scenarios where both sides share a tweakable param (e.g. separation
+        # on Rayleigh), re-render the before side first so axes lock is consistent.
+        if (self._current_scenario is not None
+                and self._current_scenario.both_sides_dynamic):
+            self._render_before(self._current_scenario)
         self._render_after()
 
     def _on_reset_clicked(self):

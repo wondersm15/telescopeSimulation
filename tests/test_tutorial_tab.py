@@ -69,25 +69,26 @@ class TestDoubleStar:
 # ---------------------------------------------------------------------------
 
 class TestScenarioRegistry:
-    def test_thirteen_scenarios_total(self):
+    def test_fourteen_scenarios_total(self):
         from telescope_gui.tutorial_mode.scenario_registry import SCENARIOS
-        assert len(SCENARIOS) == 13
+        assert len(SCENARIOS) == 14
 
     def test_acts_populated(self):
         from telescope_gui.tutorial_mode.scenario_registry import get_scenarios_by_act
         by_act = get_scenarios_by_act()
-        assert len(by_act[1]) == 6
+        assert len(by_act[1]) == 7
         assert len(by_act[2]) == 4
         assert len(by_act[3]) == 3
 
     def test_all_scenarios_implemented(self):
         from telescope_gui.tutorial_mode.scenario_registry import SCENARIOS
         implemented = [s for s in SCENARIOS if s.implemented]
-        assert len(implemented) == 13
+        assert len(implemented) == 14
         ids = {s.id for s in implemented}
         assert ids == {
             "airy_disk", "rayleigh_criterion", "central_obstruction",
             "spider_vanes", "chromatic_aberration", "vignetting",
+            "spherical_aberration",
             "obstruction_plus_spiders", "chromatic_plus_seeing",
             "aperture_vs_seeing", "fratio_coma",
             "jupiter_full", "saturn_rings", "starfield_resolution",
@@ -192,6 +193,38 @@ class TestTheoryComputations:
         assert result["theory_value"] > 0
         assert result["unit"] == "arcsec"
         assert result["label"] == "Fully illuminated field"
+
+    def test_spherical_aberration_theory_spherical(self):
+        from telescope_gui.tutorial_mode.theory_computations import (
+            compute_spherical_aberration_theory)
+        from telescope_gui.telescope_builder import build_telescope
+        t = build_telescope("Newtonian", 200.0, 800.0, primary_type="spherical",
+                            enable_obstruction=False)
+        result = compute_spherical_aberration_theory(t)
+        assert result["theory_value"] > 0
+        assert result["unit"] == "arcsec"
+
+    def test_spherical_aberration_theory_parabolic_is_zero(self):
+        from telescope_gui.tutorial_mode.theory_computations import (
+            compute_spherical_aberration_theory)
+        from telescope_gui.telescope_builder import build_telescope
+        t = build_telescope("Newtonian", 200.0, 800.0, primary_type="parabolic",
+                            enable_obstruction=False)
+        result = compute_spherical_aberration_theory(t)
+        assert result["theory_value"] == 0.0
+
+    def test_spherical_aberration_scales_with_fratio(self):
+        from telescope_gui.tutorial_mode.theory_computations import (
+            compute_spherical_aberration_theory)
+        from telescope_gui.telescope_builder import build_telescope
+        t_f4 = build_telescope("Newtonian", 200.0, 800.0, primary_type="spherical",
+                               enable_obstruction=False)
+        t_f8 = build_telescope("Newtonian", 200.0, 1600.0, primary_type="spherical",
+                               enable_obstruction=False)
+        sa_f4 = compute_spherical_aberration_theory(t_f4)["theory_value"]
+        sa_f8 = compute_spherical_aberration_theory(t_f8)["theory_value"]
+        # Blur ∝ D³/f³ — f/4 → f/8 doubles f, so blur should be ~8× less
+        assert sa_f4 / sa_f8 == pytest.approx(8.0, rel=0.01)
 
     def test_theory_functions_registry_complete(self):
         from telescope_gui.tutorial_mode.theory_computations import THEORY_FUNCTIONS
@@ -339,6 +372,24 @@ class TestScenarioRunner:
         fig, info, err = run_scenario_side(
             s.after_telescope, s.after_source, s.plot_function,
             seeing_arcsec=s.after_seeing_arcsec)
+        assert err is None
+        plt.close(fig)
+
+    def test_run_spherical_aberration_before(self):
+        from telescope_gui.tutorial_mode.scenario_registry import get_scenario_by_id
+        from telescope_gui.tutorial_mode.scenario_runner import run_scenario_side
+        s = get_scenario_by_id("spherical_aberration")
+        fig, info, err = run_scenario_side(
+            s.before_telescope, s.before_source, s.plot_function)
+        assert err is None
+        plt.close(fig)
+
+    def test_run_spherical_aberration_after(self):
+        from telescope_gui.tutorial_mode.scenario_registry import get_scenario_by_id
+        from telescope_gui.tutorial_mode.scenario_runner import run_scenario_side
+        s = get_scenario_by_id("spherical_aberration")
+        fig, info, err = run_scenario_side(
+            s.after_telescope, s.after_source, s.plot_function)
         assert err is None
         plt.close(fig)
 

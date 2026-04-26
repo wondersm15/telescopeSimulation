@@ -173,6 +173,44 @@ def compute_coma_fratio_theory(telescope, wavelength_nm: float = 550.0) -> dict:
     }
 
 
+def compute_spherical_aberration_theory(telescope,
+                                         wavelength_nm: float = 550.0) -> dict:
+    """Geometric transverse spherical aberration blur radius for a spherical mirror.
+
+    For a perfect sphere, marginal rays focus short of the paraxial focus.
+    The geometric blur radius at the paraxial focus is:
+
+        r_blur = D³ / (128 · f²)  [mm]
+
+    Converting to angular extent:
+
+        θ = r_blur · 206265 / f = D³ · 206265 / (128 · f³)  [arcsec]
+
+    Note: parabolic primaries have zero spherical aberration (returns 0).
+    Airy radius shown for comparison: θ_Airy = 1.22 · λ / D.
+    """
+    primary_type = getattr(telescope, 'primary_type', 'parabolic')
+    f = telescope.focal_length
+    D = telescope.primary_diameter
+
+    if primary_type != 'spherical':
+        return {
+            "theory_value": 0.0,
+            "label": "SA blur radius",
+            "unit": "arcsec",
+            "formula": "Parabolic: SA = 0",
+        }
+
+    r_blur_mm = D ** 3 / (128.0 * f ** 2)
+    theta_arcsec = r_blur_mm * 206265.0 / f
+    return {
+        "theory_value": theta_arcsec,
+        "label": "SA blur radius",
+        "unit": "arcsec",
+        "formula": "r = D³/(128f²)",
+    }
+
+
 # ---------------------------------------------------------------------------
 # Registry — maps scenario theory_function names to callables
 # ---------------------------------------------------------------------------
@@ -184,6 +222,7 @@ THEORY_FUNCTIONS: dict[str, callable] = {
     "compute_vignetting_theory": compute_vignetting_theory,
     "compute_aperture_vs_seeing_theory": compute_aperture_vs_seeing_theory,
     "compute_coma_fratio_theory": compute_coma_fratio_theory,
+    "compute_spherical_aberration_theory": compute_spherical_aberration_theory,
 }
 
 # Maps scenario ids to their figure overlay functions (called after plot, before set_figure)

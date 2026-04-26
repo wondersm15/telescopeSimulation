@@ -198,65 +198,200 @@ dependent focus shifts reveal chromatic aberration.</p>
 """
 
 PHYSICS_HTML = """
+<h3>Units Used in This Simulation</h3>
+<table cellpadding="4" cellspacing="0" style="border-collapse:collapse;">
+<tr style="background:#e0e0e0;">
+  <th align="left" style="padding:4px 8px;">Quantity</th>
+  <th align="left" style="padding:4px 8px;">Unit</th>
+  <th align="left" style="padding:4px 8px;">Notes</th>
+</tr>
+<tr><td style="padding:4px 8px;">Angles (sky)</td><td>arcseconds (&#8243;)</td>
+    <td>1&#176; = 3600&#8243;; Moon &#8776;1800&#8243;</td></tr>
+<tr style="background:#f5f5f5;"><td style="padding:4px 8px;">Image-plane distances</td><td>mm</td>
+    <td>Physical size at the focal plane</td></tr>
+<tr><td style="padding:4px 8px;">Aperture &amp; focal length</td><td>mm</td>
+    <td>Sometimes shown in inches for familiarity: 1&#8243; = 25.4 mm</td></tr>
+<tr style="background:#f5f5f5;"><td style="padding:4px 8px;">Wavelengths</td><td>nm</td>
+    <td>Visible: 380&ndash;700 nm; default 550 nm (green peak)</td></tr>
+<tr><td style="padding:4px 8px;">Plate scale</td><td>arcsec/mm</td>
+    <td>= 206265 / focal_length_mm</td></tr>
+</table>
+
+<h3>f-ratio</h3>
+<p>The <b>f-ratio</b> (focal ratio) is defined as:</p>
+<p style="font-family:monospace; margin-left:20px;">f = focal_length / aperture</p>
+<p>Its role in telescope optics:</p>
+<ul>
+  <li><b>Image-plane scale:</b> physical distance on the focal plane for an
+      angle &theta; is d = f_length &times; tan(&theta;) &asymp; f_length &times; &theta;
+      (for small &theta;).</li>
+  <li><b>Photographic speed:</b> lower f-ratio &rarr; brighter image &rarr; shorter
+      exposure for extended objects.</li>
+  <li><b>Coma-free field:</b> CFF &prop; f-ratio&sup2; — halving the f-ratio
+      reduces the usable unvignetted field by 4&times;.</li>
+  <li><b>Airy disk size:</b> r<sub>Airy</sub> = 1.22&lambda;f at the focal
+      plane &mdash; larger at high f-ratios, smaller at low.</li>
+  <li><b>Diffraction limit:</b> angular resolution 1.22&lambda;/D depends
+      <i>only</i> on aperture, not f-ratio.</li>
+</ul>
+
 <h3>1. Diffraction (Wave Optics)</h3>
 <p>Light diffracts at the circular aperture, producing the <b>Airy pattern</b>
 &mdash; a central disk surrounded by concentric rings. This is the fundamental
-resolution limit of any telescope.</p>
+angular resolution limit of any telescope.</p>
 <p style="font-family:monospace; margin-left:20px;">
-Rayleigh limit &theta; = 1.22 &lambda; / D &nbsp;(radians)<br>
-Airy disk radius = 1.22 &lambda; f / D &nbsp;(at focal plane)<br>
-Dawes limit &theta; = 116 / D<sub>mm</sub> &nbsp;(arcsec, empirical)
+Airy disk radius &theta;<sub>R</sub> = 1.22 &lambda; / D &nbsp;[radians]<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+= 1.22 &lambda; [nm] &times; 206265 / D [mm] &nbsp;[arcsec]<br>
+Airy radius at focal plane: r = 1.22 &lambda; &times; f-ratio &nbsp;[mm]
 </p>
-<p><i>Accuracy: Exact &mdash; uses Bessel-function Airy formula and FFT-based
-computation.</i></p>
+<p><b>Rayleigh criterion</b> (&theta; = 1.22&lambda;/D): two equal point sources
+are &ldquo;just resolved&rdquo; when the central peak of one falls on the first
+minimum of the other. Theoretical; requires high contrast.</p>
+<p><b>Dawes limit</b> (&theta; &asymp; 116/D<sub>mm</sub> arcsec): empirical
+limit for equal-magnitude double stars as observed visually. Slightly tighter
+than Rayleigh because the eye detects the small bright spot at the saddle point.
+Use Rayleigh for theoretical work; Dawes for practical double-star observing.</p>
+<p><i>Accuracy: Exact &mdash; uses Bessel-function Airy/annular formula and
+FFT-based pupil diffraction.</i></p>
 
 <h3>2. Central Obstruction</h3>
-<p>The secondary mirror blocks the center of the aperture, redistributing
-energy from the Airy disk into the diffraction rings. This lowers contrast on
-fine planetary detail.</p>
+<p>The secondary mirror blocks the centre of the aperture, redistributing
+energy from the Airy disk into the diffraction rings. This reduces peak
+intensity (<b>Strehl ratio</b>) and lowers contrast on fine planetary detail.</p>
+<p><b>Strehl ratio</b> = peak intensity of aberrated PSF / peak of
+unaberrated PSF. For a perfect annular aperture (only obstruction, no other
+errors) the Mar&eacute;chal formula gives:</p>
 <p style="font-family:monospace; margin-left:20px;">
-PSF modified by (1 &minus; &epsilon;&sup2;) factor, &epsilon; = obstruction ratio
+S = (1 &minus; &epsilon;&sup2;)&sup2; &nbsp;&nbsp; (&epsilon; = obstruction ratio)
 </p>
+<p>This is not arbitrary scaling: total energy is conserved, but the Airy disk
+widens and energy moves into the ring system, so the <i>on-axis peak</i> falls.
+A 30% obstruction gives S &asymp; 0.73 (73% of unobstructed peak).</p>
+<p><b>Resolution vs contrast:</b> obstruction <i>narrows</i> the Airy disk
+slightly (the first zero shifts inward by factor 1/(1+&epsilon;&sup2;)),
+superficially improving angular resolution on bright double stars. However
+the contrast of extended planetary detail degrades because more energy sits
+in the rings. These are different properties &mdash; resolution and contrast
+trade off.</p>
 <p>Typical obstruction ratios: Newtonian 15&ndash;25%, Cassegrain 25&ndash;35%,
 Maksutov 30&ndash;40%.</p>
-<p><i>Accuracy: Exact obstruction model.</i></p>
+<p><i>Accuracy: Exact annular-aperture PSF model.</i></p>
 
 <h3>3. Spider Vane Diffraction</h3>
 <p>Support vanes for the secondary mirror act as thin diffracting obstructions,
-producing spikes perpendicular to each vane. 4 straight vanes &rarr; 4 spikes
-(pairs overlap), 3 vanes &rarr; 6 spikes.</p>
+producing spikes <i>perpendicular</i> to each vane. Each arm creates a pair
+of opposing spikes, so:</p>
+<ul>
+  <li>4 vanes (as 2 crossing arms) &rarr; 4 spikes</li>
+  <li>3 vanes (independent arms) &rarr; 6 spikes</li>
+  <li>6 vanes (as 3 crossing arm pairs) &rarr; 6 spikes, each 2&times; brighter
+      than the 3-vane case</li>
+</ul>
+<p>Wider vanes scatter more light into spikes; curved vanes spread the spikes
+into a fan (not modelled here).</p>
 <p><i>Accuracy: Accurate &mdash; full 2D FFT of the aperture function including
-vanes.</i></p>
+vanes as half-strip obstructions.</i></p>
 
 <h3>4. Chromatic Aberration</h3>
-<p>Glass dispersion causes different wavelengths to focus at different distances.
-Severity depends on the objective design:</p>
+<p>Glass dispersion (wavelength-dependent refractive index) causes different
+wavelengths to focus at different distances. Severity depends on the objective
+design:</p>
 <ul>
-  <li><b>Singlet:</b> severe (&asymp;30/f-ratio arcsec blur)</li>
-  <li><b>Achromat:</b> corrected at two wavelengths, residual secondary
-      spectrum</li>
-  <li><b>APO:</b> corrected at three+ wavelengths, near diffraction-limited</li>
+  <li><b>Singlet:</b> severe; focal shift &prop; &lambda;<sup>&minus;2</sup></li>
+  <li><b>Achromat:</b> two wavelengths brought to the same focus (typically
+      red &amp; blue); residual &ldquo;secondary spectrum&rdquo; remains</li>
+  <li><b>APO:</b> three or more wavelengths corrected; near
+      diffraction-limited across the visible band</li>
 </ul>
-<p>Uses <b>Sellmeier equation</b> with real glass data (N-BK7, N-SF11, etc.).</p>
-<p><i>Accuracy: Accurate for implemented lens types.</i></p>
-
-<h3>5. Coma (Off-Axis Aberration)</h3>
-<p>Off-axis point sources appear comet-shaped. Worst for fast parabolic mirrors;
-negligible on-axis.</p>
+<p><b>Sellmeier equation</b> (full form used in real glass design):</p>
 <p style="font-family:monospace; margin-left:20px;">
-Coma blur &asymp; (field_angle)&sup2; / (16 &middot; f-ratio&sup3;)
+n&sup2;(&lambda;) = 1 + &sum;<sub>i</sub> B<sub>i</sub>&lambda;&sup2; /
+(&lambda;&sup2; &minus; C<sub>i</sub>)
 </p>
-<p><i>Accuracy: Geometric approximation, valid for small field angles.</i></p>
+<p>where B<sub>i</sub> and C<sub>i</sub> are glass-specific coefficients
+(e.g., for N-BK7: B<sub>1</sub>=1.0396, C<sub>1</sub>=0.00600, etc.).<br>
+<b>Note:</b> this simulation uses the simpler <b>Cauchy equation</b>
+n(&lambda;) = A + B/&lambda;&sup2; for tractability &mdash; a good
+approximation over the visible band but not as accurate as Sellmeier.</p>
+<p><i>Accuracy: Accurate for implemented lens types using Cauchy
+dispersion.</i></p>
+
+<h3>5. Coma &amp; Seidel Aberrations</h3>
+<p>Classical aberration theory (Seidel, 1856) expands the wavefront error
+as a polynomial in field angle (&theta;) and normalised pupil radius (&rho;).
+The five third-order (<i>primary</i>) terms are:</p>
+<ol>
+  <li><b>Spherical aberration</b> &mdash; on-axis blur, &rho;&sup4; term</li>
+  <li><b>Coma</b> &mdash; comet-shaped off-axis blur, &theta;&rho;&sup3;</li>
+  <li><b>Astigmatism</b> &mdash; line focus at two orientations,
+      &theta;&sup2;&rho;&sup2;</li>
+  <li><b>Field curvature</b> &mdash; best focus on a curved surface,
+      &theta;&sup2;&rho;&sup2;</li>
+  <li><b>Distortion</b> &mdash; magnification shift, &theta;&sup3;&rho;</li>
+</ol>
+<p>For fast Newtonians, <b>coma</b> is usually dominant off-axis:</p>
+<p style="font-family:monospace; margin-left:20px;">
+Coma-free field radius &prop; f-ratio&sup2;<br>
+Coma blur &asymp; 3 &theta; D / (16 f&sup2;) &nbsp;[mm at focal plane]
+</p>
+<p><i>Accuracy: Geometric approximation for coma; astigmatism and field
+curvature not yet modelled.</i></p>
 
 <h3>6. Spherical Aberration</h3>
 <p>Spherical mirrors focus marginal rays closer than paraxial rays, creating a
 blur circle. Parabolic mirrors have zero on-axis spherical aberration by
 design.</p>
 <p style="font-family:monospace; margin-left:20px;">
-LSA &asymp; D&sup3; / (128 f&sup3;) &nbsp;(Gauss formula)<br>
-Angular blur &asymp; 1000 / (f-ratio)&sup3; arcsec
+Transverse SA blur radius r = D&sup3; / (128 f&sup2;) &nbsp;[mm]<br>
+Angular blur &theta; = r &times; 206265 / f = D&sup3; &times; 206265 / (128 f&sup3;)
+&nbsp;[arcsec]
 </p>
+<p>Blur scales as (1/f-ratio)&sup3; &mdash; halving f-ratio increases blur 8&times;.
+A 200mm f/4 spherical mirror has &sim;25&Prime; blur; at f/8 this falls to
+&sim;3&Prime;.</p>
 <p><i>Accuracy: Accurate &mdash; exact ray tracing for spherical surfaces.</i></p>
+
+<h3>7. Vignetting</h3>
+<p>At off-axis field angles, the cone of light from the primary is partially
+clipped by the secondary mirror (or tube walls), reducing illumination toward
+the field edge.</p>
+<p style="font-family:monospace; margin-left:20px;">
+Fully-illuminated field radius &theta;<sub>fif</sub> = (r<sub>sec</sub>
+&minus; r<sub>beam</sub>) / d<sub>sec</sub> &times; 206265
+</p>
+<p>where r<sub>sec</sub> is the secondary mirror radius, r<sub>beam</sub>
+is the marginal beam radius at the secondary, and d<sub>sec</sub> is the
+distance from primary to secondary (mirror separation). Beyond
+&theta;<sub>fif</sub> illumination decreases toward zero at the
+&ldquo;50% illumination edge.&rdquo;</p>
+<p>Vignetting depends on f-ratio and secondary mirror size. Larger secondaries
+reduce vignetting at the cost of more obstruction (contrast loss).</p>
+<p><i>Accuracy: Geometric circle-circle overlap model, accurate for a
+Newtonian with flat secondary.</i></p>
+
+<h3>8. Atmospheric Seeing</h3>
+<p>Refractive index fluctuations in the atmosphere (turbulence) blur all
+ground-based images. The <b>Fried parameter r<sub>0</sub></b> characterises
+turbulence strength; the long-exposure FWHM of the seeing disk is:</p>
+<p style="font-family:monospace; margin-left:20px;">
+FWHM<sub>seeing</sub> &asymp; 0.98 &lambda; / r<sub>0</sub>
+</p>
+<p>Key properties:</p>
+<ul>
+  <li>FWHM is <b>independent of aperture</b> once D &gt; r<sub>0</sub>
+      (typically 10&ndash;20 cm at a good site). Bigger apertures collect
+      more light but <i>not more detail</i> in this regime.</li>
+  <li><b>Critical aperture</b> D<sub>crit</sub> = 1.22&lambda;/&theta;<sub>seeing</sub>:
+      below this, diffraction dominates; above it, seeing dominates.</li>
+  <li>FWHM scales weakly with wavelength: &prop; &lambda;<sup>&minus;1/5</sup>
+      &mdash; blue light sees slightly worse than red.</li>
+</ul>
+<p>This simulation models seeing as a Gaussian blur with the specified FWHM.
+Real seeing has a von K&aacute;rm&aacute;n spectrum and is not perfectly
+Gaussian &mdash; bright stars show non-Gaussian wings and temporal variation.</p>
+<p><i>Accuracy: Gaussian approximation &mdash; adequate for average long-exposure
+seeing effects.</i></p>
 """
 
 NOT_IMPLEMENTED_HTML = """

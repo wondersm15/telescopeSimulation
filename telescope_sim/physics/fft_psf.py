@@ -41,20 +41,25 @@ def build_pupil_mask(grid_size: int, aperture_diameter: float,
         obstruction_radius = radius * obstruction_ratio
         mask[rr <= obstruction_radius] = 0.0
 
-    # Spider vanes: thin rectangles from center to edge, equally spaced
+    # Spider vanes: thin rectangles from center to edge, equally spaced.
+    # Each vane is a HALF-strip (center → edge, one direction only), placed
+    # at 2π/N intervals. For even N, anti-parallel pairs combine to form
+    # crossing arms producing N diffraction spikes; for odd N, N arms produce
+    # 2N spikes (each arm creates a spike pair perpendicular to itself).
     if spider_vanes > 0:
         vane_half_width = spider_vane_width / 2.0
         for k in range(spider_vanes):
-            angle = k * np.pi / spider_vanes
-            # Rotate coordinates to align vane with the x-axis
+            angle = 2.0 * k * np.pi / spider_vanes
             cos_a = np.cos(angle)
             sin_a = np.sin(angle)
-            # Distance from each point to the vane line
+            # Perpendicular distance from each pixel to the vane centre-line
             perp_dist = np.abs(-sin_a * xx + cos_a * yy)
-            # Points along the vane direction (both positive and negative
-            # from center, so the vane spans the full diameter)
+            # Signed distance along the vane direction; keep only ≥ 0 so
+            # each vane is a half-strip (arm from centre outward, not through)
             along_dist = cos_a * xx + sin_a * yy
-            in_vane = (perp_dist <= vane_half_width) & (rr <= radius)
+            in_vane = ((perp_dist <= vane_half_width)
+                       & (rr <= radius)
+                       & (along_dist >= 0))
             mask[in_vane] = 0.0
 
     return mask

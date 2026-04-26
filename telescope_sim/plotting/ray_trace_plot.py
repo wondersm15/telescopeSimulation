@@ -1515,7 +1515,10 @@ def plot_polychromatic_ray_trace(
                           center_x + spread_x * margin)
         ax_inset.set_ylim(center_y - spread_y * margin,
                           center_y + spread_y * margin)
-        ax_inset.set_title("Focal region", fontsize=8)
+        # Longitudinal chromatic spread along the optical axis
+        long_spread_mm = np.ptp(focals[:, 0]) if len(focals) > 1 else 0.0
+        inset_title = f"Focal region  |  spread: {long_spread_mm:.3f} mm"
+        ax_inset.set_title(inset_title, fontsize=7)
         ax_inset.tick_params(labelsize=6)
 
         # Redraw rays in the inset
@@ -3083,6 +3086,15 @@ def _render_source_through_telescope(
         # apply vignetting, and place at correct image position.
         image = np.zeros((num_pixels, num_pixels))
         pixel_scale_arcsec = 2.0 * half_fov_arcsec / num_pixels
+        pixel_scale_mm = pixel_scale_arcsec / plate_scale
+
+        # The PSF kernel is computed in mm coordinates where psf_half_mm ∝ 1/D.
+        # Without resampling, the Airy argument x = π·D·r/(λ·f) is invariant
+        # to aperture (D cancels), so all apertures produce the same pixel
+        # pattern. We must resample to the image canvas pixel scale so that
+        # Airy radius differs visually with aperture.
+        psf_pixel_scale_mm = 2.0 * psf_half_mm / psf_n
+        psf_zoom = psf_pixel_scale_mm / pixel_scale_mm
 
         if isinstance(source, PointSource):
             stars = [(source.field_angle_arcsec,
@@ -3114,6 +3126,19 @@ def _render_source_through_telescope(
                 psf_half_mm, include_obstruction, apply_coma,
             )
 
+            # Resample PSF to image canvas pixel scale so the Airy disk
+            # appears at the correct angular size for this aperture.
+            if abs(psf_zoom - 1.0) > 0.02:
+                from scipy.ndimage import zoom as _ndz
+                psf = _ndz(psf, psf_zoom, order=1)
+                psf = np.maximum(psf, 0.0)
+                # Trim to at most half the image so large PSFs stay manageable
+                max_half = num_pixels // 2
+                h = psf.shape[0] // 2
+                if h > max_half:
+                    psf = psf[h - max_half:h + max_half + 1,
+                               h - max_half:h + max_half + 1]
+
             # Star position in the image (pixel coords)
             pa_rad = np.radians(pa_deg)
             star_x_arcsec = field_r * np.cos(pa_rad)
@@ -3123,17 +3148,25 @@ def _render_source_through_telescope(
             cy = int(round(num_pixels / 2
                            + star_y_arcsec / pixel_scale_arcsec))
 
-            # Place PSF into image at star position
-            psf_half_pix = psf_n // 2
-            for py in range(psf_n):
-                for px in range(psf_n):
-                    img_y = cy + py - psf_half_pix
-                    img_x = cx + px - psf_half_pix
-                    if (0 <= img_x < num_pixels
-                            and 0 <= img_y < num_pixels):
-                        image[img_y, img_x] += (
-                            psf[py, px] * intensity * vignetting
-                        )
+            # Stamp PSF into image using array slices (faster than pixel loop)
+            psf_h, psf_w = psf.shape
+            psf_hh = psf_h // 2
+
+            y_start = cy - psf_hh
+            x_start = cx - psf_hh
+            y1 = max(0, y_start)
+            y2 = min(num_pixels, y_start + psf_h)
+            x1 = max(0, x_start)
+            x2 = min(num_pixels, x_start + psf_w)
+            py1 = y1 - y_start
+            py2 = py1 + (y2 - y1)
+            px1 = x1 - x_start
+            px2 = px1 + (x2 - x1)
+
+            if y2 > y1 and x2 > x1:
+                image[y1:y2, x1:x2] += (
+                    psf[py1:py2, px1:px2] * intensity * vignetting
+                )
 
     elif hasattr(source, 'render_ideal_rgb'):
         # Extended source with RGB colors (Jupiter, Saturn, Moon, etc.)
@@ -3146,6 +3179,10 @@ def _render_source_through_telescope(
         # Build on-axis PSF kernel on the same angular pixel scale,
         # then convolve in image space.
         psf_angular_half = airy_radius_arcsec * 8
+        # Spider spikes extend much further than 8× Airy radius; enlarge
+        # kernel so spikes are not truncated before reaching the image.
+        if telescope.spider_vanes > 0:
+            psf_angular_half = max(psf_angular_half, airy_radius_arcsec * 60)
         # Convert to same pixel scale as the image
         pixel_scale_arcsec = 2.0 * half_fov_arcsec / num_pixels
         psf_n_img = max(16, int(2 * psf_angular_half / pixel_scale_arcsec))
@@ -3161,9 +3198,7 @@ def _render_source_through_telescope(
         # Polychromatic mode: use per-channel chromatic PSFs for
         # refractors to show color fringing.
         _use_chromatic = (polychromatic
-                          and hasattr(telescope, 'objective')
-                          and not getattr(telescope, 'corrected_optics',
-                                          False))
+                          and hasattr(telescope, 'objective'))
 
         if _use_chromatic:
             # R, G, B channel wavelengths (nm)

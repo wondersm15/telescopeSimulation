@@ -78,6 +78,13 @@ class ScenarioDefinition:
     before_apply_vignetting: bool = True
     before_apply_coma: bool = True
 
+    # When True, "Update" re-renders both sides (separation slider affects both)
+    both_sides_dynamic: bool = False
+
+    # Whether to show the 1D/2D PSF view toggle for this scenario
+    # (False for scenarios where the azimuthal pattern is the point, e.g. spiders)
+    show_psf_toggle: bool = True
+
     # For Act 3: which effects can be individually toggled on/off
     effect_toggles: tuple[str, ...] = field(default_factory=tuple)
 
@@ -119,6 +126,12 @@ _SINGLET_80MM = TelescopeConfig(
 _ACHROMAT_80MM = TelescopeConfig(
     telescope_type="Refractor", diameter=80.0, focal_length=640.0,
     objective_type="achromat",
+)
+# f/5 singlet — larger aperture & faster ratio amplifies chromatic aberration
+# so the singlet vs achromat difference is more dramatic in the ray-trace plot
+_SINGLET_100MM_F5 = TelescopeConfig(
+    telescope_type="Refractor", diameter=100.0, focal_length=500.0,
+    objective_type="singlet",
 )
 _JUPITER_200MM = TelescopeConfig(
     telescope_type="Newtonian", diameter=200.0, focal_length=1000.0,
@@ -179,32 +192,42 @@ SCENARIOS: list[ScenarioDefinition] = [
         title="Rayleigh Criterion",
         act=1, act_label="Isolated Effects",
         description=(
-            "Two stars separated by exactly the Rayleigh limit (1.22\u03bb/D) show a just-noticeable "
-            "dip between the two Airy disks. Decrease separation below the limit to see them merge; "
-            "increase to see them clearly resolved."
+            "Two stars separated by the same angle look different through different apertures. "
+            "The Rayleigh limit 1.22\u03bb/D sets the minimum resolvable separation. A 100\u202fmm scope "
+            "needs 1.38\u2033 to resolve; a 200\u202fmm scope needs only 0.69\u2033. Drag the slider to see "
+            "both sides update simultaneously."
         ),
         learn_more_section="Diffraction",
-        before_telescope=_CLEAN_200MM,
-        before_source=SourceConfig(source_type="DoubleStar", kwargs={"separation_arcsec": 0.69}),
-        before_label="At Rayleigh limit",
-        after_telescope=_CLEAN_200MM,
-        after_source=SourceConfig(source_type="DoubleStar", kwargs={"separation_arcsec": 0.69}),
-        after_label="Adjust separation \u2192",
+        before_telescope=TelescopeConfig(
+            telescope_type="Newtonian", diameter=100.0, focal_length=500.0,
+            enable_obstruction=False, spider_vanes=0,
+        ),
+        before_source=SourceConfig(source_type="DoubleStar", kwargs={"separation_arcsec": 1.0}),
+        before_label="100 mm \u2014 Rayleigh limit 1.38\u2033",
+        after_telescope=TelescopeConfig(
+            telescope_type="Newtonian", diameter=200.0, focal_length=1000.0,
+            enable_obstruction=False, spider_vanes=0,
+        ),
+        after_source=SourceConfig(source_type="DoubleStar", kwargs={"separation_arcsec": 1.0}),
+        after_label="200 mm \u2014 Rayleigh limit 0.69\u2033 \u2192",
         plot_function="plot_source_image",
         theory_function="compute_rayleigh_theory",
-        tweakable_params=("diameter", "separation_arcsec"),
+        tweakable_params=("separation_arcsec",),
+        both_sides_dynamic=True,
         implemented=True,
         terminal_template=(
             "from telescope_sim.geometry import NewtonianTelescope\n"
             "from telescope_sim.source.sources import DoubleStar\n"
             "from telescope_sim.plotting import plot_source_image\n\n"
-            "telescope = NewtonianTelescope(\n"
-            "    primary_diameter={diameter},\n"
-            "    focal_length=1000,\n"
-            "    enable_obstruction=False,\n"
-            ")\n"
+            "# 100 mm: Rayleigh limit = 1.38\"\n"
+            "t100 = NewtonianTelescope(primary_diameter=100, focal_length=500,\n"
+            "                          enable_obstruction=False)\n"
+            "# 200 mm: Rayleigh limit = 0.69\"\n"
+            "t200 = NewtonianTelescope(primary_diameter=200, focal_length=1000,\n"
+            "                          enable_obstruction=False)\n"
             "source = DoubleStar(separation_arcsec={separation_arcsec})\n"
-            "fig = plot_source_image(telescope, source, wavelength_nm={wavelength_nm})"
+            "fig100 = plot_source_image(t100, source, wavelength_nm={wavelength_nm})\n"
+            "fig200 = plot_source_image(t200, source, wavelength_nm={wavelength_nm})"
         ),
     ),
 
@@ -265,6 +288,7 @@ SCENARIOS: list[ScenarioDefinition] = [
         plot_function="plot_psf_2d",
         theory_function=None,
         tweakable_params=("spider_vanes", "spider_vane_width"),
+        show_psf_toggle=False,
         implemented=True,
         terminal_template=(
             "from telescope_sim.geometry import NewtonianTelescope\n"
@@ -289,11 +313,11 @@ SCENARIOS: list[ScenarioDefinition] = [
             "dramatically reducing fringing. Switch objective type to compare."
         ),
         learn_more_section="Chromatic Aberration",
-        before_telescope=_SINGLET_80MM,
+        before_telescope=_SINGLET_100MM_F5,
         before_source=_POINT,
         before_polychromatic=True,
-        before_label="Singlet refractor",
-        after_telescope=_SINGLET_80MM,
+        before_label="Singlet 100mm f/5",
+        after_telescope=_SINGLET_100MM_F5,
         after_source=_POINT,
         after_polychromatic=True,
         after_label="Adjust objective \u2192",
@@ -306,7 +330,7 @@ SCENARIOS: list[ScenarioDefinition] = [
             "from telescope_sim.plotting.ray_trace_plot import plot_polychromatic_ray_trace\n\n"
             "telescope = build_telescope(\n"
             "    telescope_type='Refractor',\n"
-            "    diameter=80, focal_length=640,\n"
+            "    diameter=100, focal_length=500,\n"
             "    objective_type='{objective_type}',\n"
             ")\n"
             "fig = plot_polychromatic_ray_trace(telescope)"
@@ -332,7 +356,7 @@ SCENARIOS: list[ScenarioDefinition] = [
         after_label="With vignetting \u2192",
         plot_function="plot_source_image",
         theory_function="compute_vignetting_theory",
-        tweakable_params=("diameter", "focal_length"),
+        tweakable_params=(),
         implemented=True,
         terminal_template=(
             "from telescope_sim.geometry import NewtonianTelescope\n"
@@ -349,6 +373,57 @@ SCENARIOS: list[ScenarioDefinition] = [
             "# Without vignetting\n"
             "fig = plot_source_image(telescope, source, wavelength_nm={wavelength_nm},\n"
             "                       apply_vignetting=False)"
+        ),
+    ),
+
+    ScenarioDefinition(
+        id="spherical_aberration",
+        title="Spherical Aberration",
+        act=1, act_label="Isolated Effects",
+        description=(
+            "A spherical primary mirror does not focus all rays to the same point — "
+            "marginal rays focus closer than paraxial rays, producing a bright core "
+            "surrounded by a halo. A parabolic primary is free of this on-axis defect. "
+            "Increasing f-ratio reduces the blur dramatically (∝ 1/f³)."
+        ),
+        learn_more_section="Implemented Physics",
+        before_telescope=TelescopeConfig(
+            telescope_type="Newtonian", diameter=200.0, focal_length=800.0,
+            primary_type="spherical",
+            enable_obstruction=False, spider_vanes=0,
+        ),
+        before_source=_POINT,
+        before_label="Spherical primary (f/4)",
+        after_telescope=TelescopeConfig(
+            telescope_type="Newtonian", diameter=200.0, focal_length=800.0,
+            primary_type="parabolic",
+            enable_obstruction=False, spider_vanes=0,
+        ),
+        after_source=_POINT,
+        after_label="Parabolic primary (diffraction-limited) →",
+        plot_function="plot_psf_2d",
+        theory_function="compute_spherical_aberration_theory",
+        tweakable_params=("focal_length",),
+        implemented=True,
+        terminal_template=(
+            "from telescope_gui.telescope_builder import build_telescope\n"
+            "from telescope_sim.plotting import plot_psf_2d\n\n"
+            "# Spherical primary — shows spherical aberration blur\n"
+            "t_sph = build_telescope(\n"
+            "    telescope_type='Newtonian',\n"
+            "    diameter=200, focal_length={focal_length},\n"
+            "    primary_type='spherical',\n"
+            "    enable_obstruction=False,\n"
+            ")\n\n"
+            "# Parabolic primary — diffraction-limited\n"
+            "t_par = build_telescope(\n"
+            "    telescope_type='Newtonian',\n"
+            "    diameter=200, focal_length={focal_length},\n"
+            "    primary_type='parabolic',\n"
+            "    enable_obstruction=False,\n"
+            ")\n"
+            "fig_sph = plot_psf_2d(t_sph, wavelength_nm={wavelength_nm})\n"
+            "fig_par = plot_psf_2d(t_par, wavelength_nm={wavelength_nm})"
         ),
     ),
 
@@ -375,6 +450,7 @@ SCENARIOS: list[ScenarioDefinition] = [
         plot_function="plot_psf_2d",
         theory_function=None,
         tweakable_params=("obstruction_ratio", "spider_vanes", "spider_vane_width"),
+        show_psf_toggle=False,
         implemented=True,
         terminal_template=(
             "from telescope_sim.geometry import NewtonianTelescope\n"
@@ -611,21 +687,19 @@ SCENARIOS: list[ScenarioDefinition] = [
         title="Star Field Resolution",
         act=3, act_label="Real Objects",
         description=(
-            "A random star field shows how aperture, seeing, and aberrations combine "
-            "to determine how many stars are cleanly resolved. Point sources in a "
-            "crowded field reveal overlapping PSF halos and diffraction spikes."
+            "Single star (left) shows PSF structure in detail \u2014 Airy rings, diffraction "
+            "spikes, and seeing blur. Star field (right) shows how these effects scale "
+            "across a crowded field: halos overlap, spikes cross neighbours, bright stars "
+            "bleed into faint ones. Toggle effects to see each contribution."
         ),
         learn_more_section="Diffraction",
-        before_telescope=TelescopeConfig(
-            telescope_type="Newtonian", diameter=200.0, focal_length=1000.0,
-            enable_obstruction=False, spider_vanes=0,
-        ),
-        before_source=_STARFIELD,
-        before_label="Ideal (no aberrations)",
+        before_telescope=_SPIDER_200MM,
+        before_source=_POINT,
+        before_label="Single star \u2014 PSF detail",
         after_telescope=_SPIDER_200MM,
         after_source=_STARFIELD,
         after_seeing_arcsec=1.5,
-        after_label="Realistic 200 mm Newtonian \u2192",
+        after_label="Star field \u2014 population effects \u2192",
         plot_function="plot_source_image",
         theory_function=None,
         tweakable_params=("diameter", "focal_length", "obstruction_ratio",
