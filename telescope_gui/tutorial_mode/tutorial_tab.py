@@ -66,6 +66,9 @@ class TutorialTab(QWidget):
         self._current_after_config: TelescopeConfig | None = None
         self._current_seeing: float | None = None
         self._tweak_widgets: dict[str, QWidget] = {}
+        # Independent before-side widgets (only populated when scenario sets
+        # tweakable_params_before); empty otherwise.
+        self._tweak_widgets_before: dict[str, QWidget] = {}
         # Per-axis (xlim, ylim) captured from the before-side figure
         self._before_axis_limits: list[tuple] | None = None
         self._psf_view_combo: QComboBox | None = None
@@ -245,41 +248,44 @@ class TutorialTab(QWidget):
         """Clear and rebuild the tweakable controls for the scenario."""
         self._clear_layout(self.controls_layout)
         self._tweak_widgets.clear()
+        self._tweak_widgets_before.clear()
         self._psf_view_combo = None
 
         params = scenario.tweakable_params
+        params_before = scenario.tweakable_params_before
         # PSF scenarios always get the 1D/2D toggle even if no other tweakable params
         is_psf_scenario = scenario.plot_function == "plot_psf_2d"
-        if not params and not is_psf_scenario:
+        if not params and not is_psf_scenario and not params_before:
             self.controls_group.setVisible(False)
             return
 
         self.controls_group.setVisible(True)
-        after = scenario.after_telescope
 
-        for param in params:
-            if param == "diameter":
-                self._add_spin("diameter", "Aperture (mm)", after.diameter,
-                               50.0, 1000.0, 10.0)
-            elif param == "focal_length":
-                self._add_spin("focal_length", "Focal length (mm)", after.focal_length,
-                               200.0, 10000.0, 50.0)
-            elif param == "obstruction_ratio":
-                self._add_spin("obstruction_ratio", "Obstruction", after.obstruction_ratio,
-                               0.0, 0.55, 0.01, decimals=2)
-            elif param == "spider_vanes":
-                self._add_int_spin("spider_vanes", "Spider vanes", after.spider_vanes,
-                                   0, 6)
-            elif param == "spider_vane_width":
-                self._add_spin("spider_vane_width", "Vane width (mm)", after.spider_vane_width,
-                               0.5, 10.0, 0.5)
-            elif param == "seeing":
-                self._add_seeing_combo(scenario.after_seeing_arcsec)
-            elif param == "separation_arcsec":
-                sep = scenario.after_source.kwargs.get("separation_arcsec", 1.0)
-                self._add_spin("separation_arcsec", "Separation (\")", sep, 0.1, 10.0, 0.1)
-            elif param == "objective_type":
-                self._add_objective_combo(after.objective_type)
+        # When tweakable_params_before is set, render TWO labelled groups
+        if params_before is not None:
+            before_box = self._build_group_box("Before:", "#888")
+            self._populate_group(before_box, params_before,
+                                  scenario.before_telescope,
+                                  scenario.before_source,
+                                  scenario.before_seeing_arcsec,
+                                  self._tweak_widgets_before)
+            self.controls_layout.addWidget(before_box)
+
+            after_box = self._build_group_box("After:", "#2a6496")
+            self._populate_group(after_box, params,
+                                  scenario.after_telescope,
+                                  scenario.after_source,
+                                  scenario.after_seeing_arcsec,
+                                  self._tweak_widgets)
+            self.controls_layout.addWidget(after_box)
+        else:
+            # Single shared panel (existing behaviour)
+            for param in params:
+                self._add_param_widget(param, scenario.after_telescope,
+                                        scenario.after_source,
+                                        scenario.after_seeing_arcsec,
+                                        self._tweak_widgets,
+                                        target_layout=self.controls_layout)
 
         # PSF view toggle for scenarios that render a 2D PSF
         # (disabled for spider/obstruction scenarios where azimuthal pattern matters)
@@ -288,8 +294,81 @@ class TutorialTab(QWidget):
 
         self.controls_layout.addStretch()
 
+    def _build_group_box(self, title: str, accent: str) -> QGroupBox:
+        """Inner group box used when independent before/after controls are shown."""
+        box = QGroupBox(title)
+        box.setStyleSheet(
+            f"QGroupBox {{ font-weight: bold; font-size: 9pt; "
+            f"color: {accent}; border: 1px solid #ccc; "
+            f"border-radius: 3px; margin-top: 6px; padding: 8px; }}"
+            f"QGroupBox::title {{ subcontrol-origin: margin; "
+            f"left: 6px; padding: 0 4px; }}"
+        )
+        h = QHBoxLayout(box)
+        h.setContentsMargins(6, 4, 6, 4)
+        h.setSpacing(10)
+        return box
+
+    def _populate_group(self, box: QGroupBox, params: tuple,
+                         telescope_cfg: TelescopeConfig,
+                         source_cfg: SourceConfig,
+                         seeing: float | None,
+                         widget_map: dict):
+        """Populate a group box with widgets for the given params."""
+        layout = box.layout()
+        for param in params:
+            self._add_param_widget(param, telescope_cfg, source_cfg, seeing,
+                                    widget_map, target_layout=layout)
+        layout.addStretch()
+
+    def _add_param_widget(self, param: str,
+                           telescope_cfg: TelescopeConfig,
+                           source_cfg: SourceConfig,
+                           seeing: float | None,
+                           widget_map: dict,
+                           target_layout):
+        """Dispatch a single param to the right widget builder."""
+        if param == "diameter":
+            self._add_spin(param, "Aperture (mm)", telescope_cfg.diameter,
+                           50.0, 1000.0, 10.0,
+                           widget_map=widget_map, target_layout=target_layout)
+        elif param == "focal_length":
+            self._add_spin(param, "Focal length (mm)", telescope_cfg.focal_length,
+                           200.0, 10000.0, 50.0,
+                           widget_map=widget_map, target_layout=target_layout)
+        elif param == "obstruction_ratio":
+            self._add_spin(param, "Obstruction", telescope_cfg.obstruction_ratio,
+                           0.0, 0.55, 0.01, decimals=2,
+                           widget_map=widget_map, target_layout=target_layout)
+        elif param == "spider_vanes":
+            self._add_int_spin(param, "Spider vanes", telescope_cfg.spider_vanes,
+                               0, 6,
+                               widget_map=widget_map, target_layout=target_layout)
+        elif param == "spider_vane_width":
+            self._add_spin(param, "Vane width (mm)", telescope_cfg.spider_vane_width,
+                           0.5, 10.0, 0.5,
+                           widget_map=widget_map, target_layout=target_layout)
+        elif param == "seeing":
+            self._add_seeing_combo(seeing,
+                                    widget_map=widget_map, target_layout=target_layout)
+        elif param == "separation_arcsec":
+            sep = source_cfg.kwargs.get("separation_arcsec", 1.0)
+            self._add_spin(param, "Separation (\")", sep, 0.1, 10.0, 0.1,
+                           widget_map=widget_map, target_layout=target_layout)
+        elif param == "objective_type":
+            self._add_objective_combo(telescope_cfg.objective_type,
+                                       widget_map=widget_map, target_layout=target_layout)
+        elif param == "primary_type":
+            self._add_primary_type_combo(telescope_cfg.primary_type,
+                                          widget_map=widget_map, target_layout=target_layout)
+
     def _add_spin(self, key: str, label: str, value: float,
-                  minimum: float, maximum: float, step: float, decimals: int = 1):
+                  minimum: float, maximum: float, step: float, decimals: int = 1,
+                  widget_map: dict | None = None, target_layout=None):
+        if widget_map is None:
+            widget_map = self._tweak_widgets
+        if target_layout is None:
+            target_layout = self.controls_layout
         col = QVBoxLayout()
         lbl = QLabel(label)
         lbl.setStyleSheet("font-size: 8pt; font-weight: normal; color: #555;")
@@ -301,10 +380,16 @@ class TutorialTab(QWidget):
         spin.setFixedWidth(90)
         col.addWidget(lbl)
         col.addWidget(spin)
-        self.controls_layout.addLayout(col)
-        self._tweak_widgets[key] = spin
+        target_layout.addLayout(col)
+        widget_map[key] = spin
 
-    def _add_int_spin(self, key: str, label: str, value: int, minimum: int, maximum: int):
+    def _add_int_spin(self, key: str, label: str, value: int,
+                       minimum: int, maximum: int,
+                       widget_map: dict | None = None, target_layout=None):
+        if widget_map is None:
+            widget_map = self._tweak_widgets
+        if target_layout is None:
+            target_layout = self.controls_layout
         col = QVBoxLayout()
         lbl = QLabel(label)
         lbl.setStyleSheet("font-size: 8pt; font-weight: normal; color: #555;")
@@ -314,10 +399,15 @@ class TutorialTab(QWidget):
         spin.setFixedWidth(70)
         col.addWidget(lbl)
         col.addWidget(spin)
-        self.controls_layout.addLayout(col)
-        self._tweak_widgets[key] = spin
+        target_layout.addLayout(col)
+        widget_map[key] = spin
 
-    def _add_seeing_combo(self, current_seeing: float | None):
+    def _add_seeing_combo(self, current_seeing: float | None,
+                           widget_map: dict | None = None, target_layout=None):
+        if widget_map is None:
+            widget_map = self._tweak_widgets
+        if target_layout is None:
+            target_layout = self.controls_layout
         col = QVBoxLayout()
         lbl = QLabel("Seeing")
         lbl.setStyleSheet("font-size: 8pt; font-weight: normal; color: #555;")
@@ -331,17 +421,21 @@ class TutorialTab(QWidget):
         ]
         for text, val in options:
             combo.addItem(text, val)
-        # Set current selection
         for i, (_, val) in enumerate(options):
             if val == current_seeing:
                 combo.setCurrentIndex(i)
                 break
         col.addWidget(lbl)
         col.addWidget(combo)
-        self.controls_layout.addLayout(col)
-        self._tweak_widgets["seeing"] = combo
+        target_layout.addLayout(col)
+        widget_map["seeing"] = combo
 
-    def _add_objective_combo(self, current: str):
+    def _add_objective_combo(self, current: str,
+                              widget_map: dict | None = None, target_layout=None):
+        if widget_map is None:
+            widget_map = self._tweak_widgets
+        if target_layout is None:
+            target_layout = self.controls_layout
         col = QVBoxLayout()
         lbl = QLabel("Objective type")
         lbl.setStyleSheet("font-size: 8pt; font-weight: normal; color: #555;")
@@ -353,8 +447,28 @@ class TutorialTab(QWidget):
         combo.setCurrentIndex(idx)
         col.addWidget(lbl)
         col.addWidget(combo)
-        self.controls_layout.addLayout(col)
-        self._tweak_widgets["objective_type"] = combo
+        target_layout.addLayout(col)
+        widget_map["objective_type"] = combo
+
+    def _add_primary_type_combo(self, current: str,
+                                 widget_map: dict | None = None, target_layout=None):
+        if widget_map is None:
+            widget_map = self._tweak_widgets
+        if target_layout is None:
+            target_layout = self.controls_layout
+        col = QVBoxLayout()
+        lbl = QLabel("Primary type")
+        lbl.setStyleSheet("font-size: 8pt; font-weight: normal; color: #555;")
+        combo = QComboBox()
+        options = ["spherical", "parabolic"]
+        for opt in options:
+            combo.addItem(opt)
+        idx = options.index(current) if current in options else 0
+        combo.setCurrentIndex(idx)
+        col.addWidget(lbl)
+        col.addWidget(combo)
+        target_layout.addLayout(col)
+        widget_map["primary_type"] = combo
 
     def _add_psf_view_combo(self):
         col = QVBoxLayout()
@@ -375,23 +489,43 @@ class TutorialTab(QWidget):
     # ------------------------------------------------------------------
 
     def _render_before(self, scenario: ScenarioDefinition):
-        """Render and display the static baseline image."""
+        """Render and display the baseline image."""
         self.status_label.setText("Rendering baseline…")
-        plot_fn = self._effective_plot_function(scenario)
+        plot_fn = self._effective_plot_function(scenario, side="before")
 
-        # For both_sides_dynamic scenarios, use current widget values so the
-        # before side also reflects the live tweakable params (e.g. separation).
+        # Determine which widget set drives the before side and which params
+        # to read. Three modes:
+        #   - tweakable_params_before set: read from independent before widgets
+        #   - both_sides_dynamic: read shared widgets (after-side panel)
+        #   - default: before side is fully static
         before_source = scenario.before_source
-        if scenario.both_sides_dynamic and self._tweak_widgets:
+        before_telescope = scenario.before_telescope
+        before_seeing = scenario.before_seeing_arcsec
+
+        if scenario.tweakable_params_before is not None:
+            params = self._collect_before_params(scenario)
+            before_source = self._params_to_source_config(scenario, params,
+                                                           base=scenario.before_source)
+            before_telescope = self._params_to_telescope_config(
+                scenario, params, base=scenario.before_telescope)
+            if "seeing" in params:
+                before_seeing = params["seeing"]
+        elif scenario.both_sides_dynamic and self._tweak_widgets:
             params = self._collect_params(scenario)
-            before_source = self._params_to_source_config(scenario, params)
+            before_source = self._params_to_source_config(
+                scenario, params, base=scenario.before_source)
+            if scenario.before_telescope_dynamic:
+                before_telescope = self._params_to_telescope_config(
+                    scenario, params, base=scenario.before_telescope)
+            if scenario.before_telescope_dynamic and "seeing" in params:
+                before_seeing = params["seeing"]
 
         fig, info, err = run_scenario_side(
-            scenario.before_telescope,
+            before_telescope,
             before_source,
             plot_fn,
             wavelength_nm=scenario.before_wavelength_nm,
-            seeing_arcsec=scenario.before_seeing_arcsec,
+            seeing_arcsec=before_seeing,
             polychromatic=scenario.before_polychromatic,
             apply_vignetting=scenario.before_apply_vignetting,
             apply_coma=scenario.before_apply_coma,
@@ -409,7 +543,9 @@ class TutorialTab(QWidget):
                 wavelength_nm=scenario.before_wavelength_nm,
             )
             if theory:
-                apply_theory_overlay(scenario, fig, theory)
+                apply_theory_overlay(scenario, fig, theory,
+                                     telescope=info.get("telescope"),
+                                     seeing_arcsec=scenario.before_seeing_arcsec)
                 self.theory_readout.update_theory(
                     theory["theory_value"],
                     unit=theory.get("unit", ""),
@@ -442,7 +578,7 @@ class TutorialTab(QWidget):
         # Build telescope config from current control values
         after_config = self._params_to_telescope_config(scenario, params)
         after_source_config = self._params_to_source_config(scenario, params)
-        plot_fn = self._effective_plot_function(scenario)
+        plot_fn = self._effective_plot_function(scenario, side="after")
 
         # Effect toggles (Act 3)
         active_effects = self.effect_toggles.get_active_effects()
@@ -481,7 +617,9 @@ class TutorialTab(QWidget):
             )
             if theory:
                 if plot_fn != "plot_psf_profile":
-                    apply_theory_overlay(scenario, fig, theory)
+                    apply_theory_overlay(scenario, fig, theory,
+                                         telescope=telescope,
+                                         seeing_arcsec=seeing)
                 # Estimate sim value from figure metadata or theory value placeholder
                 sim_value = self._estimate_sim_value(scenario, info, theory)
                 if sim_value is not None:
@@ -552,10 +690,10 @@ class TutorialTab(QWidget):
     # Control value collection
     # ------------------------------------------------------------------
 
-    def _collect_params(self, scenario: ScenarioDefinition) -> dict:
-        """Read current values from all tweak widgets."""
+    def _read_widget_map(self, widget_map: dict) -> dict:
+        """Read current values from a widget dict."""
         params = {}
-        for key, widget in self._tweak_widgets.items():
+        for key, widget in widget_map.items():
             if isinstance(widget, QDoubleSpinBox):
                 params[key] = widget.value()
             elif isinstance(widget, QSpinBox):
@@ -567,15 +705,31 @@ class TutorialTab(QWidget):
                     params[key] = widget.currentText()
         return params
 
+    def _collect_params(self, scenario: ScenarioDefinition) -> dict:
+        """Read current values from the after-side (or shared) tweak widgets."""
+        return self._read_widget_map(self._tweak_widgets)
+
+    def _collect_before_params(self, scenario: ScenarioDefinition) -> dict:
+        """Read current values from the independent before-side tweak widgets."""
+        return self._read_widget_map(self._tweak_widgets_before)
+
     def _params_to_telescope_config(self, scenario: ScenarioDefinition,
-                                     params: dict) -> TelescopeConfig:
-        """Merge tweak params over the scenario's after telescope config."""
-        base = scenario.after_telescope
+                                     params: dict,
+                                     base: TelescopeConfig | None = None,
+                                     ) -> TelescopeConfig:
+        """Merge tweak params over a TelescopeConfig base.
+
+        When `base` is None, falls back to scenario.after_telescope so existing
+        callers continue to work. Pass `scenario.before_telescope` explicitly
+        when rebuilding the before side from live params.
+        """
+        if base is None:
+            base = scenario.after_telescope
         return TelescopeConfig(
             telescope_type=base.telescope_type,
             diameter=params.get("diameter", base.diameter),
             focal_length=params.get("focal_length", base.focal_length),
-            primary_type=base.primary_type,
+            primary_type=params.get("primary_type", base.primary_type),
             objective_type=params.get("objective_type", base.objective_type),
             secondary_magnification=base.secondary_magnification,
             meniscus_thickness=base.meniscus_thickness,
@@ -586,9 +740,16 @@ class TutorialTab(QWidget):
         )
 
     def _params_to_source_config(self, scenario: ScenarioDefinition,
-                                   params: dict) -> SourceConfig:
-        """Build updated source config, merging any tweaked source params."""
-        base = scenario.after_source
+                                   params: dict,
+                                   base: SourceConfig | None = None,
+                                   ) -> SourceConfig:
+        """Build updated source config, merging any tweaked source params.
+
+        When `base` is None, falls back to scenario.after_source. Pass
+        `scenario.before_source` explicitly when rebuilding the before side.
+        """
+        if base is None:
+            base = scenario.after_source
         if base.source_type == "DoubleStar" and "separation_arcsec" in params:
             return SourceConfig(
                 source_type="DoubleStar",
@@ -623,8 +784,16 @@ class TutorialTab(QWidget):
     # PSF view helpers
     # ------------------------------------------------------------------
 
-    def _effective_plot_function(self, scenario: ScenarioDefinition) -> str:
-        """Return the plot function to use, accounting for the 1D/2D PSF toggle."""
+    def _effective_plot_function(self, scenario: ScenarioDefinition,
+                                  side: str = "after") -> str:
+        """Return the plot function to use for a given side.
+
+        Honours the 1D/2D PSF toggle and `secondary_plot_function` (used to
+        pair different visualisations on the two sides).
+        """
+        if (side == "after"
+                and scenario.secondary_plot_function is not None):
+            return scenario.secondary_plot_function
         if (scenario.plot_function == "plot_psf_2d"
                 and self._psf_view_combo is not None
                 and self._psf_view_combo.currentIndex() == 1):
@@ -648,11 +817,14 @@ class TutorialTab(QWidget):
     # ------------------------------------------------------------------
 
     def _on_update_clicked(self):
-        # For scenarios where both sides share a tweakable param (e.g. separation
-        # on Rayleigh), re-render the before side first so axes lock is consistent.
-        if (self._current_scenario is not None
-                and self._current_scenario.both_sides_dynamic):
-            self._render_before(self._current_scenario)
+        # Re-render the before side first whenever it tracks live params:
+        # either via shared widgets (both_sides_dynamic) or via independent
+        # widgets (tweakable_params_before).
+        scn = self._current_scenario
+        if scn is not None and (
+                scn.both_sides_dynamic
+                or scn.tweakable_params_before is not None):
+            self._render_before(scn)
         self._render_after()
 
     def _on_reset_clicked(self):

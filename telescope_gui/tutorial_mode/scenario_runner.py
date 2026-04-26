@@ -21,7 +21,9 @@ from telescope_gui.tutorial_mode.scenario_registry import (
 from telescope_gui.tutorial_mode.theory_computations import (
     THEORY_FUNCTIONS, OVERLAY_FUNCTIONS,
 )
-from telescope_sim.source.sources import PointSource, DoubleStar, Jupiter, Saturn, StarField
+from telescope_sim.source.sources import (
+    PointSource, DoubleStar, Jupiter, Saturn, StarField, TutorialStarField,
+)
 
 
 def build_source(config: SourceConfig):
@@ -38,6 +40,8 @@ def build_source(config: SourceConfig):
         return Saturn(**kw)
     elif st == "StarField":
         return StarField(**kw)
+    elif st == "TutorialStarField":
+        return TutorialStarField(**kw)
     return PointSource()
 
 
@@ -114,7 +118,11 @@ def _call_plot_function(
         plot_source_image, plot_psf_2d, plot_psf_profile,
         plot_coma_field_analysis,
     )
-    from telescope_sim.plotting.ray_trace_plot import plot_polychromatic_ray_trace
+    from telescope_sim.plotting.ray_trace_plot import (
+        plot_polychromatic_ray_trace,
+        plot_vignetting_curve,
+        plot_spot_diagram_telescope,
+    )
 
     if name == "plot_source_image":
         fig = plot_source_image(
@@ -160,6 +168,15 @@ def _call_plot_function(
         fig = plot_polychromatic_ray_trace(telescope, figsize=figsize)
         return fig, {"plot_function": name}
 
+    elif name == "plot_vignetting_curve":
+        fig = plot_vignetting_curve(telescope, figsize=figsize)
+        return fig, {"plot_function": name}
+
+    elif name == "plot_spot_diagram_telescope":
+        fig = plot_spot_diagram_telescope(
+            telescope, wavelength_nm=wavelength_nm, figsize=figsize)
+        return fig, {"plot_function": name}
+
     else:
         raise ValueError(f"Unknown plot function: {name!r}")
 
@@ -199,8 +216,14 @@ def apply_theory_overlay(
     scenario: ScenarioDefinition,
     fig: Figure,
     theory_result: dict,
+    telescope=None,
+    seeing_arcsec: float | None = None,
 ) -> None:
     """Draw a theory overlay onto the figure's axes, if applicable.
+
+    Dispatches by scenario id with two recognised signatures:
+      - simple(fig, theory_value) — for circle overlays sized by a scalar
+      - full(fig, theory_result, telescope, seeing_arcsec) — for richer overlays
 
     Must be called BEFORE MatplotlibCanvas.set_figure() since that rasterizes.
     """
@@ -208,8 +231,15 @@ def apply_theory_overlay(
     if overlay_fn is None:
         return
     try:
-        # Pass the primary theory value to the overlay function
-        overlay_fn(fig, theory_result.get("theory_value", 0.0))
+        import inspect
+        sig = inspect.signature(overlay_fn)
+        n_params = len(sig.parameters)
+        if n_params >= 4:
+            overlay_fn(fig, theory_result, telescope, seeing_arcsec)
+        elif n_params >= 3:
+            overlay_fn(fig, theory_result, telescope)
+        else:
+            overlay_fn(fig, theory_result.get("theory_value", 0.0))
     except Exception:
         pass  # Overlay failure should never crash the main UI
 

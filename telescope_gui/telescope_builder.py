@@ -10,13 +10,26 @@ from telescope_sim.geometry import (
     MaksutovCassegrainTelescope, SchmidtCassegrainTelescope
 )
 
-# Map GUI objective labels to internal objective_type values
+# Map GUI objective labels to internal objective_type values.
+# Keys are normalised by stripping/replacing hyphens, underscores and
+# spaces in `_normalize_objective_key` so callers may pass either GUI
+# strings ("APO Doublet") or internal hyphenated forms ("apo-doublet").
 OBJECTIVE_TYPE_MAP = {
     "singlet": "singlet",
     "achromat": "achromat",
     "apo doublet": "apo-doublet",
+    "apo triplet": "apo-triplet",
+    "apo triplet air-spaced": "apo-triplet",
     "apo triplet (air-spaced)": "apo-triplet",
 }
+
+
+def _normalize_objective_key(s: str) -> str:
+    """Normalise an objective-type string for OBJECTIVE_TYPE_MAP lookup."""
+    return (s.lower()
+              .replace("-", " ")
+              .replace("_", " ")
+              .strip())
 
 
 def build_telescope(telescope_type, diameter, focal_length, primary_type="parabolic",
@@ -71,7 +84,8 @@ def build_telescope(telescope_type, diameter, focal_length, primary_type="parabo
         )
 
     elif type_key == "refractor":
-        obj_type = OBJECTIVE_TYPE_MAP.get(objective_type.lower(), "singlet")
+        obj_type = OBJECTIVE_TYPE_MAP.get(
+            _normalize_objective_key(objective_type), "singlet")
         return RefractingTelescope(
             primary_diameter=diameter,
             focal_length=focal_length,

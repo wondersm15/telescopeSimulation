@@ -9,6 +9,7 @@ from telescope_sim.source.sources import (
     PointSource,
     Saturn,
     StarField,
+    TutorialStarField,
 )
 
 __all__ = [
@@ -20,4 +21,5 @@ __all__ = [
     "PointSource",
     "Saturn",
     "StarField",
+    "TutorialStarField",
 ]

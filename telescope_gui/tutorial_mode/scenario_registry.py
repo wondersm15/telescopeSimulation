@@ -81,6 +81,21 @@ class ScenarioDefinition:
     # When True, "Update" re-renders both sides (separation slider affects both)
     both_sides_dynamic: bool = False
 
+    # When True, the before-side telescope is rebuilt from live widget params
+    # (using scenario.before_telescope as the base). Use for scenarios where
+    # both sides should track aperture/obstruction/etc. simultaneously.
+    before_telescope_dynamic: bool = False
+
+    # Independent before-side widgets (G2.2). When set, the controls panel
+    # renders TWO labeled groups ("Before:" and "After:") with separate
+    # widget bindings. The before side reads from its own widgets only.
+    tweakable_params_before: tuple[str, ...] | None = None
+
+    # Use a different plot function for the after side (paired visualisations).
+    # When None, both sides use plot_function. When set, before uses
+    # plot_function and after uses secondary_plot_function.
+    secondary_plot_function: str | None = None
+
     # Whether to show the 1D/2D PSF view toggle for this scenario
     # (False for scenarios where the azimuthal pattern is the point, e.g. spiders)
     show_psf_toggle: bool = True
@@ -203,16 +218,16 @@ SCENARIOS: list[ScenarioDefinition] = [
             enable_obstruction=False, spider_vanes=0,
         ),
         before_source=SourceConfig(source_type="DoubleStar", kwargs={"separation_arcsec": 1.0}),
-        before_label="100 mm \u2014 Rayleigh limit 1.38\u2033",
+        before_label="100 mm \u2014 Rayleigh 1.38\u2033",
         after_telescope=TelescopeConfig(
             telescope_type="Newtonian", diameter=200.0, focal_length=1000.0,
             enable_obstruction=False, spider_vanes=0,
         ),
         after_source=SourceConfig(source_type="DoubleStar", kwargs={"separation_arcsec": 1.0}),
-        after_label="200 mm \u2014 Rayleigh limit 0.69\u2033 \u2192",
+        after_label="Adjustable aperture \u2192",
         plot_function="plot_source_image",
         theory_function="compute_rayleigh_theory",
-        tweakable_params=("separation_arcsec",),
+        tweakable_params=("separation_arcsec", "diameter"),
         both_sides_dynamic=True,
         implemented=True,
         terminal_template=(
@@ -342,21 +357,23 @@ SCENARIOS: list[ScenarioDefinition] = [
         title="Vignetting",
         act=1, act_label="Isolated Effects",
         description=(
-            "Off-axis light in a Newtonian is clipped by the secondary mirror, dimming "
-            "stars near the field edge. The fully-illuminated field depends on f-ratio "
-            "and secondary size. Compare uniform illumination to the vignetted result."
+            "Off-axis light in a Newtonian is clipped by the secondary mirror. Below "
+            "the fully-illuminated field angle the on-axis light cone is unobstructed; "
+            "beyond it, illumination falls smoothly toward zero at the 50% edge. "
+            "Adjust aperture and focal length to see how f-ratio shifts the curve."
         ),
         learn_more_section="Vignetting",
         before_telescope=_SPIDER_200MM,
-        before_source=_STARFIELD,
-        before_apply_vignetting=False,
-        before_label="No vignetting",
+        before_source=_POINT,  # source unused by plot_vignetting_curve
+        before_label="200 mm f/5 baseline",
         after_telescope=_SPIDER_200MM,
-        after_source=_STARFIELD,
-        after_label="With vignetting \u2192",
-        plot_function="plot_source_image",
+        after_source=_POINT,
+        after_label="Adjust aperture / focal length \u2192",
+        plot_function="plot_vignetting_curve",
         theory_function="compute_vignetting_theory",
-        tweakable_params=(),
+        tweakable_params=("diameter", "focal_length"),
+        both_sides_dynamic=True,
+        before_telescope_dynamic=False,
         implemented=True,
         terminal_template=(
             "from telescope_sim.geometry import NewtonianTelescope\n"
@@ -382,9 +399,10 @@ SCENARIOS: list[ScenarioDefinition] = [
         act=1, act_label="Isolated Effects",
         description=(
             "A spherical primary mirror does not focus all rays to the same point — "
-            "marginal rays focus closer than paraxial rays, producing a bright core "
-            "surrounded by a halo. A parabolic primary is free of this on-axis defect. "
-            "Increasing f-ratio reduces the blur dramatically (∝ 1/f³)."
+            "marginal rays focus closer than paraxial rays. The 1D PSF profile (left) "
+            "shows the radial intensity drop; the geometric spot diagram (right) shows "
+            "the actual ray landing pattern. Toggle to a parabolic primary to see the "
+            "blur disappear; increasing f-ratio shrinks the blur as 1/f³."
         ),
         learn_more_section="Implemented Physics",
         before_telescope=TelescopeConfig(
@@ -393,17 +411,21 @@ SCENARIOS: list[ScenarioDefinition] = [
             enable_obstruction=False, spider_vanes=0,
         ),
         before_source=_POINT,
-        before_label="Spherical primary (f/4)",
+        before_label="1D PSF profile",
         after_telescope=TelescopeConfig(
             telescope_type="Newtonian", diameter=200.0, focal_length=800.0,
-            primary_type="parabolic",
+            primary_type="spherical",
             enable_obstruction=False, spider_vanes=0,
         ),
         after_source=_POINT,
-        after_label="Parabolic primary (diffraction-limited) →",
-        plot_function="plot_psf_2d",
+        after_label="Geometric spot diagram →",
+        plot_function="plot_psf_profile",
+        secondary_plot_function="plot_spot_diagram_telescope",
         theory_function="compute_spherical_aberration_theory",
-        tweakable_params=("focal_length",),
+        tweakable_params=("focal_length", "primary_type"),
+        both_sides_dynamic=True,
+        before_telescope_dynamic=True,
+        show_psf_toggle=False,
         implemented=True,
         terminal_template=(
             "from telescope_gui.telescope_builder import build_telescope\n"
@@ -436,20 +458,22 @@ SCENARIOS: list[ScenarioDefinition] = [
         title="Obstruction + Spider Vanes",
         act=2, act_label="Compounding Effects",
         description=(
-            "Combine central obstruction and spider vanes to see how the enhanced secondary "
-            "rings interact with diffraction spikes. The PSF is now the product of both effects "
-            "simultaneously \u2014 not simply the sum."
+            "Combine central obstruction and spider vanes and see how the modified "
+            "Airy ring contrast interacts with diffraction spikes. Both sides have "
+            "independent controls so you can isolate either effect \u2014 leave one side "
+            "with no spiders, or compare two different obstruction ratios."
         ),
         learn_more_section="Central Obstruction",
         before_telescope=_OBSTRUCTED_200MM,
         before_source=_POINT,
-        before_label="Obstruction only",
+        before_label="Before configuration",
         after_telescope=_SPIDER_200MM,
         after_source=_POINT,
-        after_label="Obstruction + spiders \u2192",
+        after_label="After configuration \u2192",
         plot_function="plot_psf_2d",
         theory_function=None,
         tweakable_params=("obstruction_ratio", "spider_vanes", "spider_vane_width"),
+        tweakable_params_before=("obstruction_ratio", "spider_vanes", "spider_vane_width"),
         show_psf_toggle=False,
         implemented=True,
         terminal_template=(
@@ -512,28 +536,32 @@ SCENARIOS: list[ScenarioDefinition] = [
         title="Aperture vs Seeing",
         act=2, act_label="Compounding Effects",
         description=(
-            "Once aperture exceeds the critical value D\u2099\u1d63\u1d62\u209c = 1.22\u03bb/\u03b8\u209b\u1d49\u1d49\u1d4f\u1d5f\u1d57, "
-            "the atmosphere limits resolution, not the mirror. Bigger aperture then only gathers "
-            "more light \u2014 not more detail. See the simulation match this prediction."
+            "Both panels show the same telescope and seeing \u2014 the left panel overlays "
+            "the theoretical limits (Airy radius and seeing FWHM) so you can read "
+            "which one is dominating. Once aperture exceeds D\u2099\u1d63\u1d62\u209c = "
+            "1.22\u03bb/\u03b8\u209b\u1d49\u1d49\u1d4f\u1d5f\u1d57 the atmosphere limits "
+            "resolution and bigger apertures only gather more light."
         ),
         learn_more_section="Atmospheric Seeing",
         before_telescope=TelescopeConfig(
-            telescope_type="Newtonian", diameter=100.0, focal_length=500.0,
+            telescope_type="Newtonian", diameter=200.0, focal_length=1000.0,
             enable_obstruction=False, spider_vanes=0,
         ),
         before_source=_POINT,
         before_seeing_arcsec=2.5,
-        before_label="100 mm + seeing 2.5\"",
+        before_label="With theoretical-limit overlays",
         after_telescope=TelescopeConfig(
-            telescope_type="Newtonian", diameter=400.0, focal_length=2000.0,
+            telescope_type="Newtonian", diameter=200.0, focal_length=1000.0,
             enable_obstruction=False, spider_vanes=0,
         ),
         after_source=_POINT,
         after_seeing_arcsec=2.5,
-        after_label="400 mm + seeing 2.5\" \u2192",
+        after_label="Rendered image \u2192",
         plot_function="plot_source_image",
         theory_function="compute_aperture_vs_seeing_theory",
         tweakable_params=("diameter", "seeing"),
+        both_sides_dynamic=True,
+        before_telescope_dynamic=True,
         implemented=True,
         terminal_template=(
             "from telescope_sim.geometry import NewtonianTelescope\n"
@@ -558,20 +586,24 @@ SCENARIOS: list[ScenarioDefinition] = [
         title="f-ratio and Coma",
         act=2, act_label="Compounding Effects",
         description=(
-            "The coma-free field scales as f\u00b2: halving the f-ratio reduces usable field by 4\u00d7. "
-            "Adjust the f-ratio and watch the coma-free field prediction update. "
-            "This is why planetary imagers prefer slow telescopes."
+            "Coma is comet-shaped off-axis blur; the coma-free field scales as f\u00b2, "
+            "so halving the f-ratio shrinks the usable field by 4\u00d7. The left panel "
+            "shows a spot-diagram grid across the field; the right panel shows a real "
+            "star field through the same scope so you can see comatic stars at the edges."
         ),
         learn_more_section="Coma",
         before_telescope=_FAST_200MM,
         before_source=_POINT,
-        before_label="f/4 — narrow coma-free field",
-        after_telescope=_SLOW_200MM,
-        after_source=_POINT,
-        after_label="f/8 — wider coma-free field \u2192",
+        before_label="Coma spot grid",
+        after_telescope=_FAST_200MM,
+        after_source=SourceConfig(source_type="TutorialStarField"),
+        after_label="Star field through same scope \u2192",
         plot_function="plot_coma_field_analysis",
+        secondary_plot_function="plot_source_image",
         theory_function="compute_coma_fratio_theory",
         tweakable_params=("focal_length", "diameter"),
+        both_sides_dynamic=True,
+        before_telescope_dynamic=True,
         implemented=True,
         terminal_template=(
             "from telescope_sim.geometry import NewtonianTelescope\n"
@@ -697,7 +729,7 @@ SCENARIOS: list[ScenarioDefinition] = [
         before_source=_POINT,
         before_label="Single star \u2014 PSF detail",
         after_telescope=_SPIDER_200MM,
-        after_source=_STARFIELD,
+        after_source=SourceConfig(source_type="TutorialStarField"),
         after_seeing_arcsec=1.5,
         after_label="Star field \u2014 population effects \u2192",
         plot_function="plot_source_image",
@@ -705,6 +737,8 @@ SCENARIOS: list[ScenarioDefinition] = [
         tweakable_params=("diameter", "focal_length", "obstruction_ratio",
                           "spider_vanes", "spider_vane_width", "seeing"),
         effect_toggles=("obstruction", "spider_vanes", "coma", "vignetting", "seeing"),
+        both_sides_dynamic=True,
+        before_telescope_dynamic=True,
         implemented=True,
         terminal_template=(
             "from telescope_sim.geometry import NewtonianTelescope\n"

@@ -384,14 +384,100 @@ class TestScenarioRunner:
         assert err is None
         plt.close(fig)
 
-    def test_run_spherical_aberration_after(self):
+    def test_run_spherical_aberration_after_spot(self):
+        # After side uses secondary_plot_function (spot diagram)
         from telescope_gui.tutorial_mode.scenario_registry import get_scenario_by_id
         from telescope_gui.tutorial_mode.scenario_runner import run_scenario_side
         s = get_scenario_by_id("spherical_aberration")
         fig, info, err = run_scenario_side(
+            s.after_telescope, s.after_source, s.secondary_plot_function)
+        assert err is None
+        plt.close(fig)
+
+    def test_run_coma_secondary_starfield(self):
+        # Coma after side is plot_source_image with TutorialStarField
+        from telescope_gui.tutorial_mode.scenario_registry import get_scenario_by_id
+        from telescope_gui.tutorial_mode.scenario_runner import run_scenario_side
+        s = get_scenario_by_id("fratio_coma")
+        assert s.secondary_plot_function == "plot_source_image"
+        fig, info, err = run_scenario_side(
+            s.after_telescope, s.after_source, s.secondary_plot_function)
+        assert err is None
+        plt.close(fig)
+
+    def test_run_vignetting_curve(self):
+        from telescope_gui.tutorial_mode.scenario_registry import get_scenario_by_id
+        from telescope_gui.tutorial_mode.scenario_runner import run_scenario_side
+        s = get_scenario_by_id("vignetting")
+        assert s.plot_function == "plot_vignetting_curve"
+        fig, info, err = run_scenario_side(
             s.after_telescope, s.after_source, s.plot_function)
         assert err is None
         plt.close(fig)
+
+    def test_objective_type_map_handles_hyphenated(self):
+        # build_telescope must accept "apo-doublet" / "apo-triplet" as used by
+        # TelescopeConfig — previously these silently fell back to singlet.
+        from telescope_gui.telescope_builder import build_telescope
+        from telescope_sim.geometry.apo_lenses import (
+            ApochromaticDoublet, ApochromaticTriplet,
+        )
+        from telescope_sim.geometry.lenses import SphericalLens
+        t_doublet = build_telescope("Refractor", 100.0, 500.0,
+                                     objective_type="apo-doublet")
+        assert isinstance(t_doublet.objective, ApochromaticDoublet), (
+            "apo-doublet should build an ApochromaticDoublet")
+
+        t_triplet = build_telescope("Refractor", 100.0, 500.0,
+                                     objective_type="apo-triplet")
+        assert isinstance(t_triplet.objective, ApochromaticTriplet), (
+            "apo-triplet should build an ApochromaticTriplet")
+
+        t_singlet = build_telescope("Refractor", 100.0, 500.0,
+                                     objective_type="singlet")
+        assert isinstance(t_singlet.objective, SphericalLens)
+
+        # GUI label form (with space) must also still work
+        t_gui = build_telescope("Refractor", 100.0, 500.0,
+                                 objective_type="apo doublet")
+        assert isinstance(t_gui.objective, ApochromaticDoublet)
+
+    def test_chromatic_defocus_decreases_with_correction(self):
+        # Defocus magnitudes at H-alpha (656nm) for a 100mm f/5: should
+        # decrease in the order singlet > achromat > apo-doublet > apo-triplet.
+        from telescope_sim.plotting.ray_trace_plot import chromatic_defocus
+        from telescope_gui.telescope_builder import build_telescope
+        wl = 656.0
+        d_singlet = abs(chromatic_defocus(
+            build_telescope("Refractor", 100.0, 500.0, objective_type="singlet"),
+            wl))
+        d_achromat = abs(chromatic_defocus(
+            build_telescope("Refractor", 100.0, 500.0, objective_type="achromat"),
+            wl))
+        d_apo_d = abs(chromatic_defocus(
+            build_telescope("Refractor", 100.0, 500.0, objective_type="apo-doublet"),
+            wl))
+        d_apo_t = abs(chromatic_defocus(
+            build_telescope("Refractor", 100.0, 500.0, objective_type="apo-triplet"),
+            wl))
+        assert d_singlet > d_achromat > d_apo_d > d_apo_t > 0
+        # Apo-triplet correction is roughly 8x tighter than achromat
+        assert d_achromat / d_apo_t >= 7.5
+
+    def test_tutorial_starfield_deterministic(self):
+        from telescope_sim.source.sources import TutorialStarField
+        a = TutorialStarField()
+        b = TutorialStarField()
+        # Same positions, magnitudes — no random seed dependence
+        np.testing.assert_array_equal(a.star_x_arcsec, b.star_x_arcsec)
+        np.testing.assert_array_equal(a.star_y_arcsec, b.star_y_arcsec)
+        np.testing.assert_array_equal(a.star_magnitudes, b.star_magnitudes)
+        # Has the on-axis star
+        on_axis = ((a.star_x_arcsec == 0.0) & (a.star_y_arcsec == 0.0))
+        assert on_axis.any()
+        # Has at least one star at r >= 100″ (edge field for coma test)
+        r = np.sqrt(a.star_x_arcsec ** 2 + a.star_y_arcsec ** 2)
+        assert (r >= 100.0).any()
 
     def test_build_terminal_command(self):
         from telescope_gui.tutorial_mode.scenario_registry import get_scenario_by_id

@@ -181,6 +181,60 @@ class StarField(AstronomicalSource):
         return self.field_radius_arcsec * 2.0
 
 
+class TutorialStarField(StarField):
+    """Deterministic star field for tutorial demonstrations.
+
+    Stars placed at known field angles to highlight specific effects:
+      - 1 mag-0 star on-axis (resolution / PSF reference)
+      - 8 mag-1.5 stars at r=50″ (mid-field; mild coma, no vignetting)
+      - 4 mag-2.5 stars at r=150″ (edge; strong coma + onset of vignetting)
+      - 2 close pairs near centre (1.0″ and 0.5″ separation; resolution test)
+
+    Same render path as StarField — just deterministic positions.
+    """
+
+    def __init__(self, field_radius_arcsec: float = 200.0):
+        # Bypass StarField's random init by setting attributes directly
+        self.field_radius_arcsec = field_radius_arcsec
+        self.seed = 0
+        self.magnitude_range = (0.0, 3.0)
+
+        xs: list[float] = []
+        ys: list[float] = []
+        mags: list[float] = []
+
+        # On-axis bright star
+        xs.append(0.0); ys.append(0.0); mags.append(0.0)
+
+        # Close pairs near centre to probe resolution
+        for sep in (1.0, 0.5):
+            xs.append(-sep / 2.0); ys.append(0.0); mags.append(2.0)
+            xs.append(+sep / 2.0); ys.append(0.0); mags.append(2.0)
+        # Stack the resolution pairs slightly off-axis vertically so they
+        # don't overlap the on-axis star
+        ys[-4] = -8.0; ys[-3] = -8.0
+        ys[-2] = +8.0; ys[-1] = +8.0
+
+        # Mid-field ring at r=50″, 8 stars at 45° spacing
+        for k in range(8):
+            angle = k * np.pi / 4
+            xs.append(50.0 * np.cos(angle))
+            ys.append(50.0 * np.sin(angle))
+            mags.append(1.5)
+
+        # Edge ring at r=150″, 4 stars at cardinal directions
+        for k in range(4):
+            angle = k * np.pi / 2
+            xs.append(150.0 * np.cos(angle))
+            ys.append(150.0 * np.sin(angle))
+            mags.append(2.5)
+
+        self.star_x_arcsec = np.array(xs)
+        self.star_y_arcsec = np.array(ys)
+        self.star_magnitudes = np.array(mags)
+        self.num_stars = len(xs)
+
+
 class Jupiter(AstronomicalSource):
     """Parametric model of Jupiter with limb darkening and equatorial bands.
 

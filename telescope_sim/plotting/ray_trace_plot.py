@@ -633,6 +633,34 @@ def _draw_spot_diagram(ax: plt.Axes, y_offsets: np.ndarray | None,
                 bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.7))
 
 
+def plot_spot_diagram_telescope(telescope: Telescope,
+                                 wavelength_nm: float = 550.0,
+                                 num_rays: int = 51,
+                                 figsize: tuple[float, float] = (7, 7),
+                                 title: str | None = None,
+                                 save_path: str | None = None) -> plt.Figure:
+    """Trace parallel rays through a telescope and plot the focal-plane spot.
+
+    Convenience wrapper around `plot_spot_diagram` for callers that have a
+    telescope but no pre-traced rays (e.g. tutorial scenarios).
+    """
+    from telescope_sim.source.light_source import create_parallel_rays
+    rays = create_parallel_rays(
+        num_rays=num_rays,
+        aperture_diameter=telescope.primary_diameter,
+        entry_height=telescope.tube_length * 1.15,
+        wavelength_nm=wavelength_nm,
+    )
+    telescope.trace_rays(rays)
+    if title is None:
+        prim = getattr(telescope, "primary_type", "")
+        prim_label = f" ({prim})" if prim else ""
+        title = (f"Spot diagram — {telescope.primary_diameter:.0f}mm "
+                 f"f/{telescope.focal_ratio:.1f}{prim_label}")
+    return plot_spot_diagram(rays, title=title, figsize=figsize,
+                              save_path=save_path)
+
+
 def plot_spot_diagram(rays: list[Ray],
                       title: str = "Spot Diagram at Focal Plane",
                       figsize: tuple[float, float] = (7, 7),
@@ -1498,26 +1526,49 @@ def plot_polychromatic_ray_trace(
     ax.legend(fontsize="small", loc="upper right", frameon=True,
               fancybox=True, framealpha=0.9)
 
-    # Focal-region inset embedded inside the main axes (lower-right corner)
+    # Numerical focal-position readout (top-left). Useful when the chromatic
+    # spread is too small to see visually (e.g. apochromats).
+    if len(all_focal_points) >= 1:
+        focals = np.array(list(all_focal_points.values()))
+        ref = focals[:, 0].mean()
+        readout_lines = [f"Focal offsets (Δz from mean, mm):"]
+        for label, fp in all_focal_points.items():
+            dz = fp[0] - ref
+            readout_lines.append(f"  {label}: {dz:+.3f}")
+        ax.text(0.02, 0.98, "\n".join(readout_lines),
+                transform=ax.transAxes, fontsize=7,
+                verticalalignment="top", fontfamily="monospace",
+                bbox=dict(boxstyle="round,pad=0.3", facecolor="white",
+                          alpha=0.85, edgecolor="gray"))
+
+    # Focal-region inset embedded inside the main axes (wider, shorter so
+    # the colour separation is readable; horizontal layout matches the
+    # along-axis chromatic spread which is the dominant signal)
     if len(all_focal_points) >= 2:
-        ax_inset = ax.inset_axes([0.65, 0.02, 0.33, 0.35])
+        ax_inset = ax.inset_axes([0.42, 0.03, 0.56, 0.28])
         ax_inset.patch.set_facecolor("white")
         ax_inset.patch.set_alpha(0.9)
 
         focals = np.array(list(all_focal_points.values()))
         center_x = focals[:, 0].mean()
         center_y = focals[:, 1].mean()
-        spread_x = max(np.ptp(focals[:, 0]), telescope.primary_diameter * 0.05)
-        spread_y = max(np.ptp(focals[:, 1]), telescope.primary_diameter * 0.05)
-        margin = 3.0  # zoom out 3× beyond the spread
+        spread_x = max(np.ptp(focals[:, 0]), telescope.primary_diameter * 0.02)
+        spread_y = max(np.ptp(focals[:, 1]), telescope.primary_diameter * 0.02)
+        # Asymmetric margins: tight along chromatic-spread (x), loose vertically
+        margin_x = 2.5
+        margin_y = 4.0
 
-        ax_inset.set_xlim(center_x - spread_x * margin,
-                          center_x + spread_x * margin)
-        ax_inset.set_ylim(center_y - spread_y * margin,
-                          center_y + spread_y * margin)
-        # Longitudinal chromatic spread along the optical axis
+        ax_inset.set_xlim(center_x - spread_x * margin_x,
+                          center_x + spread_x * margin_x)
+        ax_inset.set_ylim(center_y - spread_y * margin_y,
+                          center_y + spread_y * margin_y)
+        # Longitudinal chromatic spread along the optical axis (with
+        # objective-type label so APO vs singlet is unambiguous)
         long_spread_mm = np.ptp(focals[:, 0]) if len(focals) > 1 else 0.0
-        inset_title = f"Focal region  |  spread: {long_spread_mm:.3f} mm"
+        obj_type = getattr(telescope, "objective_type", "")
+        obj_label = f"  |  {obj_type}" if obj_type else ""
+        inset_title = (f"Focal region{obj_label}  |  "
+                        f"spread: {long_spread_mm:.3f} mm")
         ax_inset.set_title(inset_title, fontsize=7)
         ax_inset.tick_params(labelsize=6)
 
@@ -2740,13 +2791,18 @@ def chromatic_defocus(telescope: Telescope,
     f_design = telescope.focal_length
 
     obj_type = getattr(telescope, 'objective_type', 'singlet')
+    delta_wl = abs(wavelength_nm - design_wl)
+    max_delta = 170.0  # max spread (486..656 range)
 
     if obj_type == "achromat":
-        # Residual secondary spectrum: small residual proportional to
-        # deviation from design wavelength, roughly f/2500 peak-to-peak.
-        delta_wl = abs(wavelength_nm - design_wl)
-        max_delta = 170.0  # max spread (486..656 range)
+        # Residual secondary spectrum: roughly f/2500 peak-to-peak
         return f_design / 2500.0 * (delta_wl / max_delta)
+    elif obj_type == "apo-doublet":
+        # ED+crown corrected at three wavelengths; residual ~f/8000
+        return f_design / 8000.0 * (delta_wl / max_delta)
+    elif obj_type == "apo-triplet":
+        # Triplet correction is near diffraction-limited; residual ~f/20000
+        return f_design / 20000.0 * (delta_wl / max_delta)
     else:
         # Singlet: full primary chromatic aberration
         glass = getattr(telescope.objective, 'glass', 'BK7')

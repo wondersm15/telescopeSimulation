@@ -59,6 +59,65 @@ def overlay_airy_ring(fig: Figure, airy_radius_arcsec: float) -> None:
     ax.legend(loc="upper right", fontsize=7, framealpha=0.6)
 
 
+def overlay_spider_vanes(fig: Figure, telescope) -> None:
+    """Draw dashed lines along the spider-vane directions on a 2D PSF plot.
+
+    Each vane is drawn as a thin dashed red line from the origin out to the
+    plot edge in its physical pupil-plane direction. Spikes appear in the PSF
+    perpendicular to these lines — drawing the vanes themselves makes the
+    geometric origin of the spike pattern explicit.
+    """
+    n = getattr(telescope, "spider_vanes", 0)
+    if n <= 0 or not fig.axes:
+        return
+    ax = fig.axes[0]
+    xlim = ax.get_xlim()
+    ylim = ax.get_ylim()
+    R = max(abs(xlim[0]), abs(xlim[1]), abs(ylim[0]), abs(ylim[1]))
+    R *= 0.95
+    for k in range(n):
+        angle = 2.0 * k * np.pi / n
+        x_end = R * np.cos(angle)
+        y_end = R * np.sin(angle)
+        ax.plot([0.0, x_end], [0.0, y_end],
+                color="red", linestyle=":", linewidth=0.9, alpha=0.7,
+                label=("vane direction" if k == 0 else None),
+                zorder=4)
+    leg = ax.get_legend()
+    if leg is None:
+        ax.legend(loc="upper right", fontsize=7, framealpha=0.6)
+
+
+def overlay_resolution_circles(fig: Figure,
+                                airy_radius_arcsec: float,
+                                seeing_arcsec: float | None = None) -> None:
+    """Overlay theoretical resolution circles on a rendered image plot.
+
+    Draws a dashed cyan circle at the diffraction-limited Airy radius and
+    (when seeing is active) a dotted orange circle at the seeing FWHM/2.
+    Used for the aperture-vs-seeing tutorial so the user can compare the
+    two limits visually on the rendered image.
+    """
+    if not fig.axes:
+        return
+    ax = fig.axes[0]
+    if airy_radius_arcsec > 0:
+        ax.add_patch(Circle(
+            (0.0, 0.0), airy_radius_arcsec,
+            fill=False, color="cyan", linestyle="--",
+            linewidth=1.5, alpha=0.9,
+            label=f"Airy: {airy_radius_arcsec:.2f}\"",
+        ))
+    if seeing_arcsec is not None and seeing_arcsec > 0:
+        ax.add_patch(Circle(
+            (0.0, 0.0), seeing_arcsec / 2.0,
+            fill=False, color="orange", linestyle=":",
+            linewidth=1.5, alpha=0.9,
+            label=f"Seeing FWHM/2: {seeing_arcsec / 2.0:.2f}\"",
+        ))
+    ax.legend(loc="upper right", fontsize=7, framealpha=0.7)
+
+
 def compute_rayleigh_theory(telescope, wavelength_nm: float = 550.0) -> dict:
     """Theoretical Rayleigh resolution limit (angular separation).
 
@@ -225,7 +284,29 @@ THEORY_FUNCTIONS: dict[str, callable] = {
     "compute_spherical_aberration_theory": compute_spherical_aberration_theory,
 }
 
-# Maps scenario ids to their figure overlay functions (called after plot, before set_figure)
+def _spider_overlay(fig: Figure, theory_result: dict, telescope) -> None:
+    """Scenario-id wrapper that draws spider-vane direction lines."""
+    overlay_spider_vanes(fig, telescope)
+
+
+def _resolution_overlay(fig: Figure, theory_result: dict, telescope,
+                        seeing_arcsec: float | None = None) -> None:
+    """Scenario-id wrapper for the aperture-vs-seeing comparison.
+
+    Reads Airy radius from the theory dict and draws the two circles.
+    """
+    airy = theory_result.get("diffraction_limit_arcsec", 0.0)
+    overlay_resolution_circles(fig, airy, seeing_arcsec)
+
+
+# Maps scenario ids to their figure overlay functions (called after plot, before set_figure).
+# Functions may use one of three signatures:
+#   (fig, theory_value)                        — legacy 2-arg
+#   (fig, theory_result, telescope)            — 3-arg
+#   (fig, theory_result, telescope, seeing)    — 4-arg
 OVERLAY_FUNCTIONS: dict[str, callable] = {
     "airy_disk": overlay_airy_ring,
+    "spider_vanes": _spider_overlay,
+    "obstruction_plus_spiders": _spider_overlay,
+    "aperture_vs_seeing": _resolution_overlay,
 }

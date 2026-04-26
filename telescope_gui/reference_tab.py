@@ -268,12 +268,22 @@ S = (1 &minus; &epsilon;&sup2;)&sup2; &nbsp;&nbsp; (&epsilon; = obstruction rati
 <p>This is not arbitrary scaling: total energy is conserved, but the Airy disk
 widens and energy moves into the ring system, so the <i>on-axis peak</i> falls.
 A 30% obstruction gives S &asymp; 0.73 (73% of unobstructed peak).</p>
+<p><b>Modified Airy radius (annular Rayleigh limit):</b></p>
+<p style="font-family:monospace; margin-left:20px;">
+&theta;<sub>R,annular</sub> &asymp; 1.22&lambda;/D &times; 1/(1+&epsilon;&sup2;)
+</p>
+<p>This is a useful approximation, not the exact first zero of the annular
+diffraction pattern. The exact zero requires solving<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<code>2J<sub>1</sub>(x)/x &minus; &epsilon;&sup2; &middot; 2J<sub>1</sub>(&epsilon;x)/(&epsilon;x) = 0</code><br>
+numerically; for &epsilon; &le; 0.4 the 1/(1+&epsilon;&sup2;) form is accurate
+to within a few percent. Used in <code>rayleigh_criterion_arcsec()</code> in
+the codebase.</p>
 <p><b>Resolution vs contrast:</b> obstruction <i>narrows</i> the Airy disk
-slightly (the first zero shifts inward by factor 1/(1+&epsilon;&sup2;)),
-superficially improving angular resolution on bright double stars. However
-the contrast of extended planetary detail degrades because more energy sits
-in the rings. These are different properties &mdash; resolution and contrast
-trade off.</p>
+slightly &mdash; superficially improving angular resolution on bright double
+stars. However the contrast of extended planetary detail degrades because
+more energy sits in the rings. These are different properties; the disk
+narrowing (resolution) and the Strehl drop (contrast) are independent
+consequences of the same obstruction.</p>
 <p>Typical obstruction ratios: Newtonian 15&ndash;25%, Cassegrain 25&ndash;35%,
 Maksutov 30&ndash;40%.</p>
 <p><i>Accuracy: Exact annular-aperture PSF model.</i></p>
