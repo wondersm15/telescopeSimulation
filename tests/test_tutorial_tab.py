@@ -475,9 +475,9 @@ class TestScenarioRunner:
         # Has the on-axis star
         on_axis = ((a.star_x_arcsec == 0.0) & (a.star_y_arcsec == 0.0))
         assert on_axis.any()
-        # Has at least one star at r >= 100″ (edge field for coma test)
+        # Has at least one edge star at ≥ 70% of the field radius
         r = np.sqrt(a.star_x_arcsec ** 2 + a.star_y_arcsec ** 2)
-        assert (r >= 100.0).any()
+        assert (r >= a.field_radius_arcsec * 0.7).any()
 
     def test_build_terminal_command(self):
         from telescope_gui.tutorial_mode.scenario_registry import get_scenario_by_id

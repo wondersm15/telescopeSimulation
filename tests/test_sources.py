@@ -44,7 +44,10 @@ class TestPointSource:
 
     def test_field_extent_on_axis(self):
         source = PointSource(field_angle_arcsec=0.0)
-        assert source.field_extent_arcsec == 10.0
+        # 20″ default for on-axis sources — gives the Eye-view asinh
+        # stretch room to reveal Airy-ring structure / diffraction-spike
+        # falloff without saturating.
+        assert source.field_extent_arcsec == 20.0
 
     def test_field_extent_off_axis(self):
         source = PointSource(field_angle_arcsec=100.0)

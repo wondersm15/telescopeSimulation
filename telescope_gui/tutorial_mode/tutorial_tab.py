@@ -8,6 +8,7 @@ into a single QWidget registered as a GUI mode.
 from __future__ import annotations
 
 import traceback
+from dataclasses import replace
 
 import matplotlib
 matplotlib.use("Agg")
@@ -72,6 +73,14 @@ class TutorialTab(QWidget):
         # Per-axis (xlim, ylim) captured from the before-side figure
         self._before_axis_limits: list[tuple] | None = None
         self._psf_view_combo: QComboBox | None = None
+        # log/linear PSF scale toggle (for scenarios that render a PSF)
+        self._psf_scale_combo: QComboBox | None = None
+        # Overlay-visibility toggle (e.g. spider vanes, theory rings)
+        self._show_overlay_check: QCheckBox | None = None
+        # Focus-wavelength toggle (for chromatic-aberration scenarios)
+        self._focus_wavelength_combo: QComboBox | None = None
+        # Display-stretch toggle (linear / log) for source-image scenarios
+        self._display_stretch_combo: QComboBox | None = None
         self._build_ui()
         # Load the first implemented scenario automatically
         first = get_first_implemented()
@@ -144,14 +153,8 @@ class TutorialTab(QWidget):
         self.controls_layout.setSpacing(12)
         self.main_layout.addWidget(self.controls_group)
 
-        # Update / Reset buttons
+        # Controls auto-update on edit; only a Reset is exposed.
         btn_row = QHBoxLayout()
-        self.update_btn = QPushButton("Update →")
-        self.update_btn.setStyleSheet(
-            "font-weight: bold; padding: 4px 16px; background: #2a6496; "
-            "color: white; border-radius: 4px;")
-        self.update_btn.clicked.connect(self._on_update_clicked)
-
         self.reset_btn = QPushButton("Reset")
         self.reset_btn.setStyleSheet(
             "padding: 4px 12px; color: #555; border: 1px solid #aaa; border-radius: 4px;")
@@ -166,8 +169,8 @@ class TutorialTab(QWidget):
         self.lock_axes_check.setToolTip(
             "Keep the after-side axes fixed to the before-side range,\n"
             "so size changes are visually apparent.")
+        self.lock_axes_check.stateChanged.connect(self._on_update_clicked)
 
-        btn_row.addWidget(self.update_btn)
         btn_row.addWidget(self.reset_btn)
         btn_row.addWidget(self.lock_axes_check)
         btn_row.addWidget(self.status_label)
@@ -207,7 +210,14 @@ class TutorialTab(QWidget):
 
         # Update description area
         self.title_label.setText(scenario.title)
-        self.description_label.setText(scenario.description)
+        applies_label = {
+            "refractor": "Applies to: Refractors only",
+            "reflector": "Applies to: Reflectors / catadioptric only",
+            "both": "Applies to: Refractors and Reflectors",
+        }.get(scenario.applies_to, "Applies to: Both")
+        self.description_label.setText(
+            f"{applies_label}\n\n{scenario.description}"
+        )
         self.learn_more_label.setText(
             f"Learn more → Parameters & Physics: {scenario.learn_more_section}"
         )
@@ -227,6 +237,19 @@ class TutorialTab(QWidget):
         self.before_after.clear_after()
         self.theory_readout.clear()
         self.terminal_panel.clear()
+
+        # Enable/disable the lock-axes checkbox based on scenario compatibility
+        lock_safe = self._axis_lock_is_safe(scenario)
+        self.lock_axes_check.setEnabled(lock_safe)
+        if lock_safe:
+            self.lock_axes_check.setToolTip(
+                "Keep the after-side axes fixed to the before-side range,\n"
+                "so size changes are visually apparent.")
+        else:
+            self.lock_axes_check.setToolTip(
+                "Axis lock disabled — before/after panels use different plot\n"
+                "types or sources with different fields of view, so the\n"
+                "before-side range isn't physically comparable to the after-side.")
 
         # Render the static "before" side
         self._render_before(scenario)
@@ -250,11 +273,19 @@ class TutorialTab(QWidget):
         self._tweak_widgets.clear()
         self._tweak_widgets_before.clear()
         self._psf_view_combo = None
+        self._psf_scale_combo = None
+        self._show_overlay_check = None
+        self._focus_wavelength_combo = None
+        self._display_stretch_combo = None
 
         params = scenario.tweakable_params
         params_before = scenario.tweakable_params_before
         # PSF scenarios always get the 1D/2D toggle even if no other tweakable params
         is_psf_scenario = scenario.plot_function == "plot_psf_2d"
+        # Scenarios that benefit from a log/linear toggle (PSF maps and
+        # 1D radial profiles).
+        is_psf_profile_scenario = scenario.plot_function == "plot_psf_profile"
+        wants_scale_toggle = is_psf_scenario or is_psf_profile_scenario
         if not params and not is_psf_scenario and not params_before:
             self.controls_group.setVisible(False)
             return
@@ -291,6 +322,40 @@ class TutorialTab(QWidget):
         # (disabled for spider/obstruction scenarios where azimuthal pattern matters)
         if is_psf_scenario and scenario.show_psf_toggle:
             self._add_psf_view_combo()
+
+        # Log/linear toggle for any PSF-rendering scenario
+        if wants_scale_toggle:
+            self._add_psf_scale_combo()
+
+        # Overlay-visibility toggle for scenarios with informative overlays
+        # (spider-vane lines, etc.)
+        from telescope_gui.tutorial_mode.theory_computations import OVERLAY_FUNCTIONS
+        if scenario.id in OVERLAY_FUNCTIONS:
+            self._add_show_overlay_check()
+
+        # Focus-wavelength toggle (for chromatic scenarios — both the
+        # 1D radial-profile comparison and the polychromatic star-field
+        # rendering use the same focus-wavelength concept).
+        wants_focus_combo = (
+            scenario.secondary_plot_function == "plot_chromatic_focal_planes"
+            or (scenario.after_polychromatic
+                and scenario.plot_function == "plot_source_image")
+        )
+        if wants_focus_combo:
+            self._add_focus_wavelength_combo()
+            self._sync_focus_combo_for_objective()
+
+        # Display-stretch toggle (linear / log) for any scenario whose
+        # after-side renders a source image (so the toggle is available
+        # for fratio_coma and spherical_aberration which use a different
+        # plot_function but call plot_source_image via
+        # secondary_plot_function).
+        wants_display_combo = (
+            scenario.plot_function == "plot_source_image"
+            or scenario.secondary_plot_function == "plot_source_image"
+        )
+        if wants_display_combo:
+            self._add_display_stretch_combo()
 
         self.controls_layout.addStretch()
 
@@ -378,6 +443,9 @@ class TutorialTab(QWidget):
         spin.setDecimals(decimals)
         spin.setValue(value)
         spin.setFixedWidth(90)
+        # Auto-update on Enter / focus-out so changes propagate without
+        # the user needing to press an Update button (which we removed).
+        spin.editingFinished.connect(self._on_update_clicked)
         col.addWidget(lbl)
         col.addWidget(spin)
         target_layout.addLayout(col)
@@ -397,6 +465,7 @@ class TutorialTab(QWidget):
         spin.setRange(minimum, maximum)
         spin.setValue(value)
         spin.setFixedWidth(70)
+        spin.editingFinished.connect(self._on_update_clicked)
         col.addWidget(lbl)
         col.addWidget(spin)
         target_layout.addLayout(col)
@@ -425,6 +494,7 @@ class TutorialTab(QWidget):
             if val == current_seeing:
                 combo.setCurrentIndex(i)
                 break
+        combo.currentIndexChanged.connect(self._on_update_clicked)
         col.addWidget(lbl)
         col.addWidget(combo)
         target_layout.addLayout(col)
@@ -445,6 +515,10 @@ class TutorialTab(QWidget):
             combo.addItem(opt)
         idx = options.index(current) if current in options else 0
         combo.setCurrentIndex(idx)
+        # Keep the F=C focus option enabled/disabled in sync as the
+        # user toggles objective (F=C only meaningful for achromat/apo).
+        combo.currentIndexChanged.connect(self._sync_focus_combo_for_objective)
+        combo.currentIndexChanged.connect(self._on_update_clicked)
         col.addWidget(lbl)
         col.addWidget(combo)
         target_layout.addLayout(col)
@@ -465,6 +539,7 @@ class TutorialTab(QWidget):
             combo.addItem(opt)
         idx = options.index(current) if current in options else 0
         combo.setCurrentIndex(idx)
+        combo.currentIndexChanged.connect(self._on_update_clicked)
         col.addWidget(lbl)
         col.addWidget(combo)
         target_layout.addLayout(col)
@@ -483,6 +558,191 @@ class TutorialTab(QWidget):
         col.addWidget(combo)
         self.controls_layout.addLayout(col)
         self._psf_view_combo = combo
+
+    def _add_psf_scale_combo(self):
+        """Linear/log toggle for PSF plots (2D or 1D radial profile)."""
+        col = QVBoxLayout()
+        lbl = QLabel("Scale")
+        lbl.setStyleSheet("font-size: 8pt; font-weight: normal; color: #555;")
+        combo = QComboBox()
+        combo.addItem("Log")
+        combo.addItem("Linear")
+        combo.setCurrentIndex(0)
+        combo.currentIndexChanged.connect(self._on_psf_view_changed)
+        col.addWidget(lbl)
+        col.addWidget(combo)
+        self.controls_layout.addLayout(col)
+        self._psf_scale_combo = combo
+
+    def _add_display_stretch_combo(self):
+        """View toggle: Detector / Eye / Eye + integration.
+
+        Three display mappings of the same underlying simulation:
+        - Detector: linear per-pixel intensity (what a CCD records).
+        - Eye: asinh intensity response (eye's log magnitude response).
+        - Eye + integration: asinh + ~1″ spatial blur (eye's spatial
+          resolution at moderate eyepiece magnification).
+
+        The simulated data is identical in all three; only the screen
+        mapping changes.
+        """
+        col = QVBoxLayout()
+        lbl = QLabel("View")
+        lbl.setStyleSheet("font-size: 8pt; font-weight: normal; color: #555;")
+        combo = QComboBox()
+        combo.addItem("Detector (linear)", "linear")
+        combo.addItem("Eye (logarithmic)", "log")
+        combo.addItem("Eye + integration (log + spatial)", "log_integrated")
+        combo.setCurrentIndex(1)  # Eye default — matches what you see at the eyepiece
+        combo.setToolTip(
+            "Detector: linear per-pixel intensity (calibrated CCD pixel\n"
+            "  response — bright cores dominate, dim features clipped).\n"
+            "Eye: asinh intensity response (eye's logarithmic magnitude\n"
+            "  response — dim stars visible alongside bright ones).\n"
+            "Eye + integration: Eye plus 1″ spatial integration (eye's\n"
+            "  ~1″ resolution at moderate eyepiece magnification —\n"
+            "  chromatic-disk light mixes into the perceived core)."
+        )
+        combo.currentIndexChanged.connect(self._on_update_clicked)
+        col.addWidget(lbl)
+        col.addWidget(combo)
+        self.controls_layout.addLayout(col)
+        self._display_stretch_combo = combo
+
+    # Index of the "F=C plane" item in the focus-wavelength combo (kept
+    # as a constant so the sync logic doesn't drift from the addItem
+    # order in _add_focus_wavelength_combo).
+    _FOCUS_COMBO_FC_INDEX = 1
+    _FOCUS_COMBO_G_INDEX = 0
+
+    def _sync_focus_combo_for_objective(self):
+        """Disable the F=C-plane focus item when objective is singlet.
+
+        F and C share a focal plane in an achromat (and approximately in
+        apo designs) — that's what 'achromatic' means. They lie on
+        different planes in a singlet, so the F=C-plane option is
+        meaningless for a singlet. If the user had F=C selected when
+        they switched to singlet, auto-fall-back to G.
+        """
+        if self._focus_wavelength_combo is None:
+            return
+        obj_combo = self._tweak_widgets.get("objective_type")
+        if obj_combo is None:
+            return
+        is_singlet = (obj_combo.currentText() == "singlet")
+        from PyQt6.QtCore import Qt
+        model = self._focus_wavelength_combo.model()
+        if model is None:
+            return
+        fc_item = model.item(self._FOCUS_COMBO_FC_INDEX)
+        if fc_item is None:
+            return
+        if is_singlet:
+            fc_item.setFlags(fc_item.flags() & ~Qt.ItemFlag.ItemIsEnabled)
+            if (self._focus_wavelength_combo.currentIndex()
+                    == self._FOCUS_COMBO_FC_INDEX):
+                # Auto-switch to G so we don't render an invalid
+                # F=C choice on a singlet
+                self._focus_wavelength_combo.setCurrentIndex(
+                    self._FOCUS_COMBO_G_INDEX)
+        else:
+            fc_item.setFlags(fc_item.flags() | Qt.ItemFlag.ItemIsEnabled)
+
+    def _add_focus_wavelength_combo(self):
+        """Toggle for which focal plane the user has focused on.
+
+        Default is the G / design wavelength (550 nm), peak human eye
+        sensitivity. This is where amateur observers naturally focus an
+        achromat (sharpest "snap to focus" at the brightness peak), and
+        produces the classic violet/purple halo around bright stars
+        from the defocused F and C wavelengths.
+
+        Other options:
+          R / B: focus shifted so the chosen channel is sharp at center.
+          F=C plane: where F (486 nm) and C (656 nm) converge in an
+            achromat — by construction chromatic_defocus(F) ==
+            chromatic_defocus(C) for an achromat, so this option is
+            *identical* to R or B on an achromat (and produces a green
+            halo from the defocused d-line). For a singlet F and C lie
+            at different planes, so this option picks the C-line plane.
+        """
+        col = QVBoxLayout()
+        lbl = QLabel("Focus at")
+        lbl.setStyleSheet("font-size: 8pt; font-weight: normal; color: #555;")
+        combo = QComboBox()
+        combo.addItem("G / design (550 nm)", 550.0)
+        combo.addItem("F=C plane (achromat-natural)", 656.3)
+        combo.addItem("R (656 nm)", 656.3)
+        combo.addItem("B (486 nm)", 486.1)
+        combo.setCurrentIndex(0)  # G default — typical observer focus, purple halos
+        combo.setToolTip(
+            "G / design: peak eye sensitivity; the focal plane a typical\n"
+            "  observer 'snaps to' on an achromat. Produces the classic\n"
+            "  violet/purple halo from defocused F and C light.\n"
+            "F=C plane: where F (486) and C (656) converge in an achromat\n"
+            "  — produces a green halo from defocused d-line.\n"
+            "  Achromat: F=C ≡ R ≡ B (same plane by design).\n"
+            "  Singlet: F and C are at different planes; this picks C.\n"
+            "R / B: focus shifted so that channel is sharp at center."
+        )
+        combo.currentIndexChanged.connect(self._on_update_clicked)
+        col.addWidget(lbl)
+        col.addWidget(combo)
+        self.controls_layout.addLayout(col)
+        self._focus_wavelength_combo = combo
+
+    def _add_show_overlay_check(self):
+        """Toggle for scenario-specific theoretical overlays."""
+        col = QVBoxLayout()
+        lbl = QLabel("Overlay")
+        lbl.setStyleSheet("font-size: 8pt; font-weight: normal; color: #555;")
+        check = QCheckBox("Show")
+        check.setChecked(True)
+        check.stateChanged.connect(self._on_psf_view_changed)
+        col.addWidget(lbl)
+        col.addWidget(check)
+        self.controls_layout.addLayout(col)
+        self._show_overlay_check = check
+
+    def _current_log_scale(self) -> bool | None:
+        """Return the user-selected log/linear state, or None if no toggle."""
+        if self._psf_scale_combo is None:
+            return None
+        return self._psf_scale_combo.currentIndex() == 0  # 0 = "Log"
+
+    @staticmethod
+    def _axis_lock_is_safe(scenario: ScenarioDefinition) -> bool:
+        """True when after-side axes can be safely clamped to before-side limits.
+
+        Unsafe cases:
+        - scenario uses different plot functions on each side (units / panel
+          counts differ).
+        - before/after sources are different types (typically very different
+          fields of view, e.g. PointSource vs TutorialStarField).
+        """
+        if scenario.secondary_plot_function is not None:
+            return False
+        if scenario.before_source.source_type != scenario.after_source.source_type:
+            return False
+        return True
+
+    @staticmethod
+    def _ranges_compatible(lim_before: tuple, lim_after: tuple,
+                            tolerance: float = 1.5) -> bool:
+        """Whether two axis ranges are close enough to share a lock.
+
+        Returns False when one span is more than `tolerance`× the other,
+        i.e. the after side rendered a meaningfully different extent
+        (typically a chromatic FOV auto-expansion or similar). Locking
+        in that case would clip the after side to the wrong window.
+        """
+        span_before = abs(lim_before[1] - lim_before[0])
+        span_after = abs(lim_after[1] - lim_after[0])
+        if span_before <= 0 or span_after <= 0:
+            return False
+        bigger = max(span_before, span_after)
+        smaller = min(span_before, span_after)
+        return bigger <= tolerance * smaller
 
     # ------------------------------------------------------------------
     # Rendering
@@ -520,6 +780,11 @@ class TutorialTab(QWidget):
             if scenario.before_telescope_dynamic and "seeing" in params:
                 before_seeing = params["seeing"]
 
+        stretch = (self._display_stretch_combo.currentData()
+                   if self._display_stretch_combo is not None else "linear")
+        focus_wl_before = (self._focus_wavelength_combo.currentData()
+                           if self._focus_wavelength_combo is not None
+                           else 550.0)
         fig, info, err = run_scenario_side(
             before_telescope,
             before_source,
@@ -529,29 +794,40 @@ class TutorialTab(QWidget):
             polychromatic=scenario.before_polychromatic,
             apply_vignetting=scenario.before_apply_vignetting,
             apply_coma=scenario.before_apply_coma,
+            log_scale=self._current_log_scale(),
+            display_stretch=stretch,
+            focus_wavelength_nm=focus_wl_before,
         )
         if err:
             self.status_label.setText("Before render failed")
             print(f"[Tutorial] Before render error:\n{err}")
             return
 
-        # Theory overlay on the before figure — only for 2D PSF (circle overlay)
+        # Theory + scenario overlays. Theory provides numbers/circles; some
+        # scenarios (spider_vanes, obstruction_plus_spiders) have no theory
+        # function but still need overlays — call apply_theory_overlay
+        # whether or not a theory result exists so scenario-id-keyed
+        # overlays always fire.
+        theory = None
         if scenario.theory_function and plot_fn != "plot_psf_profile":
             theory = compute_theory_for_scenario(
                 scenario, info.get("telescope"),
-                seeing_arcsec=scenario.before_seeing_arcsec,
+                seeing_arcsec=before_seeing,
                 wavelength_nm=scenario.before_wavelength_nm,
             )
             if theory:
-                apply_theory_overlay(scenario, fig, theory,
-                                     telescope=info.get("telescope"),
-                                     seeing_arcsec=scenario.before_seeing_arcsec)
                 self.theory_readout.update_theory(
                     theory["theory_value"],
                     unit=theory.get("unit", ""),
                     label=theory.get("label", ""),
                     formula=theory.get("formula", ""),
                 )
+        if (self._show_overlay_check is None
+                or self._show_overlay_check.isChecked()):
+            apply_theory_overlay(scenario, fig, theory or {},
+                                 telescope=info.get("telescope"),
+                                 seeing_arcsec=before_seeing,
+                                 side="before")
 
         # Capture per-axis limits for locking the after-side (works for
         # single-plot and multi-subplot figures such as coma field analysis)
@@ -580,13 +856,30 @@ class TutorialTab(QWidget):
         after_source_config = self._params_to_source_config(scenario, params)
         plot_fn = self._effective_plot_function(scenario, side="after")
 
-        # Effect toggles (Act 3)
+        # Effect toggles (Act 3) — read all five and apply them to either
+        # the rendering kwargs (coma, vignetting, seeing) or directly to
+        # the telescope config (obstruction, spider_vanes). Previously
+        # only coma / vignetting / seeing were honoured, so toggling
+        # obstruction or spider_vanes off had no visible effect.
         active_effects = self.effect_toggles.get_active_effects()
         apply_coma = active_effects.get("coma", True)
         apply_vignetting = active_effects.get("vignetting", True)
         seeing = params.get("seeing", scenario.after_seeing_arcsec)
         if not active_effects.get("seeing", True):
             seeing = None
+        if not active_effects.get("obstruction", True):
+            after_config = replace(
+                after_config,
+                enable_obstruction=False,
+                obstruction_ratio=0.0,
+            )
+        if not active_effects.get("spider_vanes", True):
+            after_config = replace(after_config, spider_vanes=0)
+
+        focus_wl = (self._focus_wavelength_combo.currentData()
+                    if self._focus_wavelength_combo is not None else 550.0)
+        stretch = (self._display_stretch_combo.currentData()
+                   if self._display_stretch_combo is not None else "linear")
 
         fig, info, err = run_scenario_side(
             after_config,
@@ -597,6 +890,9 @@ class TutorialTab(QWidget):
             polychromatic=scenario.after_polychromatic,
             apply_coma=apply_coma,
             apply_vignetting=apply_vignetting,
+            log_scale=self._current_log_scale(),
+            focus_wavelength_nm=focus_wl,
+            display_stretch=stretch,
         )
 
         if err:
@@ -606,7 +902,10 @@ class TutorialTab(QWidget):
 
         telescope = info.get("telescope")
 
-        # Theory computation + overlay (circle overlay only for 2D PSF)
+        # Theory + overlay. Decoupled: overlays fire whether or not a
+        # theory function exists (some scenarios use overlays for spider
+        # markers without computing a theoretical value).
+        theory = None
         if scenario.theory_function and telescope:
             theory = compute_theory_for_scenario(
                 scenario, telescope,
@@ -616,11 +915,7 @@ class TutorialTab(QWidget):
                                               scenario.after_telescope.obstruction_ratio),
             )
             if theory:
-                if plot_fn != "plot_psf_profile":
-                    apply_theory_overlay(scenario, fig, theory,
-                                         telescope=telescope,
-                                         seeing_arcsec=seeing)
-                # Estimate sim value from figure metadata or theory value placeholder
+                # Estimate sim value from figure metadata or theory placeholder
                 sim_value = self._estimate_sim_value(scenario, info, theory)
                 if sim_value is not None:
                     self.theory_readout.update_values(
@@ -640,18 +935,40 @@ class TutorialTab(QWidget):
                 if scenario.id == "aperture_vs_seeing" and "is_seeing_limited" in theory:
                     if theory["is_seeing_limited"]:
                         self.theory_readout.show_extra("⚠ Seeing-limited")
+        if (telescope
+                and (self._show_overlay_check is None
+                     or self._show_overlay_check.isChecked())):
+            apply_theory_overlay(scenario, fig, theory or {},
+                                 telescope=telescope,
+                                 seeing_arcsec=seeing,
+                                 side="after")
 
         # Apply per-axis limits from before-side for visual comparison.
-        # Iterates all axes so multi-subplot figures (e.g. coma field analysis)
-        # are locked correctly per subplot.
+        # Only safe when both sides use the same plot function AND the same
+        # source type; otherwise the captured xlim/ylim are in mismatched
+        # units (e.g. µm vs mm) or cover an incompatible FOV (e.g. 5″ point
+        # source vs 200″ star field) and applying them clips the after-side
+        # to garbage. See _axis_lock_is_safe.
+        #
+        # Additionally, even when statically safe, the after side may have
+        # auto-determined a meaningfully wider/narrower range than the
+        # captured before-side (e.g. polychromatic singlet auto-expands FOV
+        # ~14× over achromat baseline). The runtime range-mismatch check
+        # skips lock per-axis when this happens, so the after side shows
+        # its real extent rather than being clipped back.
         if (self.lock_axes_check.isChecked()
+                and self._axis_lock_is_safe(scenario)
                 and self._before_axis_limits is not None
                 and fig.axes):
             for i, ax in enumerate(fig.axes):
                 if i < len(self._before_axis_limits):
-                    xlim, ylim = self._before_axis_limits[i]
-                    ax.set_xlim(xlim)
-                    ax.set_ylim(ylim)
+                    xlim_before, ylim_before = self._before_axis_limits[i]
+                    xlim_after = ax.get_xlim()
+                    ylim_after = ax.get_ylim()
+                    if self._ranges_compatible(xlim_before, xlim_after) \
+                            and self._ranges_compatible(ylim_before, ylim_after):
+                        ax.set_xlim(xlim_before)
+                        ax.set_ylim(ylim_before)
 
         self.before_after.set_after(fig, scenario.after_label)
         plt.close(fig)

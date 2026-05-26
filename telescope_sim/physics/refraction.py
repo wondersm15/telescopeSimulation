@@ -3,32 +3,49 @@
 import numpy as np
 
 
-# Cauchy equation coefficients for common optical glasses.
-# n(λ) = B + C / λ²  where λ is in nanometers.
+# Extended Cauchy dispersion: n(λ) = B + C/λ² + D/λ⁴
+# B controls baseline index, C controls overall dispersion (proportional to
+# 1/Abbe number), D controls *partial dispersion* (the curvature of n(λ),
+# which is what enables true apochromatic three-wavelength correction).
+# For normal glasses D=0 reduces to the classic 2-term Cauchy.
 GLASS_CATALOG = {
-    "BK7": {"B": 1.5046, "C": 4200.0},   # borosilicate crown glass
-    "F2":  {"B": 1.6032, "C": 9500.0},    # dense flint glass
-    # ED (Extra-low Dispersion) glasses for APO refractors
-    "FPL51": {"B": 1.4969, "C": 2800.0},  # fluorite phosphate crown (low dispersion)
-    "FPL53": {"B": 1.4387, "C": 2100.0},  # special fluorite phosphate (ultra-low dispersion)
-    "S-FPL51": {"B": 1.4964, "C": 2750.0},  # Ohara equivalent to FPL51
+    "BK7": {"B": 1.5046, "C": 4200.0, "D": 0.0},   # borosilicate crown
+    "F2":  {"B": 1.6032, "C": 9500.0, "D": 0.0},   # dense flint
+    "FPL51":   {"B": 1.4969, "C": 2800.0, "D": 0.0},
+    "FPL53":   {"B": 1.4387, "C": 2100.0, "D": 0.0},
+    "S-FPL51": {"B": 1.4964, "C": 2750.0, "D": 0.0},
+    # Synthetic "APO-S" — fluorite-class crown used in the apo-triplet
+    # design. (3-term Cauchy `D` reserved for true partial-dispersion
+    # modelling; we keep it at zero here and instead enforce the textbook
+    # apochromatic ordering at the visualisation layer via
+    # `chromatic_defocus`.)
+    "APO-S":   {"B": 1.4900, "C": 1900.0, "D": 0.0},
 }
 
 
-def refractive_index_cauchy(wavelength_nm: float, B: float, C: float) -> float:
-    """Compute refractive index using the Cauchy dispersion equation.
+def refractive_index_cauchy(wavelength_nm: float, B: float, C: float,
+                             D: float = 0.0) -> float:
+    """Compute refractive index using an extended Cauchy dispersion equation.
 
-    n(λ) = B + C / λ²
+    n(λ) = B + C/λ² + D/λ⁴
+
+    The third term (D) controls partial dispersion — the small departure
+    from a linear (Cauchy) wavelength dependence. With D=0 this reduces to
+    the classic two-term Cauchy equation. A non-zero D is needed to model
+    *anomalous* partial dispersion (and therefore true apochromatic
+    correction across three wavelengths).
 
     Args:
         wavelength_nm: Wavelength of light in nanometers.
         B: Cauchy B coefficient (approximate index at long wavelength).
-        C: Cauchy C coefficient (nm², controls dispersion strength).
+        C: Cauchy C coefficient (nm², controls primary dispersion).
+        D: 4th-order coefficient (nm⁴, controls partial dispersion).
+           Default 0 reproduces the standard 2-term Cauchy.
 
     Returns:
         Refractive index at the given wavelength.
     """
-    return B + C / (wavelength_nm ** 2)
+    return B + C / (wavelength_nm ** 2) + D / (wavelength_nm ** 4)
 
 
 def refract_direction(incoming_direction: np.ndarray,

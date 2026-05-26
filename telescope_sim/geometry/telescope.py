@@ -504,16 +504,19 @@ class RefractingTelescope:
                 diameter=primary_diameter,
                 center=(0.0, lens_y),
                 ed_glass="FPL51",
-                crown_glass="BK7",
+                crown_glass="F2",
             )
             self.corrected_optics = True
         elif objective_type == "apo-triplet":
             from telescope_sim.geometry.apo_lenses import ApochromaticTriplet
+            # APO-S outer glass is a synthetic anomalous-partial-dispersion
+            # crown — paired with F2 in a triplet it brings three wavelengths
+            # close to coincident focus (true APO behaviour).
             self.objective = ApochromaticTriplet(
                 focal_length=focal_length,
                 diameter=primary_diameter,
                 center=(0.0, lens_y),
-                outer_glass="FPL51",
+                outer_glass="APO-S",
                 middle_glass="F2",
             )
             self.corrected_optics = True

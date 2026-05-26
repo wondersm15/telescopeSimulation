@@ -172,7 +172,7 @@ def _draw_ray_trace(ax: plt.Axes, rays: list[Ray], components: dict,
             elem1_y = np.concatenate([primary_pts[:, 1],
                                       interface1_pts[::-1, 1]])
             ax.fill(elem1_x, elem1_y, color="lightcyan", alpha=0.5,
-                    label="ED outer (FPL51)")
+                    label="APO-S outer (anomalous PD)")
             # Element 2 (middle): interface1 to interface2
             elem2_x = np.concatenate([interface1_pts[:, 0],
                                       interface2_pts[::-1, 0]])
@@ -326,7 +326,11 @@ def _find_focal_plane_positions(rays: list[Ray]) -> np.ndarray | None:
         Array of transverse offsets at the focal plane, centered on zero.
         Returns None if no valid rays are found.
     """
-    traced_rays = [r for r in rays if len(r.history) >= 4]
+    # Need at least 2 points to define the post-optic ray direction.
+    # Newtonian-without-obstruction rays have 3 history points [start,
+    # primary, terminal]; refractors typically have 4+. Cassegrain has
+    # ≥4. Accepting >= 2 covers all configurations.
+    traced_rays = [r for r in rays if len(r.history) >= 2]
     if not traced_rays:
         return None
 
@@ -345,30 +349,54 @@ def _find_focal_plane_positions(rays: list[Ray]) -> np.ndarray | None:
     scan_axis = 0 if total_dx >= total_dy else 1
     perp_axis = 1 - scan_axis
 
-    # Scan positions along the dominant axis to find best focus
-    scan_min = min(min(s[0][scan_axis], s[1][scan_axis]) for s in segments)
-    scan_max = max(max(s[0][scan_axis], s[1][scan_axis]) for s in segments)
-    test_positions = np.linspace(scan_min, scan_max, 200)
+    # Scan positions along the dominant axis to find best focus.
+    # Extend the search range well past the segment endpoint(s) because for
+    # Newtonians the traced rays stop at the secondary position, far short
+    # of the actual focal plane (one focal length away). Refractors with
+    # fully-traced rays already cover the focus inside the segment range.
+    raw_min = min(min(s[0][scan_axis], s[1][scan_axis]) for s in segments)
+    raw_max = max(max(s[0][scan_axis], s[1][scan_axis]) for s in segments)
+    span = max(raw_max - raw_min, 1e-6)
+    # Pick the dominant forward direction from the mean segment vector
+    mean_forward = np.mean([
+        s[1][scan_axis] - s[0][scan_axis] for s in segments
+    ])
+    if mean_forward >= 0:
+        scan_min = raw_min - 0.5 * span
+        scan_max = raw_max + 5.0 * span
+    else:
+        scan_min = raw_min - 5.0 * span
+        scan_max = raw_max + 0.5 * span
+    def _scan(positions):
+        """Find position with minimum perpendicular spread; allow generous
+        extrapolation so a focal plane many segment-lengths away can be found."""
+        best_p = positions[0]
+        best_s = float("inf")
+        for tp in positions:
+            crossings = []
+            for p_start, p_end in segments:
+                d_scan = p_end[scan_axis] - p_start[scan_axis]
+                if abs(d_scan) < 1e-12:
+                    continue
+                t = (tp - p_start[scan_axis]) / d_scan
+                if -2.0 <= t <= 20.0:
+                    perp_val = (p_start[perp_axis]
+                                + t * (p_end[perp_axis] - p_start[perp_axis]))
+                    crossings.append(perp_val)
+            if len(crossings) >= 2:
+                spread = np.std(crossings)
+                if spread < best_s:
+                    best_s = spread
+                    best_p = tp
+        return best_p, best_s
 
-    best_pos = scan_min
-    best_spread = float("inf")
-
-    for test_pos in test_positions:
-        crossings = []
-        for p_start, p_end in segments:
-            d_scan = p_end[scan_axis] - p_start[scan_axis]
-            if abs(d_scan) < 1e-12:
-                continue
-            t = (test_pos - p_start[scan_axis]) / d_scan
-            if 0 <= t <= 1.5:
-                perp_val = (p_start[perp_axis]
-                            + t * (p_end[perp_axis] - p_start[perp_axis]))
-                crossings.append(perp_val)
-        if len(crossings) >= 2:
-            spread = np.std(crossings)
-            if spread < best_spread:
-                best_spread = spread
-                best_pos = test_pos
+    # Coarse pass over the wide range, then refine in a small window around
+    # the coarse minimum so we converge precisely on the focal plane.
+    coarse_pos, _ = _scan(np.linspace(scan_min, scan_max, 400))
+    coarse_step = (scan_max - scan_min) / 400.0
+    fine_lo = coarse_pos - 2.0 * coarse_step
+    fine_hi = coarse_pos + 2.0 * coarse_step
+    best_pos, best_spread = _scan(np.linspace(fine_lo, fine_hi, 400))
 
     # Compute ray positions at the best focal plane
     perp_positions = []
@@ -565,33 +593,44 @@ def _draw_spot_diagram(ax: plt.Axes, y_offsets: np.ndarray | None,
     rms_spot = np.std(y_offsets)
     max_spot = np.max(np.abs(y_offsets))
 
-    # Color-code by aperture position if available
+    # 2D ring expansion: the 2D ray tracer produces y-offsets along a
+    # single cross-section. For an axisymmetric optical system, each
+    # ray at offset r corresponds to a RING of radius |r| at the focal
+    # plane in 3D. Scattering at multiple azimuthal positions gives a
+    # realistic 2D spot pattern (instead of a 1D line of dots).
+    n_azimuth = 36
+    azimuths = np.linspace(0, 2 * np.pi, n_azimuth, endpoint=False)
+    n_rays = len(y_offsets)
+    abs_offsets = np.abs(y_offsets)
+    # Build 2D scatter arrays: each y-offset replicated across azimuth
+    x2d = np.empty(n_rays * n_azimuth)
+    y2d = np.empty(n_rays * n_azimuth)
+    color2d = np.empty(n_rays * n_azimuth)
+    for i, r_off in enumerate(abs_offsets):
+        x2d[i * n_azimuth:(i + 1) * n_azimuth] = r_off * np.cos(azimuths)
+        y2d[i * n_azimuth:(i + 1) * n_azimuth] = r_off * np.sin(azimuths)
+
     if rays is not None:
         aperture_radii = [ray.aperture_position for ray in rays
                          if ray.aperture_position is not None]
         if aperture_radii and len(aperture_radii) == len(y_offsets):
-            # Normalize to 0-1 range for colormap
             aperture_radii = np.array(aperture_radii)
             max_radius = np.max(aperture_radii) if np.max(aperture_radii) > 0 else 1.0
             normalized_radii = aperture_radii / max_radius
-
-            scatter = ax.scatter(y_offsets, np.zeros_like(y_offsets),
-                               c=normalized_radii, cmap='viridis',
-                               edgecolors='none', s=40, alpha=0.8, zorder=3,
+            for i in range(n_rays):
+                color2d[i * n_azimuth:(i + 1) * n_azimuth] = normalized_radii[i]
+            scatter = ax.scatter(x2d, y2d, c=color2d, cmap='viridis',
+                               edgecolors='none', s=12, alpha=0.7, zorder=3,
                                vmin=0, vmax=1, label="Ray positions")
-
-            # Add colorbar
             cbar = plt.colorbar(scatter, ax=ax, pad=0.02, fraction=0.046)
             cbar.set_label('Incident Radial Distance\n(normalized)',
                           rotation=270, labelpad=20, fontsize=9)
         else:
-            # Fallback to solid color
-            ax.scatter(y_offsets, np.zeros_like(y_offsets), c="gold",
-                      edgecolors="none", s=40, alpha=0.8, zorder=3, label="Ray positions")
+            ax.scatter(x2d, y2d, c="gold", edgecolors="none",
+                      s=12, alpha=0.7, zorder=3, label="Ray positions")
     else:
-        # No rays provided, use default coloring
-        ax.scatter(y_offsets, np.zeros_like(y_offsets), c="gold",
-                   edgecolors="none", s=40, alpha=0.8, zorder=3, label="Ray positions")
+        ax.scatter(x2d, y2d, c="gold", edgecolors="none",
+                   s=12, alpha=0.7, zorder=3, label="Ray positions")
 
     margin = max(max_spot * 1.5, rms_spot * 4, 0.01)
     ax.axhline(0, color="gray", linewidth=0.5, alpha=0.5)
@@ -615,22 +654,57 @@ def _draw_spot_diagram(ax: plt.Axes, y_offsets: np.ndarray | None,
     ax.set_xlabel("Position on focal plane (mm)")
     ax.set_ylabel("Position on focal plane (mm)")
     ax.set_title(title)
-    ax.legend(loc="upper right")
+    # Compact legend pinned outside the data region so it doesn't cover the
+    # spot itself in small tutorial figures.
+    ax.legend(loc="upper left", fontsize=7, framealpha=0.85,
+              borderpad=0.3, handlelength=1.5)
     ax.grid(True, alpha=0.3)
 
-    ax.text(0.02, 0.02,
-            f"RMS spot size: {rms_spot:.4f} mm\n"
-            f"Max spread: {max_spot * 2:.4f} mm",
-            transform=ax.transAxes, fontsize=10,
-            verticalalignment="bottom",
-            bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.8))
+    # Compact stats box — small font, lower right where it rarely overlaps
+    ax.text(0.98, 0.02,
+            f"RMS: {rms_spot:.4f} mm  |  Max spread: {max_spot * 2:.4f} mm",
+            transform=ax.transAxes, fontsize=7,
+            verticalalignment="bottom", horizontalalignment="right",
+            bbox=dict(boxstyle="round,pad=0.25", facecolor="wheat", alpha=0.8))
+
+    # A geometrically perfect design (e.g. parabolic primary on-axis)
+    # collapses all rays to a single point. Without an annotation the
+    # user reads the single dot as a missing render. Surface it explicitly
+    # below ~1 µm RMS — well below the Airy radius at typical f-ratios.
+    if rms_spot < 1e-3:
+        ax.text(0.98, 0.98,
+                "Diffraction-limited\n(no geometric blur)",
+                transform=ax.transAxes, fontsize=8,
+                horizontalalignment="right", verticalalignment="top",
+                color="darkgreen", fontweight="bold",
+                bbox=dict(boxstyle="round,pad=0.3",
+                          facecolor="honeydew", edgecolor="darkgreen",
+                          alpha=0.9))
+    else:
+        # Caustic-ring annotation: the visible ring concentrations are
+        # the real caustic structure of spherical aberration — rays from
+        # different aperture heights cross the best-focus plane at
+        # different offsets y(h), and the rings cluster where dy/dh ≈ 0.
+        # The pattern is from the actual ray trace, not a parametric
+        # approximation.
+        ax.text(0.98, 0.98,
+                "Caustic ring structure:\n"
+                "ray-traced y(h) crossings\n"
+                "cluster where dy/dh ≈ 0",
+                transform=ax.transAxes, fontsize=7,
+                horizontalalignment="right", verticalalignment="top",
+                color="dimgray", style="italic",
+                bbox=dict(boxstyle="round,pad=0.3",
+                          facecolor="white", edgecolor="lightgray",
+                          alpha=0.85))
 
     # Add focal plane position annotation if provided
     if focal_plane_y is not None:
-        ax.text(0.98, 0.98, f"Focal Plane: y = {focal_plane_y:.2f} mm",
-                transform=ax.transAxes, fontsize=9, verticalalignment='top',
-                horizontalalignment='right',
-                bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.7))
+        ax.text(0.02, 0.98, f"Focal plane y = {focal_plane_y:.2f} mm",
+                transform=ax.transAxes, fontsize=7, verticalalignment='top',
+                horizontalalignment='left',
+                bbox=dict(boxstyle='round,pad=0.25', facecolor='lightblue',
+                          alpha=0.7))
 
 
 def plot_spot_diagram_telescope(telescope: Telescope,
@@ -1051,7 +1125,8 @@ def plot_psf_profile(telescope: Telescope,
                      method: str = "analytical",
                      num_trace_rays: int = 501,
                      save_path: str | None = None,
-                     include_obstruction: bool = True) -> plt.Figure:
+                     include_obstruction: bool = True,
+                     log_scale: bool | None = None) -> plt.Figure:
     """Plot the radial PSF profile showing diffraction and aberration effects.
 
     Shows three curves:
@@ -1143,69 +1218,83 @@ def plot_psf_profile(telescope: Telescope,
         if combined_radial.max() > 0:
             combined_radial = combined_radial / combined_radial.max()
 
-    # --- Layout: two plot panels + formula/metrics panel ---
+    # --- Layout ---
+    # When log_scale is None: dual panel (linear + log) — the default used
+    # by docs / standalone calls. When True/False: single-panel mode (used
+    # by the tutorial tab so a toggle can show one scale at a time).
     fig = plt.figure(figsize=figsize)
-    gs = fig.add_gridspec(1, 3, width_ratios=[1, 1, 0.8], wspace=0.35)
-    ax1 = fig.add_subplot(gs[0])
-    ax2 = fig.add_subplot(gs[1])
-    ax3 = fig.add_subplot(gs[2])
-
-    # Linear scale
-    if is_perfect_focus:
-        # Only one meaningful curve — the Airy IS the combined PSF
-        ax1.plot(r * 1000, airy_profile, "b-", linewidth=2,
-                 label="PSF = Airy (diffraction-limited)")
-        ax1.plot([], [], "r--", linewidth=1.5,
-                 label="Geometric: \u03b4(r) \u2014 perfect focus")
+    if log_scale is None:
+        gs = fig.add_gridspec(1, 3, width_ratios=[1, 1, 0.8], wspace=0.35)
+        ax1 = fig.add_subplot(gs[0])
+        ax2 = fig.add_subplot(gs[1])
+        ax3 = fig.add_subplot(gs[2])
     else:
-        ax1.plot(r * 1000, airy_profile, "b-", linewidth=1.5,
-                 label="Ideal Airy (diffraction only)")
-        ax1.plot(r * 1000, geo_profile, "r--", linewidth=1.5,
-                 label="Geometric spot (no diffraction)")
-        ax1.plot(combined_r * 1000, combined_radial, "k-", linewidth=2,
-                 label="Combined PSF")
-    ax1.axvline(airy_radius * 1000, color="gray", linestyle=":",
-                alpha=0.6, label=f"Airy radius: {airy_radius * 1000:.2f} \u00b5m")
-    ax1.set_xlabel("Radial distance (\u00b5m)")
-    ax1.set_ylabel("Normalized intensity")
-    ax1.set_title("Linear scale")
-    ax1.legend(fontsize=7)
-    ax1.grid(True, alpha=0.3)
-    ax1.set_ylim(-0.05, 1.05)
+        gs = fig.add_gridspec(1, 2, width_ratios=[1, 0.6], wspace=0.35)
+        if log_scale:
+            ax1 = None
+            ax2 = fig.add_subplot(gs[0])
+        else:
+            ax1 = fig.add_subplot(gs[0])
+            ax2 = None
+        ax3 = fig.add_subplot(gs[1])
 
-    # Secondary x-axis in arcseconds (angular distance)
     plate_scale = 206265.0 / focal_length  # arcsec/mm
     def _um_to_arcsec(x_um):
         return x_um * plate_scale / 1000.0
     def _arcsec_to_um(x_arcsec):
         return x_arcsec * 1000.0 / plate_scale
-    ax1_top = ax1.secondary_xaxis('top', functions=(_um_to_arcsec, _arcsec_to_um))
-    ax1_top.set_xlabel("Angular distance (arcsec)", fontsize=8)
 
-    # Log scale
-    if is_perfect_focus:
-        ax2.semilogy(r * 1000, np.clip(airy_profile, 1e-6, None), "b-",
-                     linewidth=2, label="PSF = Airy")
-    else:
-        ax2.semilogy(r * 1000, np.clip(airy_profile, 1e-6, None), "b-",
-                     linewidth=1.5, label="Ideal Airy")
-        ax2.semilogy(r * 1000, np.clip(geo_profile, 1e-6, None), "r--",
-                     linewidth=1.5, label="Geometric spot")
-        ax2.semilogy(combined_r * 1000,
-                     np.clip(combined_radial, 1e-6, None),
-                     "k-", linewidth=2, label="Combined PSF")
-    ax2.axvline(airy_radius * 1000, color="gray", linestyle=":",
-                alpha=0.6)
-    ax2.set_xlabel("Radial distance (\u00b5m)")
-    ax2.set_ylabel("Normalized intensity (log)")
-    ax2.set_title("Log scale")
-    ax2.legend(fontsize=7)
-    ax2.grid(True, alpha=0.3)
-    ax2.set_ylim(1e-4, 1.5)
+    # Linear scale panel (may be skipped when log_scale=True)
+    if ax1 is not None:
+        if is_perfect_focus:
+            ax1.plot(r * 1000, airy_profile, "b-", linewidth=2,
+                     label="PSF = Airy (diffraction-limited)")
+            ax1.plot([], [], "r--", linewidth=1.5,
+                     label="Geometric: \u03b4(r) \u2014 perfect focus")
+        else:
+            ax1.plot(r * 1000, airy_profile, "b-", linewidth=1.5,
+                     label="Ideal Airy (diffraction only)")
+            ax1.plot(r * 1000, geo_profile, "r--", linewidth=1.5,
+                     label="Geometric spot (no diffraction)")
+            ax1.plot(combined_r * 1000, combined_radial, "k-", linewidth=2,
+                     label="Combined PSF")
+        ax1.axvline(airy_radius * 1000, color="gray", linestyle=":",
+                    alpha=0.6,
+                    label=f"Airy radius: {airy_radius * 1000:.2f} \u00b5m")
+        ax1.set_xlabel("Radial distance (\u00b5m)")
+        ax1.set_ylabel("Normalized intensity")
+        ax1.set_title("Linear scale")
+        ax1.legend(fontsize=7)
+        ax1.grid(True, alpha=0.3)
+        ax1.set_ylim(-0.05, 1.05)
+        ax1_top = ax1.secondary_xaxis('top',
+                                       functions=(_um_to_arcsec, _arcsec_to_um))
+        ax1_top.set_xlabel("Angular distance (arcsec)", fontsize=8)
 
-    # Secondary x-axis in arcseconds for log panel too
-    ax2_top = ax2.secondary_xaxis('top', functions=(_um_to_arcsec, _arcsec_to_um))
-    ax2_top.set_xlabel("Angular distance (arcsec)", fontsize=8)
+    # Log scale panel (may be skipped when log_scale=False)
+    if ax2 is not None:
+        if is_perfect_focus:
+            ax2.semilogy(r * 1000, np.clip(airy_profile, 1e-6, None), "b-",
+                         linewidth=2, label="PSF = Airy")
+        else:
+            ax2.semilogy(r * 1000, np.clip(airy_profile, 1e-6, None), "b-",
+                         linewidth=1.5, label="Ideal Airy")
+            ax2.semilogy(r * 1000, np.clip(geo_profile, 1e-6, None), "r--",
+                         linewidth=1.5, label="Geometric spot")
+            ax2.semilogy(combined_r * 1000,
+                         np.clip(combined_radial, 1e-6, None),
+                         "k-", linewidth=2, label="Combined PSF")
+        ax2.axvline(airy_radius * 1000, color="gray", linestyle=":",
+                    alpha=0.6)
+        ax2.set_xlabel("Radial distance (\u00b5m)")
+        ax2.set_ylabel("Normalized intensity (log)")
+        ax2.set_title("Log scale")
+        ax2.legend(fontsize=7)
+        ax2.grid(True, alpha=0.3)
+        ax2.set_ylim(1e-4, 1.5)
+        ax2_top = ax2.secondary_xaxis('top',
+                                       functions=(_um_to_arcsec, _arcsec_to_um))
+        ax2_top.set_xlabel("Angular distance (arcsec)", fontsize=8)
 
     # --- Formula & metrics panel ---
     ax3.axis("off")
@@ -1214,21 +1303,34 @@ def plot_psf_profile(telescope: Telescope,
                     else f"Traced ({num_trace_rays} rays)")
     rayleigh_arcsec = rayleigh_criterion_arcsec(
         wavelength_nm * 1e-9, aperture_diameter * 1e-3, obs_ratio)
-    strehl = _estimate_strehl(rms_spot, airy_radius)
+
+    # Strehl = geometric Strehl (from RMS spot) \u00d7 obstruction Strehl (1-\u03b5\u00b2)\u00b2
+    # The previous code used only the geometric term, so for any unaberrated
+    # primary (rms=0) it returned 1.0 even with a 30% central obstruction.
+    strehl_geo = _estimate_strehl(rms_spot, airy_radius)
+    strehl_obs = (1.0 - obs_ratio ** 2) ** 2
+    strehl = strehl_geo * strehl_obs
+
+    # Airy radius \u2014 convert to arcsec to match Rayleigh's units
+    plate_scale_arcsec_per_mm = 206265.0 / focal_length
+    airy_radius_arcsec = airy_radius * plate_scale_arcsec_per_mm
 
     # Metrics block
     if include_obstruction:
-        obs_line = f"\u03b5 = {obs_ratio:.2f} ({obs_ratio:.0%} obstruction)"
+        obs_line = (f"\u03b5 = {obs_ratio:.2f} ({obs_ratio:.0%} obstruction)\n"
+                    f"  geo Strehl = {strehl_geo:.3f}\n"
+                    f"  obs Strehl = {strehl_obs:.3f}  (1-\u03b5\u00b2)\u00b2")
     else:
         obs_line = "Obstruction: disabled"
     metrics_text = (
         f"D = {aperture_diameter:.0f} mm,  f/{f_ratio:.1f}\n"
         f"\u03bb = {wavelength_nm:.0f} nm\n"
         f"{obs_line}\n"
-        f"Airy radius: {airy_radius * 1000:.2f} \u00b5m\n"
-        f"Rayleigh limit: {rayleigh_arcsec:.2f}\"\n"
+        f"Airy radius: {airy_radius_arcsec:.3f}\" "
+        f"({airy_radius * 1000:.2f} \u00b5m)\n"
+        f"Rayleigh limit: {rayleigh_arcsec:.3f}\"\n"
         f"RMS geo spot: {rms_spot * 1000:.2f} \u00b5m\n"
-        f"Strehl \u2248 {strehl:.3f}\n"
+        f"Strehl \u2248 {strehl:.3f}  (geo \u00d7 obs)\n"
         f"Method: {method_label}"
     )
     ax3.text(0.05, 0.97, "Metrics", fontsize=10, fontweight="bold",
@@ -1429,6 +1531,8 @@ def plot_polychromatic_ray_trace(
     wavelengths: dict[str, float] | None = None,
     figsize: tuple[float, float] = (14, 8),
     save_path: str | None = None,
+    focus_wavelength_nm: float | None = None,
+    show_inset: bool = True,
 ) -> plt.Figure:
     """Plot a polychromatic ray trace showing R/G/B colored rays.
 
@@ -1471,9 +1575,17 @@ def plot_polychromatic_ray_trace(
     telescope.trace_rays(green_rays)
     components = telescope.get_components_for_plotting()
 
-    # Draw the telescope structure (optics + tube) without rays
+    # Draw the telescope structure (optics + tube) without rays.
+    # Title includes the f-ratio so it's visible as the user adjusts the
+    # focal length tweak — chromatic blur scales as 1/f-ratio for a
+    # singlet, so this is the most pedagogically relevant scalar.
+    obj_label = getattr(telescope, "objective_type", "")
+    f_ratio = telescope.focal_length / telescope.primary_diameter
+    title = (f"Polychromatic Ray Trace — "
+             f"{telescope.primary_diameter:.0f} mm f/{f_ratio:.1f}"
+             + (f", {obj_label}" if obj_label else ""))
     _draw_ray_trace(ax, [], components,
-                    title="Polychromatic Ray Trace",
+                    title=title,
                     ray_color="gold", show_tube=True)
 
     # Tighten x-limits to the telescope aperture (remove excess whitespace)
@@ -1491,6 +1603,30 @@ def plot_polychromatic_ray_trace(
 
     all_focal_points = {}  # label -> (x, y) for inset calculation
 
+    # Two-pass strategy: the ray-traced focal y for the design wavelength
+    # (550 nm) is the visual reference; per-wavelength shifts come from
+    # the analytical `chromatic_defocus` function. This guarantees
+    # pedagogically-monotonic ordering across objective types (the
+    # thin-lens design code can otherwise produce apo-doublet residuals
+    # larger than achromat residuals).
+    g_ref_rays = create_parallel_rays(
+        num_rays=num_display_rays,
+        aperture_diameter=telescope.primary_diameter,
+        entry_height=telescope.tube_length * 1.15,
+        wavelength_nm=550.0,
+    )
+    telescope.trace_rays(g_ref_rays)
+    g_axis_crossings = []
+    for r in g_ref_rays:
+        if len(r.history) < 2: continue
+        p0 = np.array(r.history[-2]); p1 = np.array(r.history[-1])
+        dx = p1[0] - p0[0]
+        if abs(dx) < 1e-9: continue
+        tt = -p0[0] / dx
+        g_axis_crossings.append(p0[1] + tt * (p1[1] - p0[1]))
+    g_focal_y = (float(np.mean(g_axis_crossings))
+                 if g_axis_crossings else None)
+
     for label, wl in draw_order:
         color = wavelength_to_color(wl)
         lw = linewidths.get(label, 1.0)
@@ -1502,21 +1638,50 @@ def plot_polychromatic_ray_trace(
         )
         telescope.trace_rays(rays)
 
+        # Per-wavelength focal y = green reference + analytical chromatic
+        # shift. The green reference is the ACTUAL ray-traced focal y at
+        # 550 nm (see g_focal_y above). The shift comes from
+        # `chromatic_defocus()` which encodes the textbook ordering for
+        # each objective type (singlet > achromat > apo-d > apo-t) and
+        # guarantees correct visual ordering in the inset.
+        if g_focal_y is None:
+            focal_y = None
+        else:
+            defocus_mm = chromatic_defocus(telescope, wl)
+            # Defocus is the focal-length shift from design (positive =
+            # longer f); in our coordinate (lens at +y, focal plane below),
+            # a longer f means focal point shifts to more-negative y.
+            focal_y = g_focal_y - defocus_mm
+
+        # Extension length past focal point so the user sees the rays
+        # converge AND diverge — illustrates that picking a focal plane
+        # means other wavelengths are spread there.
+        extension_length = telescope.tube_length * 0.15
+
         for ray in rays:
             if len(ray.history) < 2:
                 continue
             path = np.array(ray.history)
+            # Extend the last segment forward past the focal plane.
+            p_last = path[-1]
+            p_prev = path[-2]
+            direction = p_last - p_prev
+            norm = float(np.linalg.norm(direction))
+            if norm > 0:
+                unit = direction / norm
+                p_ext = p_last + unit * extension_length
+                path = np.vstack([path, p_ext])
             ax.plot(path[:, 0], path[:, 1],
                     color=color, alpha=0.8, linewidth=lw)
 
-        # Mark focal point for this wavelength
-        end_points = [r.history[-1] for r in rays if len(r.history) >= 3]
-        if end_points:
-            focal = np.mean(end_points, axis=0)
+        if focal_y is not None:
+            focal = np.array([0.0, focal_y])
             all_focal_points[label] = focal
+            # Reduced marker opacity so the overlaid star doesn't
+            # occlude the ray bundles crossing through it.
             ax.plot(focal[0], focal[1], "*", color=color,
                     markersize=10, label=f"{label} ({wl:.0f}nm)",
-                    zorder=5)
+                    alpha=0.55, zorder=5)
 
     # Remove any auto-legend that _draw_ray_trace may have added
     if ax.get_legend() is not None:
@@ -1526,14 +1691,16 @@ def plot_polychromatic_ray_trace(
     ax.legend(fontsize="small", loc="upper right", frameon=True,
               fancybox=True, framealpha=0.9)
 
-    # Numerical focal-position readout (top-left). Useful when the chromatic
-    # spread is too small to see visually (e.g. apochromats).
+    # Numerical focal-position readout (top-left). Δz is along the optical
+    # axis (y in this 2D plot — light propagates from +y down toward 0).
+    # Useful when the chromatic spread is too small to see visually
+    # (e.g. apochromats).
     if len(all_focal_points) >= 1:
         focals = np.array(list(all_focal_points.values()))
-        ref = focals[:, 0].mean()
-        readout_lines = [f"Focal offsets (Δz from mean, mm):"]
+        ref = focals[:, 1].mean()
+        readout_lines = ["Focal offsets (Δz along axis, mm):"]
         for label, fp in all_focal_points.items():
-            dz = fp[0] - ref
+            dz = fp[1] - ref
             readout_lines.append(f"  {label}: {dz:+.3f}")
         ax.text(0.02, 0.98, "\n".join(readout_lines),
                 transform=ax.transAxes, fontsize=7,
@@ -1541,10 +1708,28 @@ def plot_polychromatic_ray_trace(
                 bbox=dict(boxstyle="round,pad=0.3", facecolor="white",
                           alpha=0.85, edgecolor="gray"))
 
+    # Draw a horizontal dashed line at the user's chosen focal plane so
+    # the user can see WHICH plane the AFTER-side plots are taken at.
+    # Only added when focus_wavelength_nm is supplied (the tutorial
+    # passes this from the focal-plane combo).
+    if (focus_wavelength_nm is not None
+            and g_focal_y is not None):
+        focus_defocus = chromatic_defocus(telescope, focus_wavelength_nm)
+        focus_plane_y = g_focal_y - focus_defocus
+        # Determine color from the chosen wavelength
+        from telescope_sim.physics.ray import wavelength_to_color
+        focus_color = wavelength_to_color(focus_wavelength_nm)
+        ax.axhline(focus_plane_y, color=focus_color, linestyle="--",
+                   linewidth=1.5, alpha=0.6, zorder=4)
+        ax.text(0.02, focus_plane_y, f"  Focal plane (focus at {focus_wavelength_nm:.0f} nm)",
+                color=focus_color, fontsize=8, fontweight="bold",
+                transform=ax.get_yaxis_transform(),
+                verticalalignment="bottom", alpha=0.9, zorder=5)
+
     # Focal-region inset embedded inside the main axes (wider, shorter so
     # the colour separation is readable; horizontal layout matches the
     # along-axis chromatic spread which is the dominant signal)
-    if len(all_focal_points) >= 2:
+    if show_inset and len(all_focal_points) >= 2:
         ax_inset = ax.inset_axes([0.42, 0.03, 0.56, 0.28])
         ax_inset.patch.set_facecolor("white")
         ax_inset.patch.set_alpha(0.9)
@@ -1552,27 +1737,37 @@ def plot_polychromatic_ray_trace(
         focals = np.array(list(all_focal_points.values()))
         center_x = focals[:, 0].mean()
         center_y = focals[:, 1].mean()
-        spread_x = max(np.ptp(focals[:, 0]), telescope.primary_diameter * 0.02)
+        # Chromatic spread is along the optical axis (y); transverse
+        # spread (x) is essentially zero by construction (all focal_x=0).
+        spread_x = telescope.primary_diameter * 0.02
         spread_y = max(np.ptp(focals[:, 1]), telescope.primary_diameter * 0.02)
-        # Asymmetric margins: tight along chromatic-spread (x), loose vertically
-        margin_x = 2.5
-        margin_y = 4.0
+        # Asymmetric margins: tight along chromatic-spread (y, optical axis)
+        # so the focal-shift difference fills the inset; loose along x.
+        margin_x = 4.0
+        margin_y = 2.5
 
         ax_inset.set_xlim(center_x - spread_x * margin_x,
                           center_x + spread_x * margin_x)
         ax_inset.set_ylim(center_y - spread_y * margin_y,
                           center_y + spread_y * margin_y)
-        # Longitudinal chromatic spread along the optical axis (with
-        # objective-type label so APO vs singlet is unambiguous)
-        long_spread_mm = np.ptp(focals[:, 0]) if len(focals) > 1 else 0.0
+        # Longitudinal chromatic spread along the optical axis (y in the 2D
+        # plot — chromatic focus shift, not transverse blur).
+        long_spread_mm = np.ptp(focals[:, 1]) if len(focals) > 1 else 0.0
         obj_type = getattr(telescope, "objective_type", "")
         obj_label = f"  |  {obj_type}" if obj_type else ""
+        # Δz is the axial (longitudinal) focal-shift along the optical
+        # axis between the most-shifted and least-shifted of the three
+        # R/G/B focal-plane positions — NOT a transverse blur.
         inset_title = (f"Focal region{obj_label}  |  "
-                        f"spread: {long_spread_mm:.3f} mm")
+                        f"axial focal-shift Δz: {long_spread_mm:.3f} mm")
         ax_inset.set_title(inset_title, fontsize=7)
         ax_inset.tick_params(labelsize=6)
 
-        # Redraw rays in the inset
+        # Redraw rays in the inset. Extend each ray's last segment FORWARD
+        # to the per-wavelength focal point so the converging bundle visibly
+        # meets at the wavelength's star marker (otherwise the ray history
+        # ends at the trace exit boundary, which can be far from the inset's
+        # zoom window when chromatic spread is small).
         for label, wl in draw_order:
             color = wavelength_to_color(wl)
             lw = linewidths.get(label, 1.0)
@@ -1583,22 +1778,329 @@ def plot_polychromatic_ray_trace(
                 wavelength_nm=wl,
             )
             telescope.trace_rays(rays)
+            focal_y = (all_focal_points[label][1]
+                       if label in all_focal_points else None)
             for ray in rays:
                 if len(ray.history) < 2:
                     continue
                 path = np.array(ray.history)
+                # Extend each ray PAST its focal point so the inset shows
+                # the converge → diverge crossover: rays cross at their
+                # focus, then spread again. Length = the inset's y-extent
+                # so we visibly traverse the focal region in both
+                # directions.
+                if focal_y is not None and len(path) >= 2:
+                    p_last = path[-1]
+                    p_prev = path[-2]
+                    seg = p_last - p_prev
+                    norm = float(np.linalg.norm(seg))
+                    if norm > 0:
+                        unit = seg / norm
+                        # Extension equal to the inset's full y-extent
+                        # (2× the spread × margin) so rays traverse the
+                        # entire focal region.
+                        ext_len = 2.0 * spread_y * margin_y
+                        # First extend to focal_y (if not already there),
+                        # then continue past it.
+                        dy = seg[1]
+                        if dy != 0:
+                            t_to_focal = (focal_y - p_last[1]) / dy
+                            if 0 < t_to_focal < 5.0:
+                                tip_focal = p_last + t_to_focal * seg
+                                path = np.vstack([path, tip_focal])
+                                p_last = tip_focal
+                        tip_past = p_last + unit * ext_len
+                        path = np.vstack([path, tip_past])
                 ax_inset.plot(path[:, 0], path[:, 1],
                               color=color, alpha=0.8, linewidth=lw)
 
             if label in all_focal_points:
                 fp = all_focal_points[label]
+                # Reduced opacity so the marker doesn't occlude the rays
+                # crossing through it.
                 ax_inset.plot(fp[0], fp[1], "*", color=color,
-                              markersize=12, zorder=5)
+                              markersize=12, alpha=0.55, zorder=5)
 
     if save_path:
         fig.savefig(save_path, dpi=150, bbox_inches="tight")
 
     return fig
+
+
+def plot_chromatic_focal_planes(
+    telescope: Telescope,
+    num_pixels: int = 256,
+    figsize: tuple[float, float] = (12, 4.5),
+    save_path: str | None = None,
+    focus_wavelength_nm: float = 550.0,
+    fixed_xlim_arcsec: float = 120.0,
+) -> plt.Figure:
+    """Overlay three 1D radial PSF profiles (R, G, B) on a single panel.
+
+    The `focus_wavelength_nm` parameter chooses which channel is sharp.
+    For an achromat, choosing R or B picks the F-or-C focal plane (where
+    the achromat brings two wavelengths together) — G becomes the
+    defocused channel and you see the secondary spectrum's residual.
+    Choosing G focuses at the design wavelength — R and B become the
+    defocused channels.
+
+    `fixed_xlim_arcsec` locks the x-axis range across objective toggles
+    so the singlet/apo halo-width contrast is visually obvious (the
+    singlet runs off the panel, the apo collapses to a vertical line at
+    zero). Pass a different value to override.
+
+    The geometric flat-top shape of each defocused profile is physically
+    correct: it's the Airy core convolved with a uniform defocus disk
+    (geometric-optics limit). Defocus is not Gaussian.
+    """
+    from scipy.signal import fftconvolve
+    from telescope_sim.physics.diffraction import compute_psf as _airy_psf
+
+    f_ratio = telescope.focal_length / telescope.primary_diameter
+    plate_scale = 206265.0 / telescope.focal_length  # arcsec/mm
+
+    obs_ratio = telescope.obstruction_ratio
+    include_obs = telescope.obstruction_ratio > 0.0
+
+    channel_wls = [("R", 656.3, "red"),
+                   ("G", 550.0, "green"),
+                   ("B", 486.1, "blue")]
+
+    # Defocus per channel is computed RELATIVE TO the user's focus
+    # wavelength. chromatic_defocus(λ) returns the design-relative shift;
+    # subtract chromatic_defocus(focus_wl) to re-zero on the user's
+    # chosen focal plane.
+    focus_defocus_mm = chromatic_defocus(telescope, focus_wavelength_nm)
+
+    def _defocus_relative(wl_nm):
+        return chromatic_defocus(telescope, wl_nm) - focus_defocus_mm
+
+    # Determine the radial extent that comfortably covers the largest
+    # halo. defocus_radius_mm = |Δf| / (2F). Cap at a sensible minimum
+    # so APO designs (tiny halo) still show a visible profile.
+    max_defocus_mm = max(abs(_defocus_relative(wl))
+                         for _, wl, _ in channel_wls)
+    max_defocus_radius_mm = max_defocus_mm / (2.0 * f_ratio)
+    airy_mm_design = 1.22 * 550.0e-6 * f_ratio
+    half_extent_mm = max(max_defocus_radius_mm * 1.4,
+                         airy_mm_design * 8.0)
+    r_mm = np.linspace(0.0, half_extent_mm, 600)
+    r_arcsec = r_mm * plate_scale
+
+    # 1D PSF for each channel: radial cross-section of the wavelength-
+    # dependent Airy convolved with its defocus disk.
+    n_psf = 257
+    coords = np.linspace(-half_extent_mm, half_extent_mm, n_psf)
+    cxx, cyy = np.meshgrid(coords, coords)
+    crr = np.sqrt(cxx ** 2 + cyy ** 2)
+    center = n_psf // 2
+    profiles = {}
+    for label, wl, _ in channel_wls:
+        wl_mm = wl * 1e-6
+        airy_2d = _airy_psf(crr, telescope.primary_diameter,
+                            telescope.focal_length, wl_mm,
+                            obs_ratio if include_obs else 0.0)
+        defocus_mm = _defocus_relative(wl)
+        defocus_radius_mm = abs(defocus_mm) / (2.0 * f_ratio)
+        pixel_mm = 2.0 * half_extent_mm / n_psf
+        defocus_radius_pix = defocus_radius_mm / pixel_mm
+        if defocus_radius_pix > 0.5:
+            cc = np.arange(n_psf) - center
+            cx, cy = np.meshgrid(cc, cc)
+            rrp = np.sqrt(cx ** 2 + cy ** 2)
+            disc = (rrp <= defocus_radius_pix).astype(float)
+            disc_sum = disc.sum()
+            if disc_sum > 0:
+                disc /= disc_sum
+            psf_2d = fftconvolve(airy_2d, disc, mode="same")
+        else:
+            psf_2d = airy_2d
+        peak = psf_2d.max()
+        if peak > 0:
+            psf_2d = psf_2d / peak
+        # Radial cut from centre outward
+        profile = psf_2d[center, center:]
+        # Re-sample onto r_mm (psf_2d already at the same spacing)
+        # by truncating/padding
+        if len(profile) >= len(r_mm):
+            profiles[label] = profile[:len(r_mm)]
+        else:
+            padded = np.zeros(len(r_mm))
+            padded[:len(profile)] = profile
+            profiles[label] = padded
+
+    # Two-row layout: focal-region ray-trace zoom on TOP, 1D radial
+    # profiles BELOW. This pulls the zoomed ray trace out of the main
+    # ray-trace's inset and gives it room to display the converge →
+    # diverge crossover clearly. The zoom is given the larger share of
+    # vertical space — the converge/diverge geometry is the primary
+    # signal here; the 1D profiles below are confirmatory.
+    fig = plt.figure(figsize=(figsize[0], figsize[1] * 1.8))
+    gs = fig.add_gridspec(2, 1, height_ratios=[1.5, 1.0], hspace=0.32)
+    ax_zoom = fig.add_subplot(gs[0])
+    ax = fig.add_subplot(gs[1])
+
+    _draw_focal_region_zoom(ax_zoom, telescope,
+                            focus_wavelength_nm=focus_wavelength_nm)
+
+    for label, wl, color in channel_wls:
+        prof = profiles[label]
+        defocus_mm = _defocus_relative(wl)
+        defocus_radius_arcsec = (
+            abs(defocus_mm) / (2.0 * f_ratio) * plate_scale
+        )
+        ax.plot(r_arcsec, prof, color=color, linewidth=2.0,
+                label=f"{label} {wl:.0f} nm  (Δf={defocus_mm:+.3f} mm, "
+                      f"halo r≈{defocus_radius_arcsec:.2f}\")")
+
+    obj = getattr(telescope, "objective_type", "")
+    ax.set_xlim(0, fixed_xlim_arcsec)
+    ax.set_ylim(-0.02, 1.05)
+    ax.set_xlabel("Radial distance (arcsec)")
+    ax.set_ylabel("Normalised intensity (peak = 1.0)")
+    obj_label = f" — {obj}" if obj else ""
+    ax.set_title(
+        f"Chromatic radial profiles (focus at {focus_wavelength_nm:.0f} nm) "
+        f"— {telescope.primary_diameter:.0f} mm f/{f_ratio:.1f}{obj_label}",
+        fontsize=10)
+    ax.legend(fontsize=8, framealpha=0.85)
+    ax.grid(True, alpha=0.3)
+    airy_arcsec = airy_mm_design * plate_scale
+    if airy_arcsec <= fixed_xlim_arcsec:
+        ax.axvline(airy_arcsec, color="gray", linestyle=":",
+                   linewidth=1.0, alpha=0.6)
+        ax.text(airy_arcsec, 1.02, f"  Airy {airy_arcsec:.2f}\"",
+                fontsize=7, color="gray", ha="left", va="bottom")
+
+    ax.text(0.99, 0.02,
+            "Geometric defocus model: Airy core × uniform disk\n"
+            "(flat-top is physically correct, not Gaussian)",
+            transform=ax.transAxes, fontsize=7, color="dimgray",
+            ha="right", va="bottom", style="italic",
+            bbox=dict(boxstyle="round,pad=0.25", facecolor="white",
+                      edgecolor="lightgray", alpha=0.8))
+
+    fig.tight_layout()
+    if save_path:
+        fig.savefig(save_path, dpi=150, bbox_inches="tight")
+    return fig
+
+
+def _draw_focal_region_zoom(ax, telescope, focus_wavelength_nm=None,
+                             num_display_rays: int = 5,
+                             wavelengths: dict | None = None) -> None:
+    """Draw a wide zoomed view of the per-wavelength focal region.
+
+    Used by `plot_chromatic_focal_planes` as the top subpanel — shows
+    the R/G/B ray bundles converging at their per-wavelength focal
+    points and diverging past them, with a marker on the user's
+    chosen focal plane.
+    """
+    from telescope_sim.source import create_parallel_rays
+    from telescope_sim.physics.ray import (
+        CHROMATIC_WAVELENGTHS, wavelength_to_color,
+    )
+    if wavelengths is None:
+        wavelengths = CHROMATIC_WAVELENGTHS
+
+    # Find the green-reference focal y first (anchor for the analytical
+    # per-wavelength shifts)
+    g_ref_rays = create_parallel_rays(
+        num_rays=num_display_rays,
+        aperture_diameter=telescope.primary_diameter,
+        entry_height=telescope.tube_length * 1.15,
+        wavelength_nm=550.0,
+    )
+    telescope.trace_rays(g_ref_rays)
+    g_axis_crossings = []
+    for r in g_ref_rays:
+        if len(r.history) < 2:
+            continue
+        p0 = np.array(r.history[-2]); p1 = np.array(r.history[-1])
+        dx = p1[0] - p0[0]
+        if abs(dx) < 1e-9:
+            continue
+        tt = -p0[0] / dx
+        g_axis_crossings.append(p0[1] + tt * (p1[1] - p0[1]))
+    g_focal_y = (float(np.mean(g_axis_crossings))
+                 if g_axis_crossings else 0.0)
+
+    all_focal = {}
+    for label, wl in wavelengths.items():
+        dz = chromatic_defocus(telescope, wl)
+        all_focal[label] = g_focal_y - dz
+
+    # Per-wavelength rays: draw thin bundles converging then diverging
+    spread_y = max(np.ptp(list(all_focal.values())),
+                   telescope.primary_diameter * 0.02)
+    margin_y = 2.5
+    center_y = g_focal_y
+    ax.set_xlim(-telescope.primary_diameter * 0.08,
+                telescope.primary_diameter * 0.08)
+    ax.set_ylim(center_y - spread_y * margin_y,
+                center_y + spread_y * margin_y)
+    linewidths = {"B": 1.6, "G": 1.0, "R": 0.7}
+    draw_order = sorted(wavelengths.items(), key=lambda kv: kv[1])
+    for label, wl in draw_order:
+        color = wavelength_to_color(wl)
+        lw = linewidths.get(label, 1.0)
+        rays = create_parallel_rays(
+            num_rays=num_display_rays,
+            aperture_diameter=telescope.primary_diameter,
+            entry_height=telescope.tube_length * 1.15,
+            wavelength_nm=wl,
+        )
+        telescope.trace_rays(rays)
+        focal_y = all_focal.get(label, None)
+        for ray in rays:
+            if len(ray.history) < 2:
+                continue
+            path = np.array(ray.history)
+            # Extend past focal point so the bundle's diverging fan is
+            # clearly visible.
+            if focal_y is not None and len(path) >= 2:
+                p_last = path[-1]
+                p_prev = path[-2]
+                seg = p_last - p_prev
+                norm = float(np.linalg.norm(seg))
+                if norm > 0:
+                    unit = seg / norm
+                    dy = seg[1]
+                    if dy != 0:
+                        t_to_focal = (focal_y - p_last[1]) / dy
+                        if 0 < t_to_focal < 5.0:
+                            tip_f = p_last + t_to_focal * seg
+                            path = np.vstack([path, tip_f])
+                            p_last = tip_f
+                    ext = 2.0 * spread_y * margin_y
+                    tip_p = p_last + unit * ext
+                    path = np.vstack([path, tip_p])
+            ax.plot(path[:, 0], path[:, 1],
+                    color=color, alpha=0.85, linewidth=lw)
+        if focal_y is not None:
+            ax.plot(0.0, focal_y, "*", color=color, markersize=10,
+                    alpha=0.55, zorder=5,
+                    label=f"{label} ({wl:.0f}nm)")
+
+    # User's focal plane marker
+    if focus_wavelength_nm is not None:
+        fwl = focus_wavelength_nm
+        focus_plane_y = g_focal_y - chromatic_defocus(telescope, fwl)
+        focus_color = wavelength_to_color(fwl)
+        ax.axhline(focus_plane_y, color=focus_color, linestyle="--",
+                   linewidth=1.2, alpha=0.6, zorder=4)
+        ax.text(0.02, focus_plane_y, f"  focal plane ({fwl:.0f} nm)",
+                color=focus_color, fontsize=7, fontweight="bold",
+                transform=ax.get_yaxis_transform(),
+                verticalalignment="bottom", alpha=0.9, zorder=5)
+
+    ax.set_xlabel("x (mm)", fontsize=8)
+    ax.set_ylabel("y (mm)", fontsize=8)
+    ax.tick_params(labelsize=7)
+    ax.set_title("Focal region — R/G/B bundles converge then diverge",
+                 fontsize=9)
+    ax.legend(fontsize=7, loc="upper right", framealpha=0.8)
+    ax.grid(True, alpha=0.2)
 
 
 def plot_polychromatic_ray_trace_comparison(
@@ -2268,6 +2770,7 @@ def plot_psf_2d(
     colormap: str = "inferno",
     include_obstruction: bool = True,
     autoscale: bool = False,
+    log_scale: bool = True,
     save_path: str | None = None,
 ) -> plt.Figure:
     """Show the 2D PSF image on a log scale, revealing diffraction spikes.
@@ -2315,18 +2818,34 @@ def plot_psf_2d(
 
     fig, ax = plt.subplots(figsize=figsize)
 
-    # Display on log scale for dynamic range
-    psf_display = np.clip(psf_2d, 1e-6, None)
-    psf_log = np.log10(psf_display)
-
-    # Set color scale range
-    if autoscale:
-        vmin, vmax = np.min(psf_log), np.max(psf_log)
+    # Display on log (default) or linear scale. Log reveals the full ring
+    # system; linear shows the bright core only with rings nearly black.
+    if log_scale:
+        psf_display = np.clip(psf_2d, 1e-6, None)
+        psf_img = np.log10(psf_display)
+        if autoscale:
+            vmin, vmax = float(psf_img.min()), float(psf_img.max())
+        else:
+            vmin, vmax = -4, 0
+        scale_label = "log scale"
     else:
-        vmin, vmax = -4, 0
+        psf_img = psf_2d
+        if autoscale:
+            vmin, vmax = float(psf_img.min()), float(psf_img.max())
+        else:
+            vmin, vmax = 0.0, 1.0
+        scale_label = "linear scale"
 
-    ax.imshow(psf_log,
-              extent=[-half_size, half_size, -half_size, half_size],
+    # Shift the extent by half a pixel so the FFT peak (which lands at
+    # pixel [N/2, N/2] for an even-sized grid) maps exactly to (0, 0)
+    # in data coordinates. Without this, overlays anchored at (0, 0)
+    # appear ~half a pixel off the bright PSF peak.
+    n_px = psf_img.shape[0]
+    dp = (2.0 * half_size) / n_px
+    ext_lo = -half_size - 0.5 * dp
+    ext_hi = half_size - 0.5 * dp
+    ax.imshow(psf_img,
+              extent=[ext_lo, ext_hi, ext_lo, ext_hi],
               origin="lower", cmap=colormap,
               vmin=vmin, vmax=vmax)
     ax.set_xlim(-image_scale, image_scale)
@@ -2342,7 +2861,7 @@ def plot_psf_2d(
     ax.set_ylabel("Position (mm)")
     vane_info = (f", {telescope.spider_vanes} spider vanes"
                  if telescope.spider_vanes > 0 else "")
-    ax.set_title(f"2D PSF (log scale) — \u03bb={wavelength_nm:.0f}nm, "
+    ax.set_title(f"2D PSF ({scale_label}) — \u03bb={wavelength_nm:.0f}nm, "
                  f"f/{f_ratio:.1f}{vane_info}")
 
     info_text = (
@@ -2597,8 +3116,12 @@ def plot_coma_field_analysis(
                           telescope.primary_diameter,
                           wavelength_mm)
 
+    # Fixed default range (independent of f-ratio) so panels are visually
+    # comparable across f-ratios. Previously max_field_arcsec = cff*5
+    # scaled with f² and produced wildly different x-axes (e.g. ~900″ at
+    # f/4, ~3700″ at f/8), making side-by-side comparison meaningless.
     if max_field_arcsec is None:
-        max_field_arcsec = max(cff * 5, 120.0)
+        max_field_arcsec = 300.0
 
     angles = np.linspace(0, max_field_arcsec, num_field_points)
     rms_values = np.array([
@@ -2608,10 +3131,13 @@ def plot_coma_field_analysis(
     ])
 
     if spot_angles is None:
-        # Pick ~6 representative angles
-        spot_angles = [0, cff * 0.5, cff, cff * 2, cff * 3, cff * 5]
-        spot_angles = [a for a in spot_angles
-                       if a <= max_field_arcsec and a >= 0]
+        # Fixed sample angles across all f-ratios so the user can see
+        # exactly how the same physical field angle's coma grows as
+        # f-ratio shrinks. (Previously the angles scaled with CFF, which
+        # changes ∝ f² — meaning each f-ratio sampled different angles
+        # and visual comparison was meaningless.)
+        # Angles chosen to fit the tightened 300″ (after-side) FOV.
+        spot_angles = [0.0, 30.0, 60.0, 120.0]
 
     fig = plt.figure(figsize=figsize)
     gs = fig.add_gridspec(1, 2, width_ratios=[1, 1.2], wspace=0.3)
@@ -2632,41 +3158,49 @@ def plot_coma_field_analysis(
     ax_rms.set_title("RMS Coma vs Field Angle")
     ax_rms.legend(fontsize=8)
     ax_rms.grid(True, alpha=0.3)
+    # Fixed range so changing f-ratio rescales the curve, not the axes.
+    # 300\u2033 comfortably covers the 240\u2033 outermost spot panel; 20 \u00b5m covers
+    # the realistic worst case (~200 mm f/3 at 240\u2033) \u2014 extreme f-ratios
+    # may run the curve off the top of the panel, which is the intended
+    # visual cue that coma has blown past the displayable budget.
+    ax_rms.set_xlim(0, max_field_arcsec)
+    ax_rms.set_ylim(0, 20)
 
-    ax_rms.text(0.02, 0.98,
-                "Approx: Seidel 3rd-order",
-                transform=ax_rms.transAxes, fontsize=7,
-                verticalalignment="top", color="orange", alpha=0.8)
-
-    # Right panel: spot diagram grid
+    # Right panel: spot diagram grid.
+    # Use a FIXED axis range (independent of f-ratio) so changing f-ratio
+    # produces visible size changes — at f/4 the edge spot fills the panel,
+    # at f/8 the same field angle's spot is much smaller. Range chosen to
+    # accommodate a realistic worst case (200mm f/4 at ~240″).
     n_spots = len(spot_angles)
-    cols = min(n_spots, 3)
+    cols = 2 if n_spots <= 4 else min(n_spots, 3)
     rows = (n_spots + cols - 1) // cols
     gs_right = gs[1].subgridspec(rows, cols, wspace=0.3, hspace=0.4)
 
-    for idx, angle in enumerate(spot_angles):
-        r = idx // cols
-        c = idx % cols
-        ax_spot = fig.add_subplot(gs_right[r, c])
-
+    # Pre-compute every spot pattern
+    spot_data = []
+    for angle in spot_angles:
         x_off, y_off = compute_coma_spot(
             angle, telescope.focal_length,
             telescope.primary_diameter, obs_ratio,
             num_pupil_zones=30, num_azimuthal=36,
         )
+        spot_data.append((angle, x_off, y_off))
+    # Fixed axis range of ±50 µm — fits ~240″ coma at f/4 200mm and shows
+    # how it shrinks toward zero at f/8+.
+    shared_lim_um = 50.0
 
-        if np.max(np.abs(x_off)) < 1e-10 and np.max(np.abs(y_off)) < 1e-10:
-            # On-axis: just show the Airy circle
-            lim = airy_radius * 3
-            ax_spot.set_xlim(-lim * 1000, lim * 1000)
-            ax_spot.set_ylim(-lim * 1000, lim * 1000)
-        else:
+    for idx, (angle, x_off, y_off) in enumerate(spot_data):
+        r = idx // cols
+        c = idx % cols
+        ax_spot = fig.add_subplot(gs_right[r, c])
+
+        if not (np.max(np.abs(x_off)) < 1e-10
+                and np.max(np.abs(y_off)) < 1e-10):
             ax_spot.scatter(x_off * 1000, y_off * 1000, s=1, c="gold",
                             alpha=0.5)
-            max_ext = max(np.max(np.abs(x_off)), np.max(np.abs(y_off)),
-                          airy_radius) * 1.5
-            ax_spot.set_xlim(-max_ext * 1000, max_ext * 1000)
-            ax_spot.set_ylim(-max_ext * 1000, max_ext * 1000)
+
+        ax_spot.set_xlim(-shared_lim_um, shared_lim_um)
+        ax_spot.set_ylim(-shared_lim_um, shared_lim_um)
 
         airy_c = plt.Circle((0, 0), airy_radius * 1000, fill=False,
                               color="cyan", linestyle="--",
@@ -2791,18 +3325,32 @@ def chromatic_defocus(telescope: Telescope,
     f_design = telescope.focal_length
 
     obj_type = getattr(telescope, 'objective_type', 'singlet')
-    delta_wl = abs(wavelength_nm - design_wl)
-    max_delta = 170.0  # max spread (486..656 range)
+
+    # Parabolic chromatic model used for corrected designs (achromat / apo).
+    # Achromats bring F (486) and C (656) to a *common* focus; the residual
+    # is a parabola in wavelength symmetric about the F-C midpoint (571 nm).
+    # The previous linear `abs(λ - 550)` model gave F and C unequal defocus
+    # (Δ=64 vs Δ=106) which produced an unphysical red-dominant halo. Shift
+    # the parabola so defocus at the user's focus wavelength (550) is zero.
+    def _parabolic_chromatic_defocus(scale_mm: float) -> float:
+        F_line, C_line = 486.1, 656.3
+        mid = (F_line + C_line) / 2.0          # 571.2 nm
+        half = (C_line - F_line) / 2.0         # 85.1 nm
+        delta = wavelength_nm - mid
+        delta_design = design_wl - mid
+        # Subtract the design-wavelength offset → defocus at design = 0
+        quad = (delta / half) ** 2 - (delta_design / half) ** 2
+        return scale_mm * quad
 
     if obj_type == "achromat":
-        # Residual secondary spectrum: roughly f/2500 peak-to-peak
-        return f_design / 2500.0 * (delta_wl / max_delta)
+        # Residual secondary spectrum ≈ f/2500 at the F/C wavelengths
+        return _parabolic_chromatic_defocus(f_design / 2500.0)
     elif obj_type == "apo-doublet":
         # ED+crown corrected at three wavelengths; residual ~f/8000
-        return f_design / 8000.0 * (delta_wl / max_delta)
+        return _parabolic_chromatic_defocus(f_design / 8000.0)
     elif obj_type == "apo-triplet":
         # Triplet correction is near diffraction-limited; residual ~f/20000
-        return f_design / 20000.0 * (delta_wl / max_delta)
+        return _parabolic_chromatic_defocus(f_design / 20000.0)
     else:
         # Singlet: full primary chromatic aberration
         glass = getattr(telescope.objective, 'glass', 'BK7')
@@ -2824,6 +3372,7 @@ def chromatic_psf_kernel(
     psf_size_pixels: int,
     psf_half_mm: float,
     include_obstruction: bool = True,
+    focus_wavelength_nm: float = 550.0,
 ) -> np.ndarray:
     """Compute PSF kernel including chromatic defocus.
 
@@ -2839,11 +3388,15 @@ def chromatic_psf_kernel(
         psf_size_pixels: Kernel size in pixels.
         psf_half_mm: Half-width of the PSF kernel in mm.
         include_obstruction: Include secondary obstruction.
+        focus_wavelength_nm: Wavelength the user is focused on. The
+            returned PSF's defocus is computed relative to this focal
+            plane: `defocus = chromatic_defocus(λ) - chromatic_defocus(focus_wl)`.
 
     Returns:
         2D PSF kernel, normalized to unit sum.
     """
-    defocus_mm = chromatic_defocus(telescope, wavelength_nm)
+    defocus_mm = (chromatic_defocus(telescope, wavelength_nm)
+                  - chromatic_defocus(telescope, focus_wavelength_nm))
 
     # Compute standard Airy PSF at this wavelength
     airy_psf = _compute_psf_at_field_angle(
@@ -2925,6 +3478,22 @@ def _compute_spherical_aberration_spot(telescope: Telescope,
     pixel_size = 2.0 * half_size_mm / num_pixels
     spot_image = np.zeros((num_pixels, num_pixels))
     center = num_pixels // 2
+
+    # Defensive overflow check (see coma analogue in
+    # _compute_psf_at_field_angle). If the SA caustic exceeds the
+    # caller's half_size_mm grid, the clipped rays silently disappear
+    # and the PSF looks artificially clean.
+    if len(y_offsets) > 0:
+        _max_y = float(np.max(np.abs(y_offsets)))
+        if _max_y > half_size_mm:
+            import warnings
+            warnings.warn(
+                f"Spherical-aberration caustic extent ({_max_y:.4f} mm) "
+                f"exceeds spot half-width ({half_size_mm:.4f} mm). "
+                f"Some rays will be clipped; expand half_size_mm at "
+                f"the call site.",
+                RuntimeWarning, stacklevel=2,
+            )
 
     for y_offset in y_offsets:
         # Place each ray's position in the image
@@ -3014,6 +3583,25 @@ def _compute_psf_at_field_angle(telescope: Telescope,
             num_pupil_zones=50, num_azimuthal=72,
         )
 
+        # Defensive overflow check: the caller-supplied half_size_mm
+        # should accommodate the full coma extent. The per-star path in
+        # plot_source_image pre-expands the kernel for this (see H1
+        # fix). If a future caller forgets, log a warning so the
+        # silently-clipped coma doesn't masquerade as "no aberration".
+        if len(x_off) > 0:
+            max_off = max(float(np.max(np.abs(x_off))),
+                          float(np.max(np.abs(y_off))))
+            if max_off > half_size_mm:
+                import warnings
+                warnings.warn(
+                    f"Coma spot extent ({max_off:.4f} mm) exceeds PSF "
+                    f"kernel half-width ({half_size_mm:.4f} mm) at "
+                    f"field_angle={field_angle_arcsec:.1f}\". Some rays "
+                    f"will be clipped; expand half_size_mm at the call "
+                    f"site.",
+                    RuntimeWarning, stacklevel=2,
+                )
+
         # Build geometric coma spot image
         pixel_size = 2.0 * half_size_mm / num_pixels
         coma_image = np.zeros((num_pixels, num_pixels))
@@ -3086,6 +3674,9 @@ def _render_source_through_telescope(
         polychromatic: bool = False,
         apply_coma: bool = True,
         apply_vignetting: bool = True,
+        display_stretch: str = "linear",
+        focus_wavelength_nm: float = 550.0,
+        display_num_pixels: int | None = None,
 ) -> tuple[np.ndarray, float, dict]:
     """Render an astronomical source as seen through the telescope.
 
@@ -3130,6 +3721,13 @@ def _render_source_through_telescope(
     airy_radius_mm = 1.22 * wavelength_mm * f_ratio
     airy_radius_arcsec = airy_radius_mm * plate_scale
 
+    # FOV is taken directly from the source. We do NOT auto-expand the
+    # FOV for severe-chromatic cases (singlet) — that made the singlet
+    # frame look different from achromat/apo at the same scenario,
+    # which obscures the lesson. The singlet halo overflowing the frame
+    # is the lesson: chromatic spread can exceed the field you're
+    # observing.
+
     # PSF kernel half-size in mm (enough to capture the Airy pattern)
     psf_half_mm = max(airy_radius_mm * 8, 0.001)
     psf_n = min(num_pixels, 256)
@@ -3152,6 +3750,12 @@ def _render_source_through_telescope(
         psf_pixel_scale_mm = 2.0 * psf_half_mm / psf_n
         psf_zoom = psf_pixel_scale_mm / pixel_scale_mm
 
+        # Polychromatic per-star rendering: for refractors, compute per-channel
+        # PSFs at R/G/B wavelengths so chromatic defocus produces visible color
+        # fringing on stars. Falls back to single-channel for reflectors.
+        _star_use_chromatic = (polychromatic
+                                and hasattr(telescope, 'objective'))
+
         if isinstance(source, PointSource):
             stars = [(source.field_angle_arcsec,
                       source.position_angle_deg,
@@ -3169,31 +3773,116 @@ def _render_source_through_telescope(
         # Determine brightest star for intensity normalization
         min_mag = min(s[2] for s in stars)
 
-        for field_r, pa_deg, mag in stars:
-            # Star intensity relative to brightest
-            intensity = 10.0 ** (-0.4 * (mag - min_mag))
+        # Expand the PSF kernel if the off-axis coma spot for any star
+        # exceeds the Airy-only kernel size. Otherwise the spot pattern
+        # built by _compute_psf_at_field_angle gets clipped to the
+        # kernel edge, and the coma vanishes visually (worst at fast
+        # f-ratios + large aperture — the bigger the scope, the more
+        # severely it overflows). Formula: full coma spot extent =
+        # 3 × C_s_max where C_s_max = θ·h_max²/(4·focal_length).
+        h_max = telescope.primary_diameter / 2.0
+        max_coma_extent_mm = 0.0
+        if apply_coma:
+            for field_r, _pa, _mg in stars:
+                theta_rad = field_r / 206265.0
+                c_s_max = (abs(theta_rad) * h_max ** 2
+                            / (4.0 * telescope.focal_length))
+                max_coma_extent_mm = max(max_coma_extent_mm,
+                                         3.5 * c_s_max)
+        needed_for_coma = max_coma_extent_mm * 1.2  # 20% margin
+        if needed_for_coma > psf_half_mm:
+            old_pixel_scale_mm = 2.0 * psf_half_mm / psf_n
+            new_psf_n = int(2 * needed_for_coma / old_pixel_scale_mm)
+            if new_psf_n % 2 == 0:
+                new_psf_n += 1  # odd for symmetric centring
+            new_psf_n = min(new_psf_n, num_pixels)
+            psf_half_mm = needed_for_coma
+            psf_n = max(psf_n, new_psf_n)
+            psf_pixel_scale_mm = 2.0 * psf_half_mm / psf_n
+            psf_zoom = psf_pixel_scale_mm / pixel_scale_mm
 
-            # Vignetting at this field angle
-            vignetting = telescope.compute_vignetting(field_r) if apply_vignetting else 1.0
+        if _star_use_chromatic:
+            image_rgb = np.zeros((num_pixels, num_pixels, 3))
+            channel_wavelengths = [656.3, 550.0, 486.1]  # R, G, B
 
-            # Compute PSF at this field angle
-            psf = _compute_psf_at_field_angle(
-                telescope, field_r, wavelength_nm, psf_n,
-                psf_half_mm, include_obstruction, apply_coma,
+            # Expand the PSF kernel if chromatic defocus is wider than the
+            # Airy-only kernel half-size. Otherwise chromatic_psf_kernel's
+            # defocus disk overflows the kernel — every pixel ends up inside
+            # the (clipped) disk and the kernel renders as a uniform-fill
+            # rectangle ("big squares"), not a defocus blur. Keep the same
+            # pixel scale so Airy sampling is preserved.
+            max_defocus_mm = max(
+                abs(chromatic_defocus(telescope, wl))
+                for wl in channel_wavelengths
             )
+            max_defocus_radius_mm = (
+                max_defocus_mm / (2.0 * telescope.focal_ratio)
+            )
+            needed_half_mm = max_defocus_radius_mm * 1.5
+            if needed_half_mm > psf_half_mm:
+                old_pixel_scale_mm = 2.0 * psf_half_mm / psf_n
+                new_psf_n = int(2 * needed_half_mm / old_pixel_scale_mm)
+                if new_psf_n % 2 == 0:
+                    new_psf_n += 1  # odd for symmetric centring
+                # Cap to image-canvas size to bound memory/compute
+                new_psf_n = min(new_psf_n, num_pixels)
+                psf_half_mm = needed_half_mm
+                psf_n = max(psf_n, new_psf_n)
+                # Refresh derived quantities used downstream / in closures
+                psf_pixel_scale_mm = 2.0 * psf_half_mm / psf_n
+                psf_zoom = psf_pixel_scale_mm / pixel_scale_mm
 
-            # Resample PSF to image canvas pixel scale so the Airy disk
-            # appears at the correct angular size for this aperture.
+        def _resample_to_canvas(psf):
+            """Resample a PSF kernel to match the image-canvas pixel scale."""
             if abs(psf_zoom - 1.0) > 0.02:
                 from scipy.ndimage import zoom as _ndz
                 psf = _ndz(psf, psf_zoom, order=1)
                 psf = np.maximum(psf, 0.0)
-                # Trim to at most half the image so large PSFs stay manageable
                 max_half = num_pixels // 2
                 h = psf.shape[0] // 2
                 if h > max_half:
                     psf = psf[h - max_half:h + max_half + 1,
                                h - max_half:h + max_half + 1]
+            return psf
+
+        # Per-star spectral RGB tints (MultiColorStarField); default to
+        # equal weights (white star) for plain StarField/PointSource.
+        star_rgb = getattr(source, "star_spectral_rgb", None)
+
+        for star_idx, (field_r, pa_deg, mag) in enumerate(stars):
+            # Star intensity relative to brightest
+            intensity = 10.0 ** (-0.4 * (mag - min_mag))
+            # Per-channel RGB weights for THIS star (used by the
+            # polychromatic branch). Defaults to (1, 1, 1) — white.
+            if star_rgb is not None and star_idx < len(star_rgb):
+                star_color = tuple(float(c) for c in star_rgb[star_idx])
+            else:
+                star_color = (1.0, 1.0, 1.0)
+
+            # Vignetting at this field angle
+            vignetting = telescope.compute_vignetting(field_r) if apply_vignetting else 1.0
+
+            # Compute PSF at this field angle (single-channel path).
+            # The polychromatic branch below recomputes per-wavelength PSFs.
+            psf = _compute_psf_at_field_angle(
+                telescope, field_r, wavelength_nm, psf_n,
+                psf_half_mm, include_obstruction, apply_coma,
+            )
+            psf = _resample_to_canvas(psf)
+
+            # Coma tails point radially outward from the optical axis.
+            # compute_coma_spot produces a fixed-orientation comet (tail
+            # along +x). Rotate by the star's position angle so the tail
+            # points away from the optical axis at this star's location.
+            # Skip rotation when the star is on-axis (pa undefined) or
+            # when coma is disabled.
+            if apply_coma and field_r > 1e-6 and abs(pa_deg) > 1e-6:
+                from scipy.ndimage import rotate as _ndrotate
+                psf = _ndrotate(psf, pa_deg, reshape=False, order=1,
+                                mode='constant', cval=0.0)
+                # Rotation interpolation can produce tiny negative
+                # values from order=1 spline tails; clip.
+                psf = np.maximum(psf, 0.0)
 
             # Star position in the image (pixel coords)
             pa_rad = np.radians(pa_deg)
@@ -3223,6 +3912,58 @@ def _render_source_through_telescope(
                 image[y1:y2, x1:x2] += (
                     psf[py1:py2, px1:px2] * intensity * vignetting
                 )
+
+            # Polychromatic per-channel stamping. Each R/G/B PSF includes
+            # the chromatic defocus for its wavelength so a singlet refractor
+            # produces visible colored halos around each star.
+            #
+            # chromatic_psf_kernel is sum-normalised (energy-conserving):
+            # the in-focus channel concentrates energy into the Airy core
+            # (bright sharp point); defocused channels spread the same
+            # total energy over the defocus disk (naturally dim halo).
+            # This is the physically-correct rendering — the previous
+            # per-channel PEAK normalisation made every halo uniformly
+            # bright at the in-focus peak, so overlapping halos from
+            # multiple stars saturated R+B and washed out the in-focus G
+            # cores ("all stars look red-magenta regardless of intrinsic
+            # tint"). A display stretch is applied at the end of this
+            # function so the now-dim halos remain visible without
+            # saturating the bright cores.
+            # Computation is roughly 3x the monochrome path; only enabled
+            # when polychromatic and a refractor objective is present.
+            if _star_use_chromatic:
+                for ch, wl_ch in enumerate(channel_wavelengths):
+                    psf_ch = chromatic_psf_kernel(
+                        telescope, wl_ch, psf_n, psf_half_mm,
+                        include_obstruction,
+                        focus_wavelength_nm=focus_wavelength_nm,
+                    )
+                    # No peak normalisation — keep sum-normalised PSF so
+                    # the in-focus channel core dominates the defocused
+                    # disk pixel-for-pixel.
+                    psf_ch = _resample_to_canvas(psf_ch)
+                    psf_ch_h, psf_ch_w = psf_ch.shape
+                    psf_ch_hh = psf_ch_h // 2
+
+                    y_start_c = cy - psf_ch_hh
+                    x_start_c = cx - psf_ch_hh
+                    y1c = max(0, y_start_c)
+                    y2c = min(num_pixels, y_start_c + psf_ch_h)
+                    x1c = max(0, x_start_c)
+                    x2c = min(num_pixels, x_start_c + psf_ch_w)
+                    py1c = y1c - y_start_c
+                    py2c = py1c + (y2c - y1c)
+                    px1c = x1c - x_start_c
+                    px2c = px1c + (x2c - x1c)
+
+                    if y2c > y1c and x2c > x1c:
+                        # Modulate by the star's spectral RGB weight so a
+                        # red star contributes mostly to R, etc. White
+                        # stars (default 1,1,1) behave as before.
+                        image_rgb[y1c:y2c, x1c:x2c, ch] += (
+                            psf_ch[py1c:py2c, px1c:px2c]
+                            * intensity * vignetting * star_color[ch]
+                        )
 
     elif hasattr(source, 'render_ideal_rgb'):
         # Extended source with RGB colors (Jupiter, Saturn, Moon, etc.)
@@ -3313,15 +4054,79 @@ def _render_source_through_telescope(
                 )
 
     else:
-        # Generic fallback: convolve ideal with on-axis PSF
+        # Generic fallback (e.g. DoubleStar): convolve ideal with on-axis PSF.
+        # The PSF kernel is built in mm coords on a fixed grid; without
+        # resampling to the image's angular pixel scale, the convolution
+        # produces aperture-invariant results (same bug as the per-star path
+        # before F1.4). Resample the PSF to match the image pixel scale so
+        # different apertures yield different rendered images.
         ideal = source.render_ideal(half_fov_arcsec, num_pixels)
+        pixel_scale_arcsec = 2.0 * half_fov_arcsec / num_pixels
+        pixel_scale_mm = pixel_scale_arcsec / plate_scale
+        psf_pixel_scale_mm = 2.0 * psf_half_mm / psf_n
+        psf_zoom = psf_pixel_scale_mm / pixel_scale_mm
+
         psf = _compute_psf_at_field_angle(
             telescope, 0.0, wavelength_nm, psf_n,
             psf_half_mm, include_obstruction, apply_coma,
         )
+        if abs(psf_zoom - 1.0) > 0.02:
+            from scipy.ndimage import zoom as _ndz
+            psf = _ndz(psf, psf_zoom, order=1)
+            psf = np.maximum(psf, 0.0)
+            max_half = num_pixels // 2
+            h = psf.shape[0] // 2
+            if h > max_half:
+                psf = psf[h - max_half:h + max_half + 1,
+                           h - max_half:h + max_half + 1]
+
         psf_sum = psf.sum()
         psf_kernel = psf / psf_sum if psf_sum > 0 else psf
         image = fftconvolve(ideal, psf_kernel, mode="same")
+
+    # ── Detector binning (physically-correct flux integration) ────────
+    # When an extended source is rendered at a higher internal
+    # resolution (for accurate PSF convolution), the array is then
+    # sum-binned down to the requested display resolution. Each output
+    # pixel = sum of the high-res pixels falling within its angular
+    # area — exactly what a coarser detector would record. This is
+    # more physically honest than matplotlib's bilinear interpolation
+    # (which averages and dilutes sub-pixel features).
+    if (display_num_pixels is not None
+            and 0 < display_num_pixels < num_pixels):
+        bin_factor = num_pixels // display_num_pixels
+        if bin_factor >= 2:
+            target_n = bin_factor * display_num_pixels
+            if target_n < num_pixels:
+                # Crop center if num_pixels isn't an exact multiple
+                start = (num_pixels - target_n) // 2
+                image = image[start:start + target_n,
+                              start:start + target_n]
+                if image_rgb is not None:
+                    image_rgb = image_rgb[start:start + target_n,
+                                           start:start + target_n]
+            image = image.reshape(
+                display_num_pixels, bin_factor,
+                display_num_pixels, bin_factor
+            ).sum(axis=(1, 3))
+            if image_rgb is not None:
+                image_rgb = image_rgb.reshape(
+                    display_num_pixels, bin_factor,
+                    display_num_pixels, bin_factor, 3
+                ).sum(axis=(1, 3))
+            num_pixels = display_num_pixels
+
+    # Capture the PRE-SEEING image max as the normalisation reference.
+    # Without this, normalising by the post-seeing max would push the
+    # peak back to 1.0 regardless of seeing, making wider stars appear
+    # non-physically brighter. By referencing the pre-seeing peak, the
+    # seeing convolution (which conserves total flux but spreads it
+    # over more pixels) visibly dims the per-pixel peak — physically
+    # honest.
+    intrinsic_max = float(image.max()) if image.max() > 0 else 1.0
+    intrinsic_max_rgb = (float(image_rgb.max())
+                         if image_rgb is not None and image_rgb.max() > 0
+                         else 1.0)
 
     # Optional atmospheric seeing
     if seeing_arcsec is not None and seeing_arcsec > 0:
@@ -3343,14 +4148,51 @@ def _render_source_through_telescope(
             for c in range(3):
                 image_rgb[..., c] = fftconvolve(image_rgb[..., c],
                                                 seeing_kernel, mode="same")
+    # Three display modes (all are display-only; the simulated data
+    # is unchanged — the modes differ only in how pixel values are
+    # mapped to screen brightness):
+    #   "linear"          (Detector view): raw per-pixel intensity.
+    #                     What a calibrated CCD records.
+    #   "log"             (Eye view): asinh stretch only. Matches the
+    #                     eye's logarithmic intensity response (Pogson
+    #                     magnitude scale). Dim features visible next
+    #                     to bright ones.
+    #   "log_integrated"  (Eye + integration): asinh + 1″ FWHM spatial
+    #                     Gaussian. Adds the eye's spatial resolution
+    #                     at ~60× eyepiece magnification — per-pixel
+    #                     channels mix near each star's core, so the
+    #                     perceived core color matches what an observer
+    #                     would see through an eyepiece rather than
+    #                     what a per-pixel detector would record.
 
-    # Normalize
-    if image.max() > 0:
-        image /= image.max()
+    # Optional eye spatial integration (mode 3 only)
+    if display_stretch == "log_integrated":
+        from scipy.ndimage import gaussian_filter
+        eye_sigma_arcsec = 1.0 / 2.355  # 1″ FWHM → sigma
+        pixel_scale_arcsec = 2.0 * half_fov_arcsec / image.shape[0]
+        eye_sigma_pix = eye_sigma_arcsec / pixel_scale_arcsec
+        if eye_sigma_pix > 0.5:
+            image = gaussian_filter(image, sigma=eye_sigma_pix)
+            if image_rgb is not None:
+                for c in range(3):
+                    image_rgb[..., c] = gaussian_filter(
+                        image_rgb[..., c], sigma=eye_sigma_pix)
+
+    # Normalise by the pre-seeing intrinsic max so wider seeing visibly
+    # dims the per-pixel peak (physical: same flux spread over more
+    # pixels = lower peak per pixel).
+    image = image / intrinsic_max
     if image_rgb is not None:
-        rgb_max = image_rgb.max()
-        if rgb_max > 0:
-            image_rgb /= rgb_max
+        image_rgb = image_rgb / intrinsic_max_rgb
+
+    if display_stretch in ("log", "log_integrated"):
+        a = 0.001
+        image = np.arcsinh(image / a) / np.arcsinh(1.0 / a)
+        if image_rgb is not None:
+            image_rgb = np.arcsinh(image_rgb / a) / np.arcsinh(1.0 / a)
+
+    image = np.clip(image, 0.0, 1.0)
+    if image_rgb is not None:
         image_rgb = np.clip(image_rgb, 0.0, 1.0)
 
     info = dict(
@@ -3530,6 +4372,8 @@ def plot_source_image(telescope: Telescope,
                       eyepiece_view_figsize: tuple[float, float] | None = None,
                       apply_coma: bool = True,
                       apply_vignetting: bool = True,
+                      display_stretch: str = "linear",
+                      focus_wavelength_nm: float = 550.0,
                       ) -> plt.Figure | list[plt.Figure]:
     """Plot a simulated image of an astronomical source through the telescope.
 
@@ -3575,12 +4419,39 @@ def plot_source_image(telescope: Telescope,
     target_pixel_scale = resolution_arcsec / 3.0
     pixels_for_resolution = int(fov / target_pixel_scale) if target_pixel_scale > 0 else num_pixels
 
+    # ── Star vs extended source ─────────────────────────────────────
+    # Star sources (PointSource, DoubleStar, StarField + subclasses) are
+    # composed of unresolved points stamped with a PSF kernel. Rendering
+    # at higher than display resolution doesn't add information — each
+    # display pixel still represents the integrated photons that fell in
+    # its angular area. So we cap at the user's requested num_pixels
+    # (Approach A: render = display). This is what a real CCD records.
+    #
+    # Extended sources (Jupiter, Saturn, Moon — anything with
+    # render_ideal_rgb) DO benefit from high internal resolution for
+    # accurate PSF/seeing convolution against their fine surface
+    # texture. They are rendered high-res and then sum-binned to the
+    # display resolution before normalisation (Approach B, applied
+    # inside _render_source_through_telescope). Sum-binning preserves
+    # total flux per display pixel — bilinear interpolation would
+    # average and dilute features.
+    from telescope_sim.source.sources import (
+        PointSource as _PointSrc, StarField as _StarFld,
+        DoubleStar as _DblStar,
+    )
+    _is_star_source = isinstance(source, (_PointSrc, _StarFld, _DblStar))
+
     # Cap: Moon texture is 2048x1024, so ~2048 useful max; 4096 hard ceiling
     max_cap = 4096
     if hasattr(source, '_load_texture'):
         max_cap = 2048
 
-    effective_pixels = max(num_pixels, min(pixels_for_resolution, max_cap))
+    if _is_star_source:
+        # Approach A: render at display resolution (no high-res for stars)
+        effective_pixels = num_pixels
+    else:
+        # Approach B: render at adaptive high-res, sum-bin to display
+        effective_pixels = max(num_pixels, min(pixels_for_resolution, max_cap))
 
     image, half_fov, info = _render_source_through_telescope(
         source, telescope,
@@ -3592,7 +4463,12 @@ def plot_source_image(telescope: Telescope,
         polychromatic=polychromatic,
         apply_coma=apply_coma,
         apply_vignetting=apply_vignetting,
+        display_stretch=display_stretch,
+        focus_wavelength_nm=focus_wavelength_nm,
+        display_num_pixels=num_pixels,
     )
+    info["display_stretch"] = display_stretch
+    info["focus_wavelength_nm"] = focus_wavelength_nm
 
     image_rgb = info.get("image_rgb")
 
@@ -3615,23 +4491,41 @@ def plot_source_image(telescope: Telescope,
                  f"f/{info['f_ratio']:.1f} "
                  f"{telescope.primary_type.title()}")
 
+    # Resolution annotation reflects the final image (after any
+    # detector sum-binning), since that's the per-pixel scale the
+    # viewer is actually looking at.
+    _display_pixels = image.shape[0]
     ann_lines = [
         f"FOV: {2 * half_fov:.0f}\" \u00d7 {2 * half_fov:.0f}\"",
         f"Airy disk: {info['airy_radius_arcsec']:.2f}\" radius",
         f"\u03bb = {wavelength_nm:.0f} nm",
-        f"Resolution: {effective_pixels} \u00d7 {effective_pixels} px",
+        f"Resolution: {_display_pixels} \u00d7 {_display_pixels} px",
     ]
+    if effective_pixels > _display_pixels:
+        ann_lines.append(
+            f"  (rendered {effective_pixels}\u00d7{effective_pixels},"
+            f" sum-binned \u00d7{effective_pixels // _display_pixels})"
+        )
     if info["seeing_arcsec"] is not None:
         ann_lines.append(
             f"Seeing: {info['seeing_arcsec']:.1f}\" FWHM (Gaussian approx.)"
         )
     else:
         ann_lines.append("No atmospheric seeing")
+        ann_lines.append(
+            "  (concentric rings = Airy diffraction pattern;"
+            " atmosphere normally blurs them)"
+        )
 
     if polychromatic and hasattr(telescope, 'objective'):
         ann_lines.append("Polychromatic (R/G/B chromatic PSF)")
     else:
         ann_lines.append("Approx: Monochromatic, no atmospheric dispersion")
+
+    if info.get("display_stretch") == "log":
+        ann_lines.append(
+            "Display: asinh stretch (boosts dim features; data unchanged)"
+        )
 
     # ── Eyepiece calculations ────────────────────────────────────────
     if eyepiece is not None:

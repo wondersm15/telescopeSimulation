@@ -22,7 +22,9 @@ from telescope_gui.tutorial_mode.theory_computations import (
     THEORY_FUNCTIONS, OVERLAY_FUNCTIONS,
 )
 from telescope_sim.source.sources import (
-    PointSource, DoubleStar, Jupiter, Saturn, StarField, TutorialStarField,
+    PointSource, DoubleStar, Jupiter, Saturn,
+    StarField, TutorialStarField, MultiColorStarField,
+    StarFieldResolutionField, ComaDemoField,
 )
 
 
@@ -42,6 +44,12 @@ def build_source(config: SourceConfig):
         return StarField(**kw)
     elif st == "TutorialStarField":
         return TutorialStarField(**kw)
+    elif st == "MultiColorStarField":
+        return MultiColorStarField(**kw)
+    elif st == "StarFieldResolutionField":
+        return StarFieldResolutionField(**kw)
+    elif st == "ComaDemoField":
+        return ComaDemoField(**kw)
     return PointSource()
 
 
@@ -74,6 +82,9 @@ def run_scenario_side(
     apply_coma: bool = True,
     apply_vignetting: bool = True,
     figsize: tuple[float, float] = (5, 5),
+    log_scale: bool | None = None,
+    focus_wavelength_nm: float = 550.0,
+    display_stretch: str = "linear",
 ) -> tuple[Figure | None, dict, str | None]:
     """Run one side (before or after) of a scenario.
 
@@ -93,6 +104,9 @@ def run_scenario_side(
             apply_coma=apply_coma,
             apply_vignetting=apply_vignetting,
             figsize=figsize,
+            log_scale=log_scale,
+            focus_wavelength_nm=focus_wavelength_nm,
+            display_stretch=display_stretch,
         )
         info["telescope"] = telescope
         info["source"] = source
@@ -112,6 +126,9 @@ def _call_plot_function(
     apply_coma: bool = True,
     apply_vignetting: bool = True,
     figsize: tuple[float, float] = (5, 5),
+    log_scale: bool | None = None,
+    focus_wavelength_nm: float = 550.0,
+    display_stretch: str = "linear",
 ) -> tuple[Figure, dict]:
     """Dispatch to the appropriate telescope_sim plot function."""
     from telescope_sim.plotting import (
@@ -122,6 +139,7 @@ def _call_plot_function(
         plot_polychromatic_ray_trace,
         plot_vignetting_curve,
         plot_spot_diagram_telescope,
+        plot_chromatic_focal_planes,
     )
 
     if name == "plot_source_image":
@@ -133,26 +151,34 @@ def _call_plot_function(
             apply_coma=apply_coma,
             apply_vignetting=apply_vignetting,
             figsize=figsize,
+            display_stretch=display_stretch,
+            focus_wavelength_nm=focus_wavelength_nm,
         )
         if isinstance(fig, list):
             fig = fig[0]
-        return fig, {"plot_function": name}
+        return fig, {"plot_function": name, "display_stretch": display_stretch}
 
     elif name == "plot_psf_2d":
+        # log_scale defaults to True (legacy behavior) for plot_psf_2d
+        _log = True if log_scale is None else log_scale
         fig = plot_psf_2d(
             telescope,
             wavelength_nm=wavelength_nm,
             include_obstruction=(telescope.obstruction_ratio > 0.0),
             figsize=figsize,
+            log_scale=_log,
         )
         return fig, {"plot_function": name}
 
     elif name == "plot_psf_profile":
+        # When log_scale is None: dual-panel (linear+log) layout.
+        # When True/False: single-panel mode driven by the view combo.
         fig = plot_psf_profile(
             telescope,
             wavelength_nm=wavelength_nm,
             include_obstruction=(telescope.obstruction_ratio > 0.0),
             figsize=figsize,
+            log_scale=log_scale,
         )
         return fig, {"plot_function": name}
 
@@ -165,7 +191,15 @@ def _call_plot_function(
         return fig, {"plot_function": name}
 
     elif name == "plot_polychromatic_ray_trace":
-        fig = plot_polychromatic_ray_trace(telescope, figsize=figsize)
+        # Use a tall aspect so the full optical-axis ray trace can use
+        # the full BeforeAfterPanel height. The focal-region zoom is
+        # paired with the after-side (plot_chromatic_focal_planes).
+        tall_figsize = (figsize[0], figsize[1] * 1.6)
+        fig = plot_polychromatic_ray_trace(
+            telescope, figsize=tall_figsize,
+            focus_wavelength_nm=focus_wavelength_nm,
+            show_inset=False,
+        )
         return fig, {"plot_function": name}
 
     elif name == "plot_vignetting_curve":
@@ -175,6 +209,14 @@ def _call_plot_function(
     elif name == "plot_spot_diagram_telescope":
         fig = plot_spot_diagram_telescope(
             telescope, wavelength_nm=wavelength_nm, figsize=figsize)
+        return fig, {"plot_function": name}
+
+    elif name == "plot_chromatic_focal_planes":
+        fig = plot_chromatic_focal_planes(
+            telescope,
+            figsize=(figsize[0] * 2.4, figsize[1] * 0.9),
+            focus_wavelength_nm=focus_wavelength_nm,
+        )
         return fig, {"plot_function": name}
 
     else:
@@ -218,6 +260,7 @@ def apply_theory_overlay(
     theory_result: dict,
     telescope=None,
     seeing_arcsec: float | None = None,
+    side: str = "after",
 ) -> None:
     """Draw a theory overlay onto the figure's axes, if applicable.
 
@@ -233,13 +276,22 @@ def apply_theory_overlay(
     try:
         import inspect
         sig = inspect.signature(overlay_fn)
-        n_params = len(sig.parameters)
-        if n_params >= 4:
-            overlay_fn(fig, theory_result, telescope, seeing_arcsec)
-        elif n_params >= 3:
-            overlay_fn(fig, theory_result, telescope)
+        params = sig.parameters
+        # Detect optional keyword arguments the overlay supports
+        kw_extra = {}
+        if "scenario" in params:
+            kw_extra["scenario"] = scenario
+        if "side" in params:
+            kw_extra["side"] = side
+        n_pos = sum(1 for p in params.values()
+                    if p.name not in ("scenario", "side")
+                    and p.kind in (p.POSITIONAL_OR_KEYWORD, p.POSITIONAL_ONLY))
+        if n_pos >= 4:
+            overlay_fn(fig, theory_result, telescope, seeing_arcsec, **kw_extra)
+        elif n_pos >= 3:
+            overlay_fn(fig, theory_result, telescope, **kw_extra)
         else:
-            overlay_fn(fig, theory_result.get("theory_value", 0.0))
+            overlay_fn(fig, theory_result.get("theory_value", 0.0), **kw_extra)
     except Exception:
         pass  # Overlay failure should never crash the main UI
 

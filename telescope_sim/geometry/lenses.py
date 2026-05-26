@@ -16,6 +16,37 @@ from telescope_sim.physics.refraction import (
 )
 
 
+def _surface_sag(R: float, half_diameter: float) -> float:
+    """Sag (height offset from vertex to rim) of a spherical surface.
+
+    Returns 0 for flat surfaces (R = inf). Returns the magnitude of the sag,
+    which is positive for both convex and concave surfaces (the geometric
+    edge offset is always positive).
+    """
+    if not np.isfinite(R) or abs(R) < 1e-9:
+        return 0.0
+    r_abs = abs(R)
+    if half_diameter >= r_abs:
+        # Half-aperture exceeds the sphere radius — clip to a safe value
+        half_diameter = 0.99 * r_abs
+    return r_abs - np.sqrt(r_abs ** 2 - half_diameter ** 2)
+
+
+def _min_safe_thickness(R_front: float, R_back: float,
+                         half_diameter: float,
+                         min_edge_margin: float = 1.0) -> float:
+    """Minimum central thickness keeping edge thickness ≥ `min_edge_margin`.
+
+    For a biconvex lens the edge sits inward of both vertices; the central
+    thickness must exceed the sum of front and back sags so the edges don't
+    cross. Returns the minimum central thickness in the same units as
+    half_diameter.
+    """
+    sag_front = _surface_sag(R_front, half_diameter) if R_front > 0 else 0.0
+    sag_back = _surface_sag(R_back, half_diameter) if R_back < 0 else 0.0
+    return sag_front + sag_back + min_edge_margin
+
+
 class Lens(ABC):
     """Abstract base class for all lens types.
 
@@ -179,7 +210,10 @@ class SphericalLens(Lens):
 
     def _refractive_index(self, wavelength_nm: float) -> float:
         return refractive_index_cauchy(
-            wavelength_nm, self._glass_coeffs["B"], self._glass_coeffs["C"]
+            wavelength_nm,
+            self._glass_coeffs["B"],
+            self._glass_coeffs["C"],
+            self._glass_coeffs.get("D", 0.0),
         )
 
     def _sphere_intersect(self, ray: Ray, sphere_center: np.ndarray | None,
@@ -466,6 +500,15 @@ class AchromaticDoublet:
             r_interface *= scale
             r3_flint *= scale
 
+        # Bump thicknesses if surface sag would make edge thickness negative
+        # (otherwise edge rays miss the back surface and the trace fails)
+        half_d = self.radius
+        thickness_crown = max(thickness_crown,
+                               _min_safe_thickness(r1_crown, r_interface, half_d))
+        thickness_flint = max(thickness_flint,
+                               _min_safe_thickness(r_interface, r3_flint, half_d))
+        self.thickness = thickness_crown + thickness_flint
+
         # Store final radii
         self._r1 = r1_crown
         self._r_interface = r_interface
@@ -492,12 +535,14 @@ class AchromaticDoublet:
         return refractive_index_cauchy(
             wavelength_nm, self._crown_coeffs["B"],
             self._crown_coeffs["C"],
+            self._crown_coeffs.get("D", 0.0),
         )
 
     def _n_flint(self, wavelength_nm: float) -> float:
         return refractive_index_cauchy(
             wavelength_nm, self._flint_coeffs["B"],
             self._flint_coeffs["C"],
+            self._flint_coeffs.get("D", 0.0),
         )
 
     def refract_ray(self, ray: Ray, wavelength_nm: float | None = None) -> bool:

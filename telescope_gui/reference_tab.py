@@ -39,13 +39,64 @@ eyepiece at the rear.</p>
 </ul>
 
 <h3>Refractor</h3>
-<p>Uses a <b>glass objective lens</b> (singlet, achromat, or apochromatic
-doublet/triplet) at the front of the tube to bring light to focus at the rear.</p>
+<p>Uses a <b>glass objective lens</b> at the front of the tube to bring light
+to focus at the rear. Four objective designs are modelled, each attacking
+chromatic aberration with progressively more glass elements and more exotic
+materials:</p>
+
+<table cellpadding="4" cellspacing="0" style="border-collapse:collapse; margin-top:6px;">
+<tr style="background:#e0e0e0;">
+  <th align="left" style="padding:4px 8px;">Design</th>
+  <th align="left" style="padding:4px 8px;">Construction</th>
+  <th align="left" style="padding:4px 8px;">How it reduces chromatic</th>
+  <th align="left" style="padding:4px 8px;">Residual focal-shift</th>
+</tr>
+<tr>
+  <td style="padding:4px 8px;"><i>Singlet</i></td>
+  <td style="padding:4px 8px;">Single lens, typically BK7 crown glass.</td>
+  <td style="padding:4px 8px;">No correction. The Cauchy dispersion of BK7 sends
+    red light to a longer focus than blue.</td>
+  <td style="padding:4px 8px;">~f / 100 between F (486 nm) and C (656 nm).</td>
+</tr>
+<tr style="background:#f5f5f5;">
+  <td style="padding:4px 8px;"><i>Achromat</i></td>
+  <td style="padding:4px 8px;">Cemented doublet: BK7 crown + F2 flint. The two
+    glasses have opposite dispersion slopes.</td>
+  <td style="padding:4px 8px;">Surface curvatures are chosen so the F-line and
+    C-line meet at a common focus. The middle (d-line, 587 nm) sits at a slightly
+    different focus &mdash; the <i>secondary spectrum</i>.</td>
+  <td style="padding:4px 8px;">~f / 2500 residual secondary spectrum.</td>
+</tr>
+<tr>
+  <td style="padding:4px 8px;"><i>APO doublet</i></td>
+  <td style="padding:4px 8px;">FPL51 ED (extra-low-dispersion) glass + matching
+    crown, cemented.</td>
+  <td style="padding:4px 8px;">The ED glass has anomalous partial dispersion that
+    flattens the focal curve. F, d, and C meet within a much tighter envelope.</td>
+  <td style="padding:4px 8px;">~f / 8000 residual.</td>
+</tr>
+<tr style="background:#f5f5f5;">
+  <td style="padding:4px 8px;"><i>APO triplet</i></td>
+  <td style="padding:4px 8px;">Three elements (ED + flint + ED) in an air-spaced
+    cell, with synthetic-fluorite or higher-grade ED glass.</td>
+  <td style="padding:4px 8px;">Three free design degrees of freedom let the
+    designer flatten the focal curve across the entire visible band. Approaches
+    a diffraction-limited image at all wavelengths.</td>
+  <td style="padding:4px 8px;">~f / 20000 residual.</td>
+</tr>
+</table>
+
+<p style="margin-top:8px;">The chromatic-aberration tutorial scenario uses these
+same residual focal-shift coefficients (see <i>Implemented Physics</i>
+&rarr; Chromatic aberration) so the rendered halo sizes match the textbook
+performance of each design class.</p>
+
 <ul>
-  <li><b>Pros:</b> No obstruction, sharp high-contrast images, low maintenance,
-      sealed tube.</li>
-  <li><b>Cons:</b> Chromatic aberration (especially singlets), heavy and
-      expensive at large apertures.</li>
+  <li><b>Pros:</b> No central obstruction or diffraction spikes from a spider, sharp
+      high-contrast images, low maintenance, sealed tube.</li>
+  <li><b>Cons:</b> Chromatic aberration (severe in singlets, residual in
+      achromats, near-zero in apos). Glass elements get heavy and expensive at
+      large apertures &mdash; 150 mm is a common practical limit.</li>
 </ul>
 
 <h3>Maksutov-Cassegrain</h3>
@@ -164,6 +215,26 @@ alignment or aberration issues.</p>
 telescope. The ideal source image is convolved with the telescope's PSF
 (including diffraction, aberrations, and obstruction effects) to produce a
 realistic view.</p>
+<p><b>Pixel meaning &amp; detector binning.</b> Each displayed pixel
+represents the integrated flux a detector pixel of that angular size would
+record &mdash; the total photons falling within the pixel's angular area,
+not a sample of the underlying continuous image. Two paths support this:</p>
+<ul>
+<li><i>Star sources</i> (PointSource, StarField, DoubleStar): rendered
+directly at the display resolution. A sub-pixel Airy disk records as one
+bright pixel (all photons in one detector cell) instead of being spread
+thinly across many pixels.</li>
+<li><i>Extended sources</i> (Jupiter, Saturn, Moon): rendered internally at
+higher resolution for accurate PSF convolution against their fine surface
+texture, then <i>sum-binned</i> to the display resolution before
+normalisation. Sum-binning conserves total flux per output pixel &mdash;
+the physically-correct downsample. Averaging (matplotlib's default
+bilinear interpolation) would dilute sub-pixel features and break flux
+conservation.</li>
+</ul>
+<p>Display modes (linear/asinh/asinh+eye-blur) operate on this same binned
+array; they alter only how pixel values are mapped to screen brightness,
+not the simulated photon counts.</p>
 
 <h3>PSF &mdash; 1D Profile</h3>
 <p>Radial cross-section of the Point Spread Function. Shows the Airy pattern:
@@ -306,14 +377,26 @@ vanes as half-strip obstructions.</i></p>
 <h3>4. Chromatic Aberration</h3>
 <p>Glass dispersion (wavelength-dependent refractive index) causes different
 wavelengths to focus at different distances. Severity depends on the objective
-design:</p>
+design &mdash; see <i>Telescope Types &rarr; Refractor</i> for the construction
+of each design class. The simulation models each with a different magnitude of
+residual focal shift:</p>
 <ul>
-  <li><b>Singlet:</b> severe; focal shift &prop; &lambda;<sup>&minus;2</sup></li>
-  <li><b>Achromat:</b> two wavelengths brought to the same focus (typically
-      red &amp; blue); residual &ldquo;secondary spectrum&rdquo; remains</li>
-  <li><b>APO:</b> three or more wavelengths corrected; near
-      diffraction-limited across the visible band</li>
+  <li><b>Singlet:</b> severe; focal shift follows the Cauchy index curve of BK7
+      directly (no correction). F&ndash;C span ≈ f / 100.</li>
+  <li><b>Achromat (BK7+F2 doublet):</b> the doublet brings F (486 nm) and C
+      (656 nm) to a common focus, leaving a parabolic residual &ldquo;secondary
+      spectrum&rdquo; with peak amplitude ≈ f / 2500 at the F&ndash;C midpoint.</li>
+  <li><b>APO doublet (ED + crown):</b> the anomalous partial dispersion of the
+      ED glass collapses the residual to ≈ f / 8000.</li>
+  <li><b>APO triplet (ED + flint + ED, air-spaced):</b> three free degrees of
+      freedom drive the residual to ≈ f / 20000 &mdash; below the diffraction
+      limit at typical apertures.</li>
 </ul>
+<p>The defocus shift is converted to a per-wavelength PSF kernel by
+convolving the wavelength-scaled Airy disk with the geometric defocus disk
+(radius = |&Delta;f| / 2F). For severe defocus this gives a flat-topped uniform
+disc (the geometric-optics limit); for mild defocus it approaches an Airy
+pattern with reduced peak.</p>
 <p><b>Sellmeier equation</b> (full form used in real glass design):</p>
 <p style="font-family:monospace; margin-left:20px;">
 n&sup2;(&lambda;) = 1 + &sum;<sub>i</sub> B<sub>i</sub>&lambda;&sup2; /

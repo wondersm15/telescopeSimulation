@@ -106,6 +106,12 @@ class ScenarioDefinition:
     # Whether this scenario is fully implemented (False = placeholder "coming soon")
     implemented: bool = False
 
+    # Which telescope class the demonstrated physics applies to.
+    # "refractor" — applies only to refractors (e.g., chromatic aberration)
+    # "reflector" — applies only to reflectors / catadioptric (e.g., spider vanes)
+    # "both"      — geometry-driven, applies to any aperture (e.g., diffraction)
+    applies_to: str = "both"
+
     # Python API terminal command template (use {param} placeholders)
     terminal_template: str = ""
 
@@ -123,11 +129,11 @@ _OBSTRUCTED_200MM = TelescopeConfig(
     enable_obstruction=True, obstruction_ratio=0.30, spider_vanes=0,
 )
 _SPIDER_200MM = TelescopeConfig(
-    telescope_type="Newtonian", diameter=200.0, focal_length=1000.0,
+    telescope_type="Newtonian", diameter=200.0, focal_length=800.0,  # f/4 — coma visible on edge stars
     enable_obstruction=True, obstruction_ratio=0.20, spider_vanes=4, spider_vane_width=2.0,
 )
 _FAST_200MM = TelescopeConfig(
-    telescope_type="Newtonian", diameter=200.0, focal_length=800.0,  # f/4
+    telescope_type="Newtonian", diameter=200.0, focal_length=600.0,  # f/3
     enable_obstruction=True, obstruction_ratio=0.20, spider_vanes=0,
 )
 _SLOW_200MM = TelescopeConfig(
@@ -171,13 +177,15 @@ SCENARIOS: list[ScenarioDefinition] = [
     # ------------------------------------------------------------------
 
     ScenarioDefinition(
-        id="airy_disk",
+        id="airy_disk", applies_to="both",
         title="Airy Disk",
         act=1, act_label="Isolated Effects",
         description=(
             "A circular aperture diffracts light into a central bright disk surrounded by "
-            "concentric rings — the Airy pattern. The first dark ring radius is exactly "
-            "1.22\u03bb/D. Increase aperture to see the rings shrink; decrease to see them grow."
+            "concentric rings — the Airy pattern. The angular radius of the first dark "
+            "ring is 1.22\u03bb/D — it depends only on aperture and wavelength, not "
+            "on focal length (focal length only sets the mm scale at the focal plane). "
+            "Scale context: 1″ ≈ a US quarter at 5 km; typical seeing 1–4″."
         ),
         learn_more_section="Diffraction",
         before_telescope=_CLEAN_200MM,
@@ -188,7 +196,7 @@ SCENARIOS: list[ScenarioDefinition] = [
         after_label="Adjust aperture \u2192",
         plot_function="plot_psf_2d",
         theory_function="compute_airy_disk_theory",
-        tweakable_params=("diameter", "focal_length"),
+        tweakable_params=("diameter",),
         implemented=True,
         terminal_template=(
             "from telescope_sim.geometry import NewtonianTelescope\n"
@@ -203,14 +211,15 @@ SCENARIOS: list[ScenarioDefinition] = [
     ),
 
     ScenarioDefinition(
-        id="rayleigh_criterion",
+        id="rayleigh_criterion", applies_to="both",
         title="Rayleigh Criterion",
         act=1, act_label="Isolated Effects",
         description=(
             "Two stars separated by the same angle look different through different apertures. "
             "The Rayleigh limit 1.22\u03bb/D sets the minimum resolvable separation. A 100\u202fmm scope "
             "needs 1.38\u2033 to resolve; a 200\u202fmm scope needs only 0.69\u2033. Drag the slider to see "
-            "both sides update simultaneously."
+            "both sides update simultaneously. "
+            "Scale context: easy doubles ≈ 5\u2033; tough planetary doubles \u2248 1\u2033; typical seeing 1\u20134\u2033 \u2014 atmosphere often dominates."
         ),
         learn_more_section="Diffraction",
         before_telescope=TelescopeConfig(
@@ -247,7 +256,7 @@ SCENARIOS: list[ScenarioDefinition] = [
     ),
 
     ScenarioDefinition(
-        id="central_obstruction",
+        id="central_obstruction", applies_to="reflector",
         title="Central Obstruction",
         act=1, act_label="Isolated Effects",
         description=(
@@ -285,7 +294,7 @@ SCENARIOS: list[ScenarioDefinition] = [
     ),
 
     ScenarioDefinition(
-        id="spider_vanes",
+        id="spider_vanes", applies_to="reflector",
         title="Spider Vane Diffraction",
         act=1, act_label="Isolated Effects",
         description=(
@@ -319,26 +328,45 @@ SCENARIOS: list[ScenarioDefinition] = [
     ),
 
     ScenarioDefinition(
-        id="chromatic_aberration",
+        id="chromatic_aberration", applies_to="refractor",
         title="Chromatic Aberration",
         act=1, act_label="Isolated Effects",
         description=(
-            "A singlet lens refracts different wavelengths to different focal points, producing "
-            "colour fringing. An achromatic doublet brings two wavelengths to the same focus, "
-            "dramatically reducing fringing. Switch objective type to compare."
+            "A simple glass lens refracts blue light more strongly than red, so the "
+            "three colours focus at slightly different distances. The inset shows the "
+            "focal spread (R/G/B stars) along the optical axis. Four objective designs "
+            "to compare:\n"
+            " \u2022 Singlet (one BK7 lens): worst case \u2014 focal spread scales with aperture "
+            "and inversely with f-ratio; bright stars show vivid colour halos.\n"
+            " \u2022 Achromat (BK7 + F2 cemented doublet): two wavelengths brought to the "
+            "same focus; ~25\u00d7 smaller residual chromatic than a singlet.\n"
+            " \u2022 APO doublet (FPL51 ED + BK7 cemented): three wavelengths very nearly "
+            "coincident; ~80\u00d7 smaller than a singlet.\n"
+            " \u2022 APO triplet (ED + flint + ED, air-spaced): full apochromatic "
+            "correction across the visible band; ~200\u00d7 smaller residual.\n"
+            "Try changing the f-ratio (focal length) \u2014 chromatic blur scales as 1/F, "
+            "so a slow scope tames the same glass.\n"
+            "Note: the singlet ray trace also shows spherical aberration \u2014 within a "
+            "single colour, marginal rays cross the axis closer to the lens than "
+            "paraxial rays, so same-colour rays do not all converge to one point. A "
+            "spherical singlet has both CA and SA; the achromat reduces both; the APO "
+            "models here are idealised to zero SA so only CA remains visible."
         ),
         learn_more_section="Chromatic Aberration",
         before_telescope=_SINGLET_100MM_F5,
         before_source=_POINT,
         before_polychromatic=True,
-        before_label="Singlet 100mm f/5",
+        before_label="Singlet 100mm f/5 (reference)",
         after_telescope=_SINGLET_100MM_F5,
         after_source=_POINT,
         after_polychromatic=True,
-        after_label="Adjust objective \u2192",
+        after_label="Focal-plane image at each colour \u2192",
         plot_function="plot_polychromatic_ray_trace",
+        secondary_plot_function="plot_chromatic_focal_planes",
         theory_function=None,
-        tweakable_params=("objective_type",),
+        tweakable_params=("objective_type", "focal_length"),
+        both_sides_dynamic=True,
+        before_telescope_dynamic=True,
         implemented=True,
         terminal_template=(
             "from telescope_gui.telescope_builder import build_telescope\n"
@@ -353,14 +381,23 @@ SCENARIOS: list[ScenarioDefinition] = [
     ),
 
     ScenarioDefinition(
-        id="vignetting",
+        id="vignetting", applies_to="reflector",
         title="Vignetting",
         act=1, act_label="Isolated Effects",
         description=(
-            "Off-axis light in a Newtonian is clipped by the secondary mirror. Below "
-            "the fully-illuminated field angle the on-axis light cone is unobstructed; "
-            "beyond it, illumination falls smoothly toward zero at the 50% edge. "
-            "Adjust aperture and focal length to see how f-ratio shifts the curve."
+            "Stars away from the optical axis send their light cone into the telescope "
+            "at an angle. After bouncing off the primary mirror this converging cone is "
+            "laterally offset from the optical axis \u2014 if the offset exceeds the "
+            "secondary mirror's clear aperture, part of the cone is clipped and that "
+            "star is dimmed. Three things set the falloff: secondary mirror size "
+            "(obstruction ratio), distance from primary to secondary (focal length), "
+            "and the primary's diameter. Note: a LARGER secondary mirror reduces "
+            "vignetting (catches more of the off-axis cone) but INCREASES "
+            "the central-obstruction contrast loss — telescope designers balance "
+            "these. Below the fully-illuminated field angle "
+            "\u03b8_fif the on-axis cone is unobstructed; beyond it, illumination falls "
+            "smoothly toward zero at the 50% edge. Adjust the parameters to see how "
+            "each shifts the curve."
         ),
         learn_more_section="Vignetting",
         before_telescope=_SPIDER_200MM,
@@ -368,10 +405,10 @@ SCENARIOS: list[ScenarioDefinition] = [
         before_label="200 mm f/5 baseline",
         after_telescope=_SPIDER_200MM,
         after_source=_POINT,
-        after_label="Adjust aperture / focal length \u2192",
+        after_label="Adjust aperture / f / obstruction \u2192",
         plot_function="plot_vignetting_curve",
         theory_function="compute_vignetting_theory",
-        tweakable_params=("diameter", "focal_length"),
+        tweakable_params=("diameter", "focal_length", "obstruction_ratio"),
         both_sides_dynamic=True,
         before_telescope_dynamic=False,
         implemented=True,
@@ -394,7 +431,7 @@ SCENARIOS: list[ScenarioDefinition] = [
     ),
 
     ScenarioDefinition(
-        id="spherical_aberration",
+        id="spherical_aberration", applies_to="reflector",
         title="Spherical Aberration",
         act=1, act_label="Isolated Effects",
         description=(
@@ -422,7 +459,7 @@ SCENARIOS: list[ScenarioDefinition] = [
         plot_function="plot_psf_profile",
         secondary_plot_function="plot_spot_diagram_telescope",
         theory_function="compute_spherical_aberration_theory",
-        tweakable_params=("focal_length", "primary_type"),
+        tweakable_params=("diameter", "focal_length", "primary_type"),
         both_sides_dynamic=True,
         before_telescope_dynamic=True,
         show_psf_toggle=False,
@@ -454,7 +491,7 @@ SCENARIOS: list[ScenarioDefinition] = [
     # ------------------------------------------------------------------
 
     ScenarioDefinition(
-        id="obstruction_plus_spiders",
+        id="obstruction_plus_spiders", applies_to="reflector",
         title="Obstruction + Spider Vanes",
         act=2, act_label="Compounding Effects",
         description=(
@@ -490,22 +527,51 @@ SCENARIOS: list[ScenarioDefinition] = [
     ),
 
     ScenarioDefinition(
-        id="chromatic_plus_seeing",
+        id="chromatic_plus_seeing", applies_to="refractor",
         title="Chromatic Aberration + Seeing",
         act=2, act_label="Compounding Effects",
         description=(
-            "Atmospheric seeing blurs the image on scales that can mask chromatic fringing. "
-            "Under excellent seeing the colour fringes are visible; under poor seeing they "
-            "wash out. This shows when chromatic aberration actually matters in practice."
+            "Five stars with realistic spectral colours (M-type red giant, "
+            "K-type orange, G-type yellow Sun, A-type blue-white, B-type "
+            "deep blue) seen through an 80 mm f/8 achromat under good "
+            "1.5″ atmospheric seeing.\n\n"
+            "F and C are the Fraunhofer spectral lines — F = hydrogen Hβ "
+            "at 486 nm (blue), C = hydrogen Hα at 656 nm (red). A classical "
+            "achromat is *defined* by bringing F and C to a common focal "
+            "plane; the small remaining shift at G/d (550-587 nm) is the "
+            "secondary spectrum.\n\n"
+            "FOCAL-PLANE CHOICE matters: the 'Focus at' combo picks WHICH "
+            "wavelength is sharp at the center, which controls the halo color.\n"
+            " • G / design (550 nm) — default. Where amateur observers "
+            "'snap to focus' an achromat (peak eye sensitivity). Sharp green "
+            "core + the classic VIOLET HALO from defocused F and C.\n"
+            " • F=C plane — the focal plane where F and C converge in an "
+            "achromat. R and B sharp, G defocused → GREEN HALO around "
+            "the core. By design, chromatic_defocus(F) ≡ chromatic_defocus(C) "
+            "for an achromat — so R, B, and F=C are IDENTICAL choices for "
+            "an achromat. (Greyed out for a singlet, where F and C lie on "
+            "different focal planes.)\n\n"
+            "VIEW: Detector shows raw per-pixel CCD intensity (G core "
+            "dominates when focused at G because G is concentrated by the "
+            "in-focus Airy peak while F/C are spread thin over the chromatic "
+            "disk). Eye applies the eye's logarithmic intensity response so "
+            "dim halos are visible. Eye + integration adds 1″ spatial "
+            "integration matching eye resolution at a moderate eyepiece — "
+            "the chromatic disk mixes into the perceived core, producing "
+            "the white-cored, violet-haloed star image observers describe.\n\n"
+            "Toggle the objective to see singlet (huge chromatic), achromat "
+            "(secondary spectrum residual), APO doublet (3 wavelengths "
+            "corrected), and APO triplet (near diffraction-limited)."
         ),
         learn_more_section="Chromatic Aberration",
-        before_telescope=_SINGLET_80MM,
-        before_source=_POINT,
+        before_telescope=_ACHROMAT_80MM,
+        before_source=SourceConfig(source_type="MultiColorStarField"),
+        before_seeing_arcsec=1.5,
         before_polychromatic=True,
-        before_label="No seeing (space)",
-        after_telescope=_SINGLET_80MM,
-        after_source=_POINT,
-        after_seeing_arcsec=2.5,
+        before_label="Achromat, 1.5″ seeing",
+        after_telescope=_ACHROMAT_80MM,
+        after_source=SourceConfig(source_type="MultiColorStarField"),
+        after_seeing_arcsec=1.5,
         after_polychromatic=True,
         after_label="With seeing \u2192",
         plot_function="plot_source_image",
@@ -532,7 +598,7 @@ SCENARIOS: list[ScenarioDefinition] = [
     ),
 
     ScenarioDefinition(
-        id="aperture_vs_seeing",
+        id="aperture_vs_seeing", applies_to="both",
         title="Aperture vs Seeing",
         act=2, act_label="Compounding Effects",
         description=(
@@ -582,22 +648,40 @@ SCENARIOS: list[ScenarioDefinition] = [
     ),
 
     ScenarioDefinition(
-        id="fratio_coma",
+        id="fratio_coma", applies_to="reflector",
         title="f-ratio and Coma",
         act=2, act_label="Compounding Effects",
         description=(
-            "Coma is comet-shaped off-axis blur; the coma-free field scales as f\u00b2, "
-            "so halving the f-ratio shrinks the usable field by 4\u00d7. The left panel "
-            "shows a spot-diagram grid across the field; the right panel shows a real "
-            "star field through the same scope so you can see comatic stars at the edges."
+            "Coma is comet-shaped off-axis blur; angular coma scales as 1/f\u00b2, so a "
+            "fast scope (small f-ratio) suffers \u2014 the coma-free field shrinks as f\u00b2. "
+            "Default: 200 mm f/3 (a fast Newtonian where coma is dramatic at the edges), "
+            "1.5\u2033 \u2018good\u2019 atmospheric seeing. Left panel shows a spot-diagram grid "
+            "across the field at 0/30/60/120 arcsec off-axis; the right panel shows "
+            "the same field as colored points so you can see comatic stars near the edge. "
+            "Field-angle context: 120\u2033 = 2 arcmin \u2248 the corner of a typical eyepiece "
+            "view at high magnification (a 50\u00b0 AFOV eyepiece at 150\u00d7 shows 20 arcmin TFOV, "
+            "so 120\u2033 is 20% of the field radius). The right-panel reference circles mark "
+            "(a) the coma-free zone cff = 1.22 \u03bb F\u00b2/D (where \u03c3_coma equals the Airy radius) "
+            "and (b) 10\u00d7 cff where the comatic blur is 10\u00d7 the Airy disk. Try slowing the "
+            "scope (raise the focal length) \u2014 coma shrinks rapidly and stars round up."
         ),
         learn_more_section="Coma",
         before_telescope=_FAST_200MM,
         before_source=_POINT,
         before_label="Coma spot grid",
         after_telescope=_FAST_200MM,
-        after_source=SourceConfig(source_type="TutorialStarField"),
-        after_label="Star field through same scope \u2192",
+        after_source=SourceConfig(
+            source_type="ComaDemoField",
+            kwargs={"field_radius_arcsec": 150.0},
+        ),
+        # Seeing 1.5\u2033 \u2014 "good seeing" for an amateur site. Coma at the
+        # outermost spot (240\u2033 off-axis, f/3) is ~1.2\u2033 RMS with a ~3-4\u2033
+        # visible spot extent \u2014 larger than the seeing FWHM, so comatic
+        # elongation reads through the atmosphere. (At f/4 with 5\u2033 seeing
+        # in the old default, coma was 7\u00d7 smaller than seeing and stars
+        # looked perfectly circular.)
+        after_seeing_arcsec=1.5,
+        after_label="Star field \u2014 same field angles as spot grid \u2192",
         plot_function="plot_coma_field_analysis",
         secondary_plot_function="plot_source_image",
         theory_function="compute_coma_fratio_theory",
@@ -621,7 +705,7 @@ SCENARIOS: list[ScenarioDefinition] = [
     # ------------------------------------------------------------------
 
     ScenarioDefinition(
-        id="jupiter_full",
+        id="jupiter_full", applies_to="reflector",
         title="Jupiter Full Simulation",
         act=3, act_label="Real Objects",
         description=(
@@ -668,7 +752,7 @@ SCENARIOS: list[ScenarioDefinition] = [
     ),
 
     ScenarioDefinition(
-        id="saturn_rings",
+        id="saturn_rings", applies_to="reflector",
         title="Saturn with Rings",
         act=3, act_label="Real Objects",
         description=(
@@ -715,7 +799,7 @@ SCENARIOS: list[ScenarioDefinition] = [
     ),
 
     ScenarioDefinition(
-        id="starfield_resolution",
+        id="starfield_resolution", applies_to="reflector",
         title="Star Field Resolution",
         act=3, act_label="Real Objects",
         description=(
@@ -729,7 +813,13 @@ SCENARIOS: list[ScenarioDefinition] = [
         before_source=_POINT,
         before_label="Single star \u2014 PSF detail",
         after_telescope=_SPIDER_200MM,
-        after_source=SourceConfig(source_type="TutorialStarField"),
+        after_source=SourceConfig(
+            source_type="StarFieldResolutionField",
+            kwargs={"field_radius_arcsec": 300.0},
+        ),
+        # 1.5\u2033 "good seeing". Narrow enough that the global normalisation
+        # by intrinsic peak keeps stars bright; the f/4 scope makes edge
+        # coma visible without atmospheric blur swamping it.
         after_seeing_arcsec=1.5,
         after_label="Star field \u2014 population effects \u2192",
         plot_function="plot_source_image",

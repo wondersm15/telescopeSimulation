@@ -77,8 +77,11 @@ class PointSource(AstronomicalSource):
 
     @property
     def field_extent_arcsec(self) -> float:
+        # 20″ default for on-axis source — wider than 10″ to give the
+        # Eye-view asinh stretch room to reveal Airy-ring structure and
+        # diffraction-spike falloff without saturating.
         if self.field_angle_arcsec < 1.0:
-            return 10.0
+            return 20.0
         return self.field_angle_arcsec * 2.5
 
 
@@ -184,51 +187,233 @@ class StarField(AstronomicalSource):
 class TutorialStarField(StarField):
     """Deterministic star field for tutorial demonstrations.
 
-    Stars placed at known field angles to highlight specific effects:
-      - 1 mag-0 star on-axis (resolution / PSF reference)
-      - 8 mag-1.5 stars at r=50″ (mid-field; mild coma, no vignetting)
-      - 4 mag-2.5 stars at r=150″ (edge; strong coma + onset of vignetting)
-      - 2 close pairs near centre (1.0″ and 0.5″ separation; resolution test)
+    Stars are placed at known field angles to highlight specific effects:
+      - 1 bright on-axis star (resolution / PSF reference)
+      - 2 close pairs (1.0″ and 0.5″) — resolution test
+      - 8 mid-field stars at r=50″ (mild coma, full illumination)
+      - 8 edge stars at r=150″ (strong coma + onset of vignetting)
+      - 4 prominent bright stars near each cardinal direction at the edge,
+        magnitude 0.0 — so coma blur on bright stars is unmistakable
+
+    Magnitudes are chosen so the dimmest star is ~50% of the brightest's
+    intensity (peak normalisation makes anything dimmer than ~0.05 nearly
+    invisible against a black background).
 
     Same render path as StarField — just deterministic positions.
     """
 
-    def __init__(self, field_radius_arcsec: float = 200.0):
+    def __init__(self, field_radius_arcsec: float = 100.0):
         # Bypass StarField's random init by setting attributes directly
         self.field_radius_arcsec = field_radius_arcsec
         self.seed = 0
-        self.magnitude_range = (0.0, 3.0)
+        self.magnitude_range = (-0.5, 1.5)
+
+        # Position scales: stars at 33% and 75% of the field radius
+        r_mid = field_radius_arcsec * 0.33
+        r_edge = field_radius_arcsec * 0.75
+        r_edge_bright = field_radius_arcsec * 0.80
+        # Close-pair offset and separations are small but not vanishing
+        pair_y = max(field_radius_arcsec * 0.05, 4.0)
+        sep_1 = max(field_radius_arcsec * 0.008, 0.5)
+        sep_2 = max(field_radius_arcsec * 0.004, 0.25)
 
         xs: list[float] = []
         ys: list[float] = []
         mags: list[float] = []
 
-        # On-axis bright star
-        xs.append(0.0); ys.append(0.0); mags.append(0.0)
+        # On-axis bright reference star (the brightest in the field)
+        xs.append(0.0); ys.append(0.0); mags.append(-0.5)
 
-        # Close pairs near centre to probe resolution
-        for sep in (1.0, 0.5):
-            xs.append(-sep / 2.0); ys.append(0.0); mags.append(2.0)
-            xs.append(+sep / 2.0); ys.append(0.0); mags.append(2.0)
-        # Stack the resolution pairs slightly off-axis vertically so they
-        # don't overlap the on-axis star
-        ys[-4] = -8.0; ys[-3] = -8.0
-        ys[-2] = +8.0; ys[-1] = +8.0
+        # Close pairs to probe resolution — placed off-axis vertically so
+        # they don't overlap the on-axis star.
+        xs.append(-sep_1); ys.append(+pair_y); mags.append(0.5)
+        xs.append(+sep_1); ys.append(+pair_y); mags.append(0.5)
+        xs.append(-sep_2); ys.append(-pair_y); mags.append(0.5)
+        xs.append(+sep_2); ys.append(-pair_y); mags.append(0.5)
 
-        # Mid-field ring at r=50″, 8 stars at 45° spacing
+        # Mid-field ring (8 stars at 45° spacing)
         for k in range(8):
             angle = k * np.pi / 4
-            xs.append(50.0 * np.cos(angle))
-            ys.append(50.0 * np.sin(angle))
-            mags.append(1.5)
+            xs.append(r_mid * np.cos(angle))
+            ys.append(r_mid * np.sin(angle))
+            mags.append(0.8)
 
-        # Edge ring at r=150″, 4 stars at cardinal directions
+        # Edge ring (8 stars at 45° spacing)
+        for k in range(8):
+            angle = k * np.pi / 4
+            xs.append(r_edge * np.cos(angle))
+            ys.append(r_edge * np.sin(angle))
+            mags.append(1.0)
+
+        # 4 prominent bright stars near edges along cardinal directions —
+        # offset slightly from the regular ring so they don't overlap.
         for k in range(4):
-            angle = k * np.pi / 2
-            xs.append(150.0 * np.cos(angle))
-            ys.append(150.0 * np.sin(angle))
-            mags.append(2.5)
+            angle = k * np.pi / 2 + np.pi / 8
+            xs.append(r_edge_bright * np.cos(angle))
+            ys.append(r_edge_bright * np.sin(angle))
+            mags.append(0.0)  # As bright as on-axis
 
+        self.star_x_arcsec = np.array(xs)
+        self.star_y_arcsec = np.array(ys)
+        self.star_magnitudes = np.array(mags)
+        self.num_stars = len(xs)
+
+
+class StarFieldResolutionField(StarField):
+    """Wide-field star field designed for the Star Field Resolution scenario.
+
+    Combines a seeded-random background population with planted features
+    that test the population-effects the scenario teaches:
+
+      - 1 bright on-axis reference star (mag 0).
+      - 4 close pairs at separations 0.6/0.9/1.3/1.8″ — straddling the
+        Rayleigh limit for a typical 200 mm aperture so the user can see
+        which pairs the scope resolves.
+      - 5 bright edge stars (mag 0.5–1.5) at 80% of the field radius,
+        placed at non-cardinal angles so the user sees coma and vignetting
+        dim them differently.
+      - ~70 background stars uniformly distributed in area with magnitudes
+        1.5–5.0, seeded for reproducibility.
+
+    Total ≈ 84 stars across the configured field (default 600″ extent).
+    """
+
+    def __init__(self, field_radius_arcsec: float = 300.0,
+                 num_background: int = 70,
+                 seed: int = 17):
+        # Bypass StarField's random-init constructor and place stars directly
+        self.field_radius_arcsec = field_radius_arcsec
+        self.seed = seed
+        # Magnitudes span ~3.5 stops (-1 to 2.5). After peak-normalising
+        # to the brightest star, the dimmest is ~4% — still visible
+        # against black, while preserving a clear bright/dim variation.
+        # Wider ranges drive the faint end below the rasterisation
+        # noise floor.
+        self.magnitude_range = (-1.0, 2.5)
+
+        xs: list[float] = []
+        ys: list[float] = []
+        mags: list[float] = []
+
+        # On-axis reference — brightest in the field so it dominates the
+        # peak normalisation and the rest of the field is properly scaled
+        # against it.
+        xs.append(0.0); ys.append(0.0); mags.append(-1.0)
+
+        # Close pairs at increasing separation — straddles the Rayleigh
+        # limit for D=100–300 mm at 550 nm (~0.5–1.5″). Bright enough
+        # (mag ~0.5) to be clearly visible against the saturated
+        # on-axis reference.
+        pair_positions = [
+            (60.0,  70.0,  0.6),   # tight
+            (-80.0, 50.0,  0.9),   # near 200 mm Rayleigh limit
+            (90.0, -55.0,  1.3),
+            (-65.0, -85.0, 1.8),   # easily split
+        ]
+        for cx, cy, sep in pair_positions:
+            xs.append(cx - sep / 2.0); ys.append(cy); mags.append(0.5)
+            xs.append(cx + sep / 2.0); ys.append(cy); mags.append(0.8)
+
+        # Bright edge stars — non-cardinal so coma's astigmatic
+        # orientation is visible at multiple angles.
+        r_edge = field_radius_arcsec * 0.80
+        edge_angles_deg = [25, 95, 155, 220, 305]
+        edge_mags = [0.0, 0.8, 0.3, 1.0, 0.5]
+        for ang_deg, mg in zip(edge_angles_deg, edge_mags):
+            ang = np.radians(ang_deg)
+            xs.append(r_edge * np.cos(ang))
+            ys.append(r_edge * np.sin(ang))
+            mags.append(mg)
+
+        # Background population — uniform in area, seeded random.
+        # Variable brightness spans the dim end of the range so the
+        # population has a clear bright/dim distribution (avoids the
+        # "every star same brightness" look).
+        rng = np.random.default_rng(seed)
+        r_bg = field_radius_arcsec * np.sqrt(rng.uniform(0, 1, num_background))
+        theta_bg = rng.uniform(0, 2 * np.pi, num_background)
+        mag_bg = rng.uniform(1.2, 2.5, num_background)
+        for r, t, m in zip(r_bg, theta_bg, mag_bg):
+            xs.append(r * np.cos(t))
+            ys.append(r * np.sin(t))
+            mags.append(float(m))
+
+        self.star_x_arcsec = np.array(xs)
+        self.star_y_arcsec = np.array(ys)
+        self.star_magnitudes = np.array(mags)
+        self.num_stars = len(xs)
+
+
+class ComaDemoField(StarField):
+    """Four stars at the exact field angles used by the coma spot grid.
+
+    The companion `plot_coma_field_analysis` plot samples spot diagrams
+    at 0″, 60″, 120″, 240″. This source places one star at each of those
+    angles along the east axis, so the user can read the comet-shaped
+    blur on each star and match it to the corresponding spot panel.
+
+    `field_radius_arcsec` defaults to 280″ to keep the 240″ outermost
+    star a comfortable distance from the rendered field edge.
+    """
+
+    DEMO_ANGLES_ARCSEC = (0.0, 30.0, 60.0, 120.0)
+
+    def __init__(self, field_radius_arcsec: float = 150.0):
+        self.field_radius_arcsec = field_radius_arcsec
+        self.seed = 0
+        # Bright (mag -1.0) so the small Airy disks are clearly visible
+        # at the 560″ FOV without any auxiliary markers/labels.
+        self.magnitude_range = (-1.0, -1.0)
+        xs = list(self.DEMO_ANGLES_ARCSEC)
+        ys = [0.0] * len(xs)
+        mags = [-1.0] * len(xs)
+        self.star_x_arcsec = np.array(xs)
+        self.star_y_arcsec = np.array(ys)
+        self.star_magnitudes = np.array(mags)
+        self.num_stars = len(xs)
+
+
+class MultiColorStarField(StarField):
+    """A small deterministic field of stars with realistic spectral colours.
+
+    Each star has an intrinsic RGB tint mimicking real stellar spectral
+    classes (M, K, G, F/A, B). When rendered through a polychromatic
+    refractor the chromatic aberration adds *additional* halos on top of
+    the natural colours — exactly what a real observer sees through a
+    coloured-fringe telescope.
+
+    Used by the chromatic + seeing tutorial scenario.
+    """
+
+    # (label, x_arcsec, y_arcsec, magnitude, (R, G, B) tint, T_eff_K)
+    # Stars are spread across a wide field (~80″ extent) so achromat
+    # chromatic halos (~5″ radius) fit comfortably around each isolated
+    # star without overlapping its neighbours.
+    # T_eff_K is the characteristic effective surface temperature in
+    # Kelvin (textbook values for each spectral class); kT in eV =
+    # T_eff_K / 11604.5.
+    STARS = [
+        ("Antares-like (M1)",   -25.0, +18.0,  0.5, (1.00, 0.45, 0.10),  3500),
+        ("Arcturus-like (K1)",  +25.0, +18.0,  0.0, (1.00, 0.70, 0.30),  4300),
+        ("Sun-like (G2)",       -25.0, -18.0,  0.5, (1.00, 0.92, 0.65),  5800),
+        ("Sirius-like (A1)",      0.0,   0.0, -0.5, (0.85, 0.92, 1.00),  9900),
+        ("Spica-like (B1)",     +25.0, -18.0,  0.0, (0.55, 0.75, 1.00), 22400),
+    ]
+
+    def __init__(self, field_radius_arcsec: float = 40.0):
+        # Bypass StarField's random init by setting attributes directly
+        self.field_radius_arcsec = field_radius_arcsec
+        self.seed = 0
+        self.magnitude_range = (-0.5, 0.5)
+        xs = [s[1] for s in self.STARS]
+        ys = [s[2] for s in self.STARS]
+        mags = [s[3] for s in self.STARS]
+        # Per-star spectral RGB tint (used by the polychromatic per-star
+        # renderer to weight each channel)
+        self.star_spectral_rgb = np.array([s[4] for s in self.STARS])
+        self.star_labels = [s[0] for s in self.STARS]
+        # Effective surface temperatures in Kelvin
+        self.star_temperatures_K = np.array([s[5] for s in self.STARS])
         self.star_x_arcsec = np.array(xs)
         self.star_y_arcsec = np.array(ys)
         self.star_magnitudes = np.array(mags)
