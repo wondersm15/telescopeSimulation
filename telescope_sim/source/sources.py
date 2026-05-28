@@ -439,8 +439,28 @@ class Jupiter(AstronomicalSource):
             Typical range: ~30" (far) to ~50" (near opposition).
     """
 
-    def __init__(self, angular_diameter_arcsec: float = 40.0):
+    def __init__(self, angular_diameter_arcsec: float = 40.0,
+                 use_realtime: bool = False):
+        """
+        Args:
+            angular_diameter_arcsec: Fixed angular diameter when not
+                using the live ephemeris. Default 40″ is typical near
+                opposition; Jupiter varies from ~30″ (apoaposition) to
+                ~50″ (closest approach near opposition).
+            use_realtime: When True, query skyfield + DE421 at
+                construction time and override
+                `angular_diameter_arcsec` with the *current* Earth–
+                Jupiter geometry. Requires skyfield (already in
+                requirements); the ephemeris file downloads on first
+                use and caches at ~/.skyfield.
+        """
+        if use_realtime:
+            from telescope_sim.source.realtime import (
+                jupiter_angular_diameter,
+            )
+            angular_diameter_arcsec = jupiter_angular_diameter()
         self.angular_diameter_arcsec = angular_diameter_arcsec
+        self.use_realtime = use_realtime
 
     def render_ideal(self, half_fov_arcsec: float,
                      num_pixels: int) -> np.ndarray:
@@ -598,9 +618,32 @@ class Saturn(AstronomicalSource):
     """
 
     def __init__(self, angular_diameter_arcsec: float = 18.0,
-                 ring_tilt_deg: float = 20.0):
+                 ring_tilt_deg: float = 20.0,
+                 use_realtime: bool = False):
+        """
+        Args:
+            angular_diameter_arcsec: Equatorial diameter of the planet
+                disk. Saturn's body varies ~15″-20″ over its orbit;
+                Cassini-mission peaks at opposition.
+            ring_tilt_deg: Tilt of rings toward observer (0 = edge-on,
+                ±26.7 = maximum opening). The sign matters: positive =
+                rings tilted with north hemisphere toward us.
+            use_realtime: When True, query skyfield/DE421 for the
+                current Saturn geometry and override both the
+                angular diameter and ring tilt. Honest representation
+                of "what Saturn looks like tonight" — particularly
+                useful around ring-plane crossings (next one in 2025)
+                when the rings disappear from view.
+        """
+        if use_realtime:
+            from telescope_sim.source.realtime import (
+                saturn_angular_diameter, saturn_ring_tilt,
+            )
+            angular_diameter_arcsec = saturn_angular_diameter()
+            ring_tilt_deg = saturn_ring_tilt()
         self.angular_diameter_arcsec = angular_diameter_arcsec
         self.ring_tilt_deg = ring_tilt_deg
+        self.use_realtime = use_realtime
 
     def _build_geometry(self, half_fov_arcsec, num_pixels):
         """Compute shared coordinate grids and geometry parameters."""
@@ -816,10 +859,32 @@ class Moon(AstronomicalSource):
 
     def __init__(self, angular_diameter_arcsec: float = 1870.0,
                  phase: float = 1.0,
-                 sub_observer_lon_deg: float = 0.0):
+                 sub_observer_lon_deg: float = 0.0,
+                 use_realtime: bool = False):
+        """
+        Args:
+            angular_diameter_arcsec: Apparent diameter (1850″-2000″
+                range; mean ~1870″).
+            phase: Illuminated fraction 0..1 (0 = new, 0.5 = half, 1 = full).
+            sub_observer_lon_deg: Sub-observer longitude — controls
+                which face of the Moon is presented.
+            use_realtime: When True, query skyfield for the *current*
+                Moon geometry: angular diameter (varies with the
+                ~14% Earth–Moon distance change over a month),
+                illumination phase, and approximate sub-observer
+                longitude.
+        """
+        if use_realtime:
+            from telescope_sim.source.realtime import (
+                moon_angular_diameter, moon_phase, moon_phase_angle,
+            )
+            angular_diameter_arcsec = moon_angular_diameter()
+            phase = moon_phase()
+            sub_observer_lon_deg = moon_phase_angle()
         self.angular_diameter_arcsec = angular_diameter_arcsec
         self.phase = np.clip(phase, 0.0, 1.0)
         self.sub_observer_lon_deg = sub_observer_lon_deg
+        self.use_realtime = use_realtime
 
     @classmethod
     def _load_texture(cls):

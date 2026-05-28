@@ -24,3 +24,8 @@ Thumbs.db
 
 # Claude Code
 .claude/
+
+# Skyfield ephemeris (downloaded on first realtime use, ~16 MB)
+# Lives in ~/.skyfield by default; this catches accidental local copies.
+de421.bsp
+*.bsp

@@ -88,6 +88,12 @@ class TutorialTab(QWidget):
         # Filter combo (ND / colour). Only shown when the scenario
         # opts in via show_filter_combo (e.g. Act 3 filter scenarios).
         self._filter_combo: QComboBox | None = None
+        # Live ephemeris checkbox. When checked, the after-side source
+        # is reconstructed with use_realtime=True so its angular size
+        # (and Saturn ring tilt) come from skyfield/DE421 at the time
+        # the user opened the scenario. Only shown on scenarios with
+        # supports_realtime=True.
+        self._realtime_check: QCheckBox | None = None
         self._build_ui()
         # Load the first implemented scenario automatically
         first = get_first_implemented()
@@ -287,6 +293,7 @@ class TutorialTab(QWidget):
         self._exposure_slider = None
         self._exposure_value_label = None
         self._filter_combo = None
+        self._realtime_check = None
 
         params = scenario.tweakable_params
         params_before = scenario.tweakable_params_before
@@ -369,6 +376,8 @@ class TutorialTab(QWidget):
             self._add_exposure_slider(scenario.default_exposure)
         if wants_display_combo and scenario.show_filter_combo:
             self._add_filter_combo(scenario.default_filter)
+        if scenario.supports_realtime:
+            self._add_realtime_check()
 
         self.controls_layout.addStretch()
 
@@ -687,6 +696,37 @@ class TutorialTab(QWidget):
         self.controls_layout.addLayout(col)
         self._exposure_slider = slider
         self._exposure_value_label = value_lbl
+
+    def _add_realtime_check(self):
+        """Checkbox to swap the after-side source for the live ephemeris.
+
+        When checked, the after-side source is reconstructed with
+        ``use_realtime=True``. That triggers a skyfield query for the
+        current Jupiter/Saturn/Moon geometry (angular size + Saturn
+        ring tilt + Moon phase) so the rendered image matches what
+        the user would actually see through a telescope *tonight*.
+        """
+        col = QVBoxLayout()
+        lbl = QLabel("Source data")
+        lbl.setStyleSheet(
+            "font-size: 8pt; font-weight: normal; color: #555;")
+        check = QCheckBox("Use live ephemeris")
+        check.setToolTip(
+            "Default: fixed reference angular size (representative\n"
+            "values near opposition). Check this to override with the\n"
+            "current Earth–target geometry from skyfield + DE421:\n"
+            "  • Jupiter / Saturn / Moon angular diameters\n"
+            "  • Saturn ring tilt (relevant near 2025 ring-plane\n"
+            "    crossing — rings nearly invisible at low tilt).\n"
+            "  • Moon phase / sub-observer longitude.\n"
+            "First-time use downloads the JPL DE421 ephemeris\n"
+            "(~16 MB) into ~/.skyfield."
+        )
+        check.stateChanged.connect(self._on_update_clicked)
+        col.addWidget(lbl)
+        col.addWidget(check)
+        self.controls_layout.addLayout(col)
+        self._realtime_check = check
 
     def _add_filter_combo(self, default_filter: str):
         """ND/colour filter dropdown for brightness/saturation scenarios.
@@ -1200,12 +1240,21 @@ class TutorialTab(QWidget):
         """
         if base is None:
             base = scenario.after_source
+        kwargs = dict(base.kwargs)
+
         if base.source_type == "DoubleStar" and "separation_arcsec" in params:
-            return SourceConfig(
-                source_type="DoubleStar",
-                kwargs={"separation_arcsec": params["separation_arcsec"]},
-            )
-        return base
+            kwargs["separation_arcsec"] = params["separation_arcsec"]
+
+        # Live ephemeris toggle (only applies to after-side, not before)
+        if (scenario.supports_realtime
+                and self._realtime_check is not None
+                and self._realtime_check.isChecked()
+                and base is scenario.after_source):
+            kwargs["use_realtime"] = True
+
+        if kwargs == base.kwargs:
+            return base
+        return SourceConfig(source_type=base.source_type, kwargs=kwargs)
 
     # ------------------------------------------------------------------
     # Source code viewer helpers

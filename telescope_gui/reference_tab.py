@@ -538,6 +538,38 @@ the detector:</p>
 published Wratten/Schott curves; the qualitative behaviour matches but
 the absolute transmission can differ a few percent from
 manufacturer specifications. No out-of-band leakage modelled.</i></p>
+
+<h3>10. Live Ephemeris (Real-Time Targets)</h3>
+<p>Real Objects scenarios (Jupiter, Saturn, Moon) expose a
+<b>Use live ephemeris</b> checkbox. When enabled, the source is
+constructed with <code>use_realtime=True</code> and queries the JPL
+DE421 ephemeris (via the <code>skyfield</code> package) to compute:</p>
+<ul>
+  <li>Current Earth&ndash;target distance &rarr; apparent angular diameter.
+  Jupiter spans ~30&Prime; (apoapsis) to ~50&Prime; (closest approach);
+  Saturn ~15&Prime; to 20&Prime;; Moon ~1800&Prime; (varies ~14&nbsp;% over a
+  month with the Earth&ndash;Moon distance).</li>
+  <li>Saturn ring tilt (B angle). Saturn's rotation axis is fixed in
+  space at 26.7&deg; from the orbital plane; from Earth's perspective
+  the tilt cycles between &plusmn;26.7&deg; over Saturn's 29.5-year
+  orbit. The next ring-plane crossing is in 2025 &mdash; near that
+  date the rings nearly disappear at low magnification.</li>
+  <li>Moon illuminated fraction and approximate sub-observer
+  longitude (phase). New / first-quarter / full / last-quarter
+  appearances follow the actual lunation.</li>
+</ul>
+<p>Default (checkbox off) uses representative fixed values: Jupiter
+40&Prime;, Saturn 18&Prime; with 20&deg; ring tilt, Moon 1870&Prime; at
+full phase. The fixed mode is appropriate for "what does Jupiter look
+like through a 200&nbsp;mm scope" pedagogical comparisons; the live mode
+is appropriate for "if I go out tonight, will my scope match the
+simulation?" validation.</p>
+<p><i>Accuracy: DE421 is JPL's standard low-precision planetary
+ephemeris (~1&Prime; over 1900&ndash;2050). Saturn ring-tilt formula
+here uses ecliptic-latitude proxy &mdash; accurate to ~1&deg; near
+maximum-tilt epochs (2002, 2017, 2032), less so near the crossing
+itself. First-use downloads the 16&nbsp;MB ephemeris into
+<code>~/.skyfield</code>; subsequent loads are local.</i></p>
 """
 
 NOT_IMPLEMENTED_HTML = """

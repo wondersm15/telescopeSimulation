@@ -133,6 +133,14 @@ class ScenarioDefinition:
     # interact with exposure + saturation correctly.
     show_filter_combo: bool = False
 
+    # When True, expose a "Use live ephemeris" checkbox. The after-side
+    # source is then constructed with use_realtime=True so its angular
+    # size (Jupiter/Saturn/Moon) and Saturn ring tilt come from skyfield
+    # at scenario-load time. Useful for "what does this look like
+    # tonight" — and for ring-plane crossing demos where the fixed
+    # tilt value would mislead.
+    supports_realtime: bool = False
+
 
 # ---------------------------------------------------------------------------
 # Shared telescope configs used across multiple scenarios
@@ -835,6 +843,7 @@ SCENARIOS: list[ScenarioDefinition] = [
         default_exposure=1.0,
         default_filter="ND-1.0",
         show_filter_combo=True,
+        supports_realtime=True,
         terminal_template=(
             "from telescope_gui.telescope_builder import build_telescope\n"
             "from telescope_sim.source.sources import Moon\n"
@@ -885,6 +894,7 @@ SCENARIOS: list[ScenarioDefinition] = [
         default_exposure=0.25,
         default_filter="W25 (red)",
         show_filter_combo=True,
+        supports_realtime=True,
         terminal_template=(
             "from telescope_gui.telescope_builder import build_telescope\n"
             "from telescope_sim.source.sources import Jupiter\n"
@@ -1000,6 +1010,7 @@ SCENARIOS: list[ScenarioDefinition] = [
         # the disk into the linear range so bands and limb darkening
         # remain visible without complete clipping.
         default_exposure=0.25,
+        supports_realtime=True,
         terminal_template=(
             "from telescope_sim.geometry import NewtonianTelescope\n"
             "from telescope_sim.source.sources import Jupiter\n"
@@ -1050,6 +1061,7 @@ SCENARIOS: list[ScenarioDefinition] = [
         # Same reasoning as jupiter_full — bright disk at 200 mm
         # saturates at exp=1.0; lower exposure preserves ring detail.
         default_exposure=0.25,
+        supports_realtime=True,
         terminal_template=(
             "from telescope_sim.geometry import NewtonianTelescope\n"
             "from telescope_sim.source.sources import Saturn\n"
