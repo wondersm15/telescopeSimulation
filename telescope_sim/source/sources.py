@@ -542,47 +542,94 @@ class Jupiter(AstronomicalSource):
         limb = np.zeros_like(rr)
         limb[disk] = 1.0 - u * (1.0 - mu[disk])
 
-        # Latitude
+        # Latitude (radians, ±π/2) and approximate longitude for
+        # in-plane texture. Longitude is the x-coordinate on the
+        # apparent disk projected through the equator — a flat
+        # projection that ignores foreshortening but is fine for
+        # the level of detail we render.
         lat = np.zeros_like(yy)
         lat[disk] = np.arcsin(np.clip(yy[disk] / radius_arcsec, -1, 1))
+        lon = np.zeros_like(xx)  # rough longitude on the visible face
+        lon[disk] = np.arcsin(np.clip(
+            xx[disk] / (radius_arcsec * np.cos(lat[disk]) + 1e-9),
+            -1, 1
+        ))
 
-        # Band pattern as signed value: positive = zone (bright/cream),
-        # negative = belt (dark/brown)
-        band_signal = (0.08 * np.sin(6.0 * lat)
-                       + 0.05 * np.sin(12.0 * lat)
-                       + 0.03 * np.sin(20.0 * lat))
+        # Multi-scale band pattern: more frequency components than the
+        # original (which had only 6/12/20 sin terms producing ~3-6
+        # broad bands). Real Jupiter shows ~15 named belts/zones plus
+        # finer turbulent boundaries, so we layer additional 30 and
+        # 60-cycle components. Equator-weighted amplitude concentrates
+        # detail at low latitudes where Jovian banding is genuinely
+        # most active.
+        equator_weight = np.exp(-((lat / np.radians(45.0)) ** 2))
+        band_signal = (
+            0.10 * np.sin(6.0 * lat)
+            + 0.07 * np.sin(12.0 * lat)
+            + 0.05 * np.sin(24.0 * lat)
+            + 0.03 * np.sin(36.0 * lat) * equator_weight
+            + 0.02 * np.sin(60.0 * lat) * equator_weight
+        )
 
-        # Map band_signal to a blend factor: 0 = belt color, 1 = zone color
-        # band_signal range is roughly [-0.16, +0.16]
-        blend = np.clip(0.5 + band_signal / 0.32, 0.0, 1.0)
+        # Longitude-dependent festoon turbulence — small zonal waves
+        # along the belts where they meet zones. Deterministic
+        # (seeded by lat·lon) so a given scope always sees the same
+        # disk; not animated.
+        festoon = (
+            0.025 * np.sin(8.0 * lon) * np.sin(20.0 * lat)
+            + 0.015 * np.sin(13.0 * lon) * np.sin(28.0 * lat)
+        )
+        band_signal = band_signal + festoon * equator_weight
+
+        # Map signed band signal to a [0, 1] blend factor.
+        blend = np.clip(0.5 + band_signal / 0.36, 0.0, 1.0)
 
         # Realistic Jupiter colors (RGB, 0-1 scale)
-        # Zones (bright): cream/pale yellow
-        zone_color = np.array([235, 220, 185]) / 255.0
-        # Belts (dark): warm brown
-        belt_color = np.array([170, 130, 90]) / 255.0
+        zone_color = np.array([235, 220, 185]) / 255.0  # cream zones
+        belt_color = np.array([155, 110, 75]) / 255.0   # warm brown belts (deeper than before)
 
-        # Interpolate between belt and zone colors
         rgb = np.zeros((num_pixels, num_pixels, 3))
         for c in range(3):
             rgb[..., c] = (belt_color[c] * (1.0 - blend)
                            + zone_color[c] * blend)
 
-        # Great Red Spot: reddish-orange tint
+        # Great Red Spot — slightly tighter and more saturated than
+        # the original (real GRS is about 0.3 × Jupiter's diameter
+        # across, tapering in latitude).
         grs_lat = np.radians(-22.0)
         grs_lon = np.radians(30.0)
         grs_x = radius_arcsec * np.cos(grs_lat) * np.sin(grs_lon)
         grs_y = radius_arcsec * np.sin(grs_lat)
-        grs_sigma_x = radius_arcsec * 0.12
-        grs_sigma_y = radius_arcsec * 0.07
+        grs_sigma_x = radius_arcsec * 0.13
+        grs_sigma_y = radius_arcsec * 0.06
         grs_mask = np.exp(
             -((xx - grs_x) ** 2 / (2 * grs_sigma_x ** 2)
               + (yy - grs_y) ** 2 / (2 * grs_sigma_y ** 2))
         )
-        grs_color = np.array([200, 120, 80]) / 255.0
+        grs_color = np.array([210, 105, 75]) / 255.0
         for c in range(3):
             rgb[..., c] = (rgb[..., c] * (1.0 - grs_mask)
                            + grs_color[c] * grs_mask)
+
+        # Small white ovals at typical temperate latitudes — the
+        # long-lived anticyclonic features seen in Hubble Jupiter
+        # images. Each is a faint Gaussian brightening relative to
+        # the band.
+        ovals = [
+            (np.radians(38.0),  np.radians(-60.0)),  # northern temperate
+            (np.radians(-38.0), np.radians(80.0)),   # southern temperate
+            (np.radians(-22.0), np.radians(-110.0)), # near GRS band
+        ]
+        oval_color = np.array([245, 235, 215]) / 255.0
+        for o_lat, o_lon in ovals:
+            ox = radius_arcsec * np.cos(o_lat) * np.sin(o_lon)
+            oy = radius_arcsec * np.sin(o_lat)
+            sigma = radius_arcsec * 0.035
+            mask = np.exp(
+                -((xx - ox) ** 2 + (yy - oy) ** 2) / (2 * sigma ** 2)
+            ) * 0.65
+            for c in range(3):
+                rgb[..., c] = rgb[..., c] * (1.0 - mask) + oval_color[c] * mask
 
         # Apply limb darkening and disk mask
         for c in range(3):
@@ -665,10 +712,18 @@ class Saturn(AstronomicalSource):
         limb = np.zeros_like(disk_r)
         limb[disk] = 1.0 - u * (1.0 - mu[disk])
 
-        # Subtle band structure (less pronounced than Jupiter)
+        # Band structure: Saturn's bands are subtler than Jupiter's
+        # but still resolve into a half-dozen alternating belts at
+        # large apertures. Multi-frequency model gives finer detail
+        # than the old 5/10 cycle pair.
         lat = np.zeros_like(yy)
         lat[disk] = np.arcsin(np.clip(yy[disk] / r_pol, -1, 1))
-        bands = 0.04 * np.sin(5.0 * lat) + 0.02 * np.sin(10.0 * lat)
+        bands = (
+            0.05 * np.sin(5.0 * lat)
+            + 0.03 * np.sin(10.0 * lat)
+            + 0.02 * np.sin(18.0 * lat)
+            + 0.01 * np.sin(30.0 * lat)
+        )
 
         # Ring geometry: rings are circular but appear as an ellipse
         # due to tilt. Ring plane is tilted relative to line of sight.
@@ -677,6 +732,12 @@ class Saturn(AstronomicalSource):
         ring_inner_b = r_eq * 1.24   # inner edge of C ring
         ring_cassini_inner = r_eq * 1.95  # Cassini division inner edge
         ring_cassini_outer = r_eq * 2.02  # Cassini division outer edge
+        # Encke gap (in the A ring, ~133,500 km / R_eq ≈ 2.22 R_eq).
+        # Real width ≈ 325 km — extremely narrow, only visible in
+        # large amateur scopes under exceptional seeing. Including it
+        # makes the resolution-limit lesson more useful.
+        ring_encke_inner = r_eq * 2.214
+        ring_encke_outer = r_eq * 2.224
         ring_outer_a = r_eq * 2.27   # outer edge of A ring
 
         # Projected ring coordinates (ellipse due to tilt)
@@ -684,27 +745,55 @@ class Saturn(AstronomicalSource):
         # Ring distance from center in ring-plane coordinates
         ring_r = np.sqrt((xx / 1.0) ** 2 + (yy / sin_tilt) ** 2)
 
-        # Ring mask (annulus, excluding Cassini division)
+        # Ring mask (annulus, excluding Cassini and Encke gaps)
         in_rings = (ring_r >= ring_inner_b) & (ring_r <= ring_outer_a)
         in_cassini = ((ring_r >= ring_cassini_inner)
                       & (ring_r <= ring_cassini_outer))
-        ring_mask = in_rings & ~in_cassini
+        in_encke = ((ring_r >= ring_encke_inner)
+                    & (ring_r <= ring_encke_outer))
+        ring_mask = in_rings & ~in_cassini & ~in_encke
 
-        # Ring brightness varies with radius (B ring brightest)
+        # Ring brightness varies with radius (B ring brightest).
+        # B-ring inner edge has the strongest "ramp" — a brightness
+        # gradient real observers can see.
         ring_brightness = np.zeros_like(ring_r)
-        # C ring (inner, dim): ring_inner_b to ~1.53*r_eq
+        # C ring (inner, dim): ring_inner_b to ~1.53*r_eq, dims toward inner
         c_ring = (ring_r >= ring_inner_b) & (ring_r < r_eq * 1.53)
-        ring_brightness[c_ring] = 0.35
-        # B ring (middle, brightest): ~1.53*r_eq to cassini_inner
+        c_grad = (ring_r[c_ring] - ring_inner_b) / (r_eq * 1.53 - ring_inner_b)
+        ring_brightness[c_ring] = 0.30 + 0.20 * c_grad
+        # B ring (middle, brightest): ~1.53*r_eq to cassini_inner; brightness
+        # gradient peaks near the middle.
         b_ring = ((ring_r >= r_eq * 1.53)
                   & (ring_r < ring_cassini_inner))
-        ring_brightness[b_ring] = 1.0
+        b_center = (r_eq * 1.53 + ring_cassini_inner) / 2.0
+        b_half_width = (ring_cassini_inner - r_eq * 1.53) / 2.0
+        b_grad = 1.0 - 0.25 * np.abs(
+            (ring_r[b_ring] - b_center) / b_half_width
+        )
+        ring_brightness[b_ring] = b_grad
         # A ring (outer, moderate): cassini_outer to ring_outer_a
         a_ring = ((ring_r >= ring_cassini_outer)
                   & (ring_r <= ring_outer_a))
         ring_brightness[a_ring] = 0.65
 
         ring_brightness *= ring_mask
+
+        # Ring shadow on the planet: where the rings cross the
+        # equatorial line in front of the disk, they cast a thin
+        # shadow on the planet behind. Approximated as a darkening
+        # band where the rings' near-edge projection meets the disk.
+        # Strength scales with sin(tilt) — invisible edge-on.
+        shadow = np.zeros_like(disk_r)
+        if abs(sin_tilt) > 0.03:
+            # Shadow is a thin strip just below the ring projection,
+            # only on the part of the disk *not* covered by the
+            # rings in projection.
+            shadow_band = (
+                (np.abs(yy) < 0.05 * r_eq)
+                & disk
+                & ~ring_mask
+            )
+            shadow[shadow_band] = 0.35 * abs(sin_tilt)
 
         # Separate front and back rings relative to planet disk.
         # For positive tilt (viewing from above the ring plane), the
@@ -718,7 +807,7 @@ class Saturn(AstronomicalSource):
             "bands": bands, "ring_mask": ring_mask,
             "ring_front": ring_front, "ring_back": ring_back,
             "ring_brightness": ring_brightness, "r_eq": r_eq,
-            "sin_tilt": sin_tilt,
+            "sin_tilt": sin_tilt, "shadow": shadow,
         }
 
     def render_ideal(self, half_fov_arcsec: float,
@@ -801,6 +890,13 @@ class Saturn(AstronomicalSource):
                                          ring_rgb[..., ch])
             ring_rgb[..., ch] = np.where(a_mask, a_ring_color[ch],
                                          ring_rgb[..., ch])
+
+        # Ring shadow on the disk: darken the equatorial strip where
+        # the rings cast a shadow across the planet (only when not
+        # already covered by front-facing rings).
+        if g["shadow"].max() > 0:
+            for ch in range(3):
+                rgb[..., ch] = rgb[..., ch] * (1.0 - g["shadow"])
 
         # Layer back rings (behind planet, only outside disk)
         back_vis = g["ring_back"] & ~g["disk"]
