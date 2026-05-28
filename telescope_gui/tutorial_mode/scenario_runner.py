@@ -86,6 +86,7 @@ def run_scenario_side(
     focus_wavelength_nm: float = 550.0,
     display_stretch: str = "linear",
     exposure_level: float = 1.0,
+    filter_name: str = "None",
 ) -> tuple[Figure | None, dict, str | None]:
     """Run one side (before or after) of a scenario.
 
@@ -109,6 +110,7 @@ def run_scenario_side(
             focus_wavelength_nm=focus_wavelength_nm,
             display_stretch=display_stretch,
             exposure_level=exposure_level,
+            filter_name=filter_name,
         )
         info["telescope"] = telescope
         info["source"] = source
@@ -132,6 +134,7 @@ def _call_plot_function(
     focus_wavelength_nm: float = 550.0,
     display_stretch: str = "linear",
     exposure_level: float = 1.0,
+    filter_name: str = "None",
 ) -> tuple[Figure, dict]:
     """Dispatch to the appropriate telescope_sim plot function."""
     from telescope_sim.plotting import (
@@ -157,6 +160,7 @@ def _call_plot_function(
             display_stretch=display_stretch,
             focus_wavelength_nm=focus_wavelength_nm,
             exposure_level=exposure_level,
+            filter_name=filter_name,
         )
         if isinstance(fig, list):
             fig = fig[0]
@@ -164,6 +168,7 @@ def _call_plot_function(
             "plot_function": name,
             "display_stretch": display_stretch,
             "exposure_level": exposure_level,
+            "filter_name": filter_name,
         }
 
     elif name == "plot_psf_2d":

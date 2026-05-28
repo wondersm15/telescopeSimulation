@@ -124,6 +124,15 @@ class ScenarioDefinition:
     # exposes this directly to the user.
     default_exposure: float = 1.0
 
+    # Default filter for this scenario ("None" = unfiltered). Act 3
+    # filter scenarios use this to demonstrate ND and colour filters.
+    default_filter: str = "None"
+
+    # When True, expose a Filter dropdown in the UI controls. Filters
+    # multiply per-channel flux before saturation clipping, so they
+    # interact with exposure + saturation correctly.
+    show_filter_combo: bool = False
+
 
 # ---------------------------------------------------------------------------
 # Shared telescope configs used across multiple scenarios

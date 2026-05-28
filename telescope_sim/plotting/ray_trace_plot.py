@@ -3708,6 +3708,7 @@ def _render_source_through_telescope(
         focus_wavelength_nm: float = 550.0,
         display_num_pixels: int | None = None,
         exposure_level: float = 1.0,
+        filter_name: str = "None",
 ) -> tuple[np.ndarray, float, dict]:
     """Render an astronomical source as seen through the telescope.
 
@@ -4239,6 +4240,23 @@ def _render_source_through_telescope(
                     image_rgb[..., c] = gaussian_filter(
                         image_rgb[..., c], sigma=eye_sigma_pix)
 
+    # Filter transmission — applied *before* saturation normalisation
+    # so the filter genuinely reduces collected photons (a 10% ND on
+    # a saturated source recovers detail; a colour filter shifts the
+    # RGB balance). Channel-wise multiply for polychromatic / RGB
+    # rendering, single multiply for the grayscale luminance.
+    from telescope_sim.physics.filters import get_filter_by_name
+    _flt = get_filter_by_name(filter_name)
+    if _flt.name != "None":
+        T_lum = _flt.luminance_transmission
+        T_R, T_G, T_B = _flt.channel_transmissions()
+        image = image * T_lum
+        if image_rgb is not None:
+            image_rgb = image_rgb.copy()
+            image_rgb[..., 0] *= T_R
+            image_rgb[..., 1] *= T_G
+            image_rgb[..., 2] *= T_B
+
     # Apply the fixed-reference normalisation. Values above 1.0 will
     # be clipped by the final np.clip — that's the saturation effect.
     image = image / saturation_divisor
@@ -4452,6 +4470,7 @@ def plot_source_image(telescope: Telescope,
                       display_stretch: str = "linear",
                       focus_wavelength_nm: float = 550.0,
                       exposure_level: float = 1.0,
+                      filter_name: str = "None",
                       ) -> plt.Figure | list[plt.Figure]:
     """Plot a simulated image of an astronomical source through the telescope.
 
@@ -4545,6 +4564,7 @@ def plot_source_image(telescope: Telescope,
         focus_wavelength_nm=focus_wavelength_nm,
         display_num_pixels=num_pixels,
         exposure_level=exposure_level,
+        filter_name=filter_name,
     )
     info["display_stretch"] = display_stretch
     info["focus_wavelength_nm"] = focus_wavelength_nm

@@ -85,6 +85,9 @@ class TutorialTab(QWidget):
         # Default per-scenario via ScenarioDefinition.default_exposure.
         self._exposure_slider: QSlider | None = None
         self._exposure_value_label: QLabel | None = None
+        # Filter combo (ND / colour). Only shown when the scenario
+        # opts in via show_filter_combo (e.g. Act 3 filter scenarios).
+        self._filter_combo: QComboBox | None = None
         self._build_ui()
         # Load the first implemented scenario automatically
         first = get_first_implemented()
@@ -283,6 +286,7 @@ class TutorialTab(QWidget):
         self._display_stretch_combo = None
         self._exposure_slider = None
         self._exposure_value_label = None
+        self._filter_combo = None
 
         params = scenario.tweakable_params
         params_before = scenario.tweakable_params_before
@@ -363,6 +367,8 @@ class TutorialTab(QWidget):
         if wants_display_combo:
             self._add_display_stretch_combo()
             self._add_exposure_slider(scenario.default_exposure)
+        if wants_display_combo and scenario.show_filter_combo:
+            self._add_filter_combo(scenario.default_filter)
 
         self.controls_layout.addStretch()
 
@@ -682,6 +688,40 @@ class TutorialTab(QWidget):
         self._exposure_slider = slider
         self._exposure_value_label = value_lbl
 
+    def _add_filter_combo(self, default_filter: str):
+        """ND/colour filter dropdown for brightness/saturation scenarios.
+
+        Pulls the library from telescope_sim.physics.filters. Filters
+        multiply per-channel flux before saturation clipping — so they
+        physically reduce photons and shift colour balance, exactly
+        like a real eyepiece filter.
+        """
+        from telescope_sim.physics.filters import FILTER_LIBRARY
+        col = QVBoxLayout()
+        lbl = QLabel("Filter")
+        lbl.setStyleSheet(
+            "font-size: 8pt; font-weight: normal; color: #555;")
+        combo = QComboBox()
+        for flt in FILTER_LIBRARY:
+            combo.addItem(flt.name, flt.name)
+            combo.setItemData(combo.count() - 1, flt.description,
+                              Qt.ItemDataRole.ToolTipRole)
+        idx = combo.findData(default_filter)
+        if idx >= 0:
+            combo.setCurrentIndex(idx)
+        combo.setToolTip(
+            "Optical filter applied before the detector. ND = neutral\n"
+            "density (uniform dimming). W = Wratten colour filters that\n"
+            "shift the RGB balance — useful for revealing low-contrast\n"
+            "features on planets (red filter highlights Jupiter's GRS,\n"
+            "blue brings out Venus cloud detail, etc.)."
+        )
+        combo.currentIndexChanged.connect(self._on_update_clicked)
+        col.addWidget(lbl)
+        col.addWidget(combo)
+        self.controls_layout.addLayout(col)
+        self._filter_combo = combo
+
     # Index of the "F=C plane" item in the focus-wavelength combo (kept
     # as a constant so the sync logic doesn't drift from the addItem
     # order in _add_focus_wavelength_combo).
@@ -789,6 +829,12 @@ class TutorialTab(QWidget):
             return scenario.default_exposure
         return self._slider_to_exposure(self._exposure_slider.value())
 
+    def _current_filter(self, scenario: ScenarioDefinition) -> str:
+        """Return the user-selected filter name, or scenario default."""
+        if self._filter_combo is None:
+            return scenario.default_filter
+        return self._filter_combo.currentData() or scenario.default_filter
+
     @staticmethod
     def _axis_lock_is_safe(scenario: ScenarioDefinition) -> bool:
         """True when after-side axes can be safely clamped to before-side limits.
@@ -865,6 +911,7 @@ class TutorialTab(QWidget):
                            if self._focus_wavelength_combo is not None
                            else 550.0)
         exposure = self._current_exposure(scenario)
+        flt = self._current_filter(scenario)
         fig, info, err = run_scenario_side(
             before_telescope,
             before_source,
@@ -878,6 +925,7 @@ class TutorialTab(QWidget):
             display_stretch=stretch,
             focus_wavelength_nm=focus_wl_before,
             exposure_level=exposure,
+            filter_name=flt,
         )
         if err:
             self.status_label.setText("Before render failed")
@@ -963,6 +1011,7 @@ class TutorialTab(QWidget):
                    if self._display_stretch_combo is not None else "linear")
 
         exposure = self._current_exposure(scenario)
+        flt = self._current_filter(scenario)
         fig, info, err = run_scenario_side(
             after_config,
             after_source_config,
@@ -976,6 +1025,7 @@ class TutorialTab(QWidget):
             focus_wavelength_nm=focus_wl,
             display_stretch=stretch,
             exposure_level=exposure,
+            filter_name=flt,
         )
 
         if err:
