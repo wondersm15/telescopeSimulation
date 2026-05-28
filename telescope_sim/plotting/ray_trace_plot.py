@@ -66,11 +66,24 @@ def _draw_ray_trace(ax: plt.Axes, rays: list[Ray], components: dict,
                     ray_alpha: float = 0.7,
                     mirror_color: str = "steelblue",
                     mirror_linewidth: float = 3.0,
-                    show_tube: bool = True) -> None:
+                    show_tube: bool = True,
+                    ray_colors: list | None = None,
+                    show_focal_marker: bool = True) -> None:
     """Draw a ray trace diagram on the given axes.
 
     This is the core drawing helper used by both plot_ray_trace and
     the comparison functions.
+
+    Args:
+        ray_colors: Optional list of per-ray colors (matplotlib color spec).
+            When provided, each ray uses its corresponding entry from
+            the list instead of the single `ray_color`. Used by the
+            ray-fan visualisation to share a pupil-zone colormap with
+            the ray-trace panel.
+        show_focal_marker: When False, suppresses the default "focal
+            point" star + eyepiece icon. Useful when the caller wants
+            to place its own focal-plane marker (e.g. at the *paraxial*
+            plane rather than the mean of the secondary hits).
     """
     if show_tube:
         _draw_tube(ax, components)
@@ -275,15 +288,19 @@ def _draw_ray_trace(ax: plt.Axes, rays: list[Ray], components: dict,
                         [sec_y - 3, sec_y + 3],
                         color="gray", linewidth=1.5, alpha=0.7)
 
-    for ray in rays:
+    for ray_idx, ray in enumerate(rays):
         if len(ray.history) < 2:
             continue
         path = np.array(ray.history)
+        if ray_colors is not None and ray_idx < len(ray_colors):
+            color = ray_colors[ray_idx]
+        else:
+            color = ray_color
         ax.plot(path[:, 0], path[:, 1],
-                color=ray_color, alpha=ray_alpha, linewidth=1.0)
+                color=color, alpha=ray_alpha, linewidth=1.0)
 
     end_points = [ray.history[-1] for ray in rays if len(ray.history) >= 3]
-    if end_points:
+    if end_points and show_focal_marker:
         focal_area = np.mean(end_points, axis=0)
         ax.plot(focal_area[0], focal_area[1], "r*", markersize=12,
                 label="Focal point", zorder=5)
@@ -735,6 +752,349 @@ def _draw_spot_diagram(ax: plt.Axes, y_offsets: np.ndarray | None,
                 horizontalalignment='left',
                 bbox=dict(boxstyle='round,pad=0.25', facecolor='lightblue',
                           alpha=0.7))
+
+
+def _paraxial_focal_plane_offsets(rays: list[Ray]) -> np.ndarray | None:
+    """Transverse offsets at the *paraxial* focal plane, ray by ray.
+
+    Different from `_find_focal_plane_positions` (which scans for the
+    minimum-spread plane = circle of least confusion). For an SA-free
+    optic, the two planes coincide and all offsets are ≈ 0. For a
+    spherical primary, the paraxial plane is *farther* than the
+    marginal crossing, so marginal rays arrive having already crossed
+    the axis — Δy(h) follows the classical cubic textbook signature.
+
+    Returns an array aligned to the input ray order (NaN where the
+    ray failed to trace or the plane lies far outside its segment).
+    """
+    traced = [r for r in rays if len(r.history) >= 2]
+    if not traced:
+        return None
+
+    # Detect dominant travel axis from the bundle as a whole.
+    # (Cannot use a single ray — the on-axis ray for a Newtonian
+    # bounces straight back and gives degenerate direction.)
+    segments = [(np.array(r.history[-2]), np.array(r.history[-1]))
+                for r in traced]
+    total_dx = sum(abs(s[1][0] - s[0][0]) for s in segments)
+    total_dy = sum(abs(s[1][1] - s[0][1]) for s in segments)
+    scan_axis = 0 if total_dx >= total_dy else 1
+    perp_axis = 1 - scan_axis
+
+    # Pick the smallest *non-zero*-|h| ray with a non-degenerate
+    # segment as the paraxial reference. The exactly-on-axis ray
+    # often reflects back along its own path (Newtonian centerline),
+    # producing direction[perp_axis] ≈ 0 — that doesn't tell us
+    # where the actual focal plane lies.
+    candidates = [
+        r for r in traced
+        if abs(r.origin[0]) > 1e-3
+        and abs((np.array(r.history[-1])
+                 - np.array(r.history[-2]))[perp_axis]) > 1e-6
+    ]
+    if not candidates:
+        return None
+    on_axis = min(candidates, key=lambda r: abs(r.origin[0]))
+    p0 = np.array(on_axis.history[-2])
+    p1 = np.array(on_axis.history[-1])
+    direction = p1 - p0
+
+    # Solve for where the reference ray's final segment crosses the
+    # optical axis (perp_value = 0). That scan-axis coordinate is the
+    # paraxial focal plane.
+    t_ref = -p0[perp_axis] / direction[perp_axis]
+    plane_pos = p0[scan_axis] + t_ref * direction[scan_axis]
+
+    # Sample each ray at that plane, allowing generous extrapolation.
+    offsets = []
+    for r in rays:
+        if len(r.history) < 2:
+            offsets.append(np.nan)
+            continue
+        rp0 = np.array(r.history[-2])
+        rp1 = np.array(r.history[-1])
+        rdir = rp1 - rp0
+        if abs(rdir[scan_axis]) < 1e-12:
+            offsets.append(np.nan)
+            continue
+        t = (plane_pos - rp0[scan_axis]) / rdir[scan_axis]
+        # Allow extrapolation beyond the traced segment (paraxial focal
+        # plane is typically one focal-length past the secondary).
+        if not (-5.0 <= t <= 50.0):
+            offsets.append(np.nan)
+            continue
+        off = rp0[perp_axis] + t * rdir[perp_axis]
+        offsets.append(off)
+
+    return np.asarray(offsets, dtype=float)
+
+
+def _pupil_colormap_colors(entry_heights: np.ndarray):
+    """Return (per-ray RGBA colors, ScalarMappable for colorbar).
+
+    Maps |entry height| onto the viridis colormap so the innermost
+    rays are dark and marginal rays are bright. Symmetric: a ray at
+    +5 mm and -5 mm share the same colour, because in a rotationally
+    symmetric system they belong to the same pupil zone.
+    """
+    h_abs = np.abs(entry_heights)
+    h_max = float(np.max(h_abs)) if len(h_abs) > 0 else 1.0
+    if h_max <= 0:
+        h_max = 1.0
+    norm = plt.Normalize(vmin=0.0, vmax=h_max)
+    cmap = plt.get_cmap("viridis")
+    colors = [cmap(norm(float(h))) for h in h_abs]
+    sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
+    sm.set_array([])
+    return colors, sm
+
+
+def plot_ray_fan_telescope(telescope: Telescope,
+                            wavelength_nm: float = 550.0,
+                            num_rays: int = 21,
+                            figsize: tuple[float, float] = (7, 5),
+                            title: str | None = None,
+                            save_path: str | None = None,
+                            ) -> plt.Figure:
+    """Ray-fan plot: transverse focal-plane offset vs pupil entry height.
+
+    This is the canonical optical-design view of an aberration: the
+    shape of the curve directly reveals which Seidel aberration is
+    present.
+
+      • cubic (Δy ∝ h³)   → spherical aberration
+      • parabolic (Δy ∝ h²) → coma
+      • linear (Δy ∝ h)     → defocus
+      • flat (Δy ≈ 0)        → diffraction-limited
+
+    Each point is one traced ray, coloured by its pupil entry height
+    using a viridis colormap that the companion ray-trace plot
+    (`plot_ray_trace_pupil_colored`) reuses — so the viewer can pick
+    a coloured ray in the ray trace and find the same colour in the
+    ray fan, connecting "where the ray came from" to "where it
+    landed".
+    """
+    from telescope_sim.source.light_source import create_parallel_rays
+    rays = create_parallel_rays(
+        num_rays=num_rays,
+        aperture_diameter=telescope.primary_diameter,
+        entry_height=telescope.tube_length * 1.15,
+        wavelength_nm=wavelength_nm,
+    )
+    # Capture pupil entry heights before tracing
+    entry_heights = np.array([r.origin[0] for r in rays])
+
+    telescope.trace_rays(rays)
+    # Use the paraxial focal plane (where central rays focus) so SA
+    # produces the canonical Δy ∝ h³ cubic curve. Plotting at the
+    # circle of least confusion (min-spread plane) instead would
+    # give a less-canonical W-shape that doesn't match the textbook
+    # "cubic = SA" teaching.
+    y_offsets = _paraxial_focal_plane_offsets(rays)
+
+    fig, ax = plt.subplots(figsize=figsize)
+
+    if y_offsets is None or len(y_offsets) == 0:
+        ax.text(0.5, 0.5, "Ray trace failed", ha="center", va="center",
+                transform=ax.transAxes)
+        return fig
+
+    # Drop NaN rays (failed traces or far-extrapolated)
+    valid = ~np.isnan(y_offsets)
+    entry_heights = entry_heights[valid]
+    y_offsets = y_offsets[valid]
+
+    # Sort by pupil height for a clean trace line
+    sort_idx = np.argsort(entry_heights)
+    h_sorted = entry_heights[sort_idx]
+    y_sorted = y_offsets[sort_idx]
+
+    colors, sm = _pupil_colormap_colors(h_sorted)
+
+    # The connecting trace line: faint, so it suggests "this is a
+    # smooth function of h" without competing with the dots.
+    ax.plot(h_sorted, y_sorted * 1000.0, color="gray", alpha=0.4,
+            linewidth=1.0, zorder=1)
+
+    # Coloured dots (one per ray)
+    ax.scatter(h_sorted, y_sorted * 1000.0, c=colors, s=70,
+                edgecolors="black", linewidths=0.5, zorder=3)
+
+    # Reference axes
+    ax.axhline(0.0, color="black", linestyle=":", alpha=0.4, zorder=0)
+    ax.axvline(0.0, color="black", linestyle=":", alpha=0.4, zorder=0)
+
+    # Annotations
+    primary = getattr(telescope, "primary_type", "")
+    primary_label = f" ({primary})" if primary else ""
+    f_ratio = telescope.focal_ratio
+    rms_um = float(np.std(y_sorted) * 1000.0)
+    max_um = float(np.max(np.abs(y_sorted)) * 1000.0)
+
+    if title is None:
+        title = (f"Ray fan — {telescope.primary_diameter:.0f} mm "
+                 f"f/{f_ratio:.1f}{primary_label}")
+    ax.set_title(title, fontsize=11)
+    ax.set_xlabel("Pupil entry height h (mm)")
+    ax.set_ylabel("Transverse focal-plane offset Δy (µm)")
+    ax.grid(True, alpha=0.3)
+
+    # Pupil-zone colorbar (matches the companion ray-trace panel)
+    cbar = fig.colorbar(sm, ax=ax, shrink=0.85,
+                        label="|Pupil zone| (mm)")
+    cbar.ax.tick_params(labelsize=8)
+
+    # Aberration cheat-sheet
+    cheat = ("Curve shape ↔ aberration\n"
+             "  S-shape (h³)   spherical\n"
+             "  U-shape (h²)   coma\n"
+             "  tilt (h¹)      defocus\n"
+             "  ≈ 0 across h   diffraction-limited")
+    ax.text(0.02, 0.98, cheat, transform=ax.transAxes,
+            va="top", ha="left", fontsize=7,
+            bbox=dict(boxstyle="round,pad=0.3",
+                      facecolor="white", alpha=0.85,
+                      edgecolor="gray"))
+    # Stats
+    ax.text(0.98, 0.02,
+            f"RMS Δy = {rms_um:.2f} µm\nmax |Δy| = {max_um:.2f} µm",
+            transform=ax.transAxes, va="bottom", ha="right",
+            fontsize=7,
+            bbox=dict(boxstyle="round,pad=0.3",
+                      facecolor="white", alpha=0.85,
+                      edgecolor="gray"))
+
+    plt.tight_layout()
+    if save_path:
+        fig.savefig(save_path, dpi=150, bbox_inches="tight")
+    return fig
+
+
+def plot_ray_trace_pupil_colored(telescope: Telescope,
+                                  wavelength_nm: float = 550.0,
+                                  num_rays: int = 21,
+                                  figsize: tuple[float, float] = (7, 5),
+                                  title: str | None = None,
+                                  save_path: str | None = None,
+                                  ) -> plt.Figure:
+    """Ray-trace plot with rays coloured by pupil entry zone.
+
+    Companion to `plot_ray_fan_telescope` — both use the same
+    viridis-on-|h| colormap so a ray in the trace and its point in
+    the ray fan share a colour. Useful for spherical-aberration
+    teaching: the user can see that the bright (marginal) rays
+    cross the axis short of the dim (paraxial) rays.
+    """
+    from telescope_sim.source.light_source import create_parallel_rays
+    rays = create_parallel_rays(
+        num_rays=num_rays,
+        aperture_diameter=telescope.primary_diameter,
+        entry_height=telescope.tube_length * 1.15,
+        wavelength_nm=wavelength_nm,
+    )
+    entry_heights = np.array([r.origin[0] for r in rays])
+
+    telescope.trace_rays(rays)
+
+    colors, sm = _pupil_colormap_colors(entry_heights)
+
+    components = telescope.get_components_for_plotting()
+    if title is None:
+        primary = getattr(telescope, "primary_type", "")
+        primary_label = f" ({primary})" if primary else ""
+        title = (f"Ray trace — {telescope.primary_diameter:.0f} mm "
+                 f"f/{telescope.focal_ratio:.1f}{primary_label}")
+
+    fig, ax = plt.subplots(figsize=figsize)
+    _draw_ray_trace(ax, rays, components, title=title,
+                    ray_color="gold",  # ignored when ray_colors is set
+                    ray_alpha=0.85,
+                    show_tube=True,
+                    ray_colors=colors,
+                    show_focal_marker=False)
+
+    # Extend each ray's final (post-primary) segment forward to the
+    # paraxial focal plane. The base tracer stops at the secondary
+    # depth, which hides the *whole point* of the SA scenario —
+    # marginal rays crossing the axis short of paraxial. We unfold
+    # the geometry and just continue the primary→secondary
+    # direction; physically correct because the secondary is a flat
+    # mirror that doesn't change ray convergence.
+    paraxial_offsets = _paraxial_focal_plane_offsets(rays)
+    if paraxial_offsets is not None:
+        # Recover the paraxial focal-plane scan-axis position by
+        # locating the smallest-|h| ray with a non-degenerate
+        # direction (matches the logic in the offset helper).
+        traced = [r for r in rays if len(r.history) >= 2]
+        segments = [(np.array(r.history[-2]), np.array(r.history[-1]))
+                    for r in traced]
+        total_dx = sum(abs(s[1][0] - s[0][0]) for s in segments)
+        total_dy = sum(abs(s[1][1] - s[0][1]) for s in segments)
+        scan_axis = 0 if total_dx >= total_dy else 1
+        perp_axis = 1 - scan_axis
+        candidates = [
+            r for r in traced
+            if abs(r.origin[0]) > 1e-3
+            and abs((np.array(r.history[-1])
+                     - np.array(r.history[-2]))[perp_axis]) > 1e-6
+        ]
+        if candidates:
+            ref = min(candidates, key=lambda r: abs(r.origin[0]))
+            rp0 = np.array(ref.history[-2])
+            rp1 = np.array(ref.history[-1])
+            rdir = rp1 - rp0
+            t_ref = -rp0[perp_axis] / rdir[perp_axis]
+            plane_pos = rp0[scan_axis] + t_ref * rdir[scan_axis]
+
+            # Now draw the extension for each ray
+            for ray_idx, r in enumerate(rays):
+                if len(r.history) < 2:
+                    continue
+                p0 = np.array(r.history[-2])
+                p1 = np.array(r.history[-1])
+                d = p1 - p0
+                if abs(d[scan_axis]) < 1e-12:
+                    continue
+                # Stop a bit past the focal plane so the SA crossover
+                # is visually obvious
+                if scan_axis == 1:
+                    extend_to = plane_pos + 0.05 * (plane_pos - p0[scan_axis])
+                else:
+                    extend_to = plane_pos + 0.05 * (plane_pos - p0[scan_axis])
+                t = (extend_to - p0[scan_axis]) / d[scan_axis]
+                ext_pt = p0 + t * d
+                # Use the matching pupil color
+                if ray_idx < len(colors):
+                    c = colors[ray_idx]
+                else:
+                    c = "gold"
+                ax.plot([p1[0], ext_pt[0]],
+                        [p1[1], ext_pt[1]],
+                        color=c, alpha=0.6, linewidth=1.0,
+                        linestyle=":", zorder=2)
+
+            # Mark the paraxial focal plane with a horizontal/vertical
+            # guide line + a star at the on-axis position.
+            if scan_axis == 1:
+                ax.axhline(plane_pos, color="gray", linestyle="--",
+                            alpha=0.5, linewidth=0.8)
+                ax.plot(0.0, plane_pos, "r*", markersize=12, zorder=5,
+                        label="Paraxial focal plane")
+            else:
+                ax.axvline(plane_pos, color="gray", linestyle="--",
+                            alpha=0.5, linewidth=0.8)
+                ax.plot(plane_pos, 0.0, "r*", markersize=12, zorder=5,
+                        label="Paraxial focal plane")
+
+    # Add pupil-zone colorbar — matches the ray-fan panel
+    cbar = fig.colorbar(sm, ax=ax, shrink=0.7, pad=0.02,
+                        label="|Pupil zone| (mm)")
+    cbar.ax.tick_params(labelsize=8)
+
+    plt.tight_layout()
+    if save_path:
+        fig.savefig(save_path, dpi=150, bbox_inches="tight")
+    return fig
 
 
 def plot_spot_diagram_telescope(telescope: Telescope,

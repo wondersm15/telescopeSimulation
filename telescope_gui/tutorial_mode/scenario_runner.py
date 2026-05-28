@@ -148,6 +148,8 @@ def _call_plot_function(
         plot_vignetting_curve,
         plot_spot_diagram_telescope,
         plot_chromatic_focal_planes,
+        plot_ray_fan_telescope,
+        plot_ray_trace_pupil_colored,
     )
 
     if name == "plot_source_image":
@@ -224,6 +226,21 @@ def _call_plot_function(
     elif name == "plot_spot_diagram_telescope":
         fig = plot_spot_diagram_telescope(
             telescope, wavelength_nm=wavelength_nm, figsize=figsize)
+        return fig, {"plot_function": name}
+
+    elif name == "plot_ray_fan_telescope":
+        fig = plot_ray_fan_telescope(
+            telescope, wavelength_nm=wavelength_nm, figsize=figsize)
+        return fig, {"plot_function": name}
+
+    elif name == "plot_ray_trace_pupil_colored":
+        # Newtonian ray traces are tall (rays travel ~focal_length
+        # along the y-axis vs ~aperture wide); use the scenario's
+        # native square canvas. matplotlib auto-fits within set_aspect.
+        fig = plot_ray_trace_pupil_colored(
+            telescope, wavelength_nm=wavelength_nm,
+            figsize=figsize,
+        )
         return fig, {"plot_function": name}
 
     elif name == "plot_chromatic_focal_planes":

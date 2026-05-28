@@ -458,10 +458,15 @@ SCENARIOS: list[ScenarioDefinition] = [
         act=1, act_label="Isolated Effects",
         description=(
             "A spherical primary mirror does not focus all rays to the same point — "
-            "marginal rays focus closer than paraxial rays. The 1D PSF profile (left) "
-            "shows the radial intensity drop; the geometric spot diagram (right) shows "
-            "the actual ray landing pattern. Toggle to a parabolic primary to see the "
-            "blur disappear; increasing f-ratio shrinks the blur as 1/f³."
+            "marginal rays focus closer than paraxial rays.\n"
+            "Left: the ray trace, with each ray coloured by its pupil entry zone "
+            "(dark = central, bright = marginal). Notice how the bright marginal "
+            "rays cross the axis short of the dim paraxial rays.\n"
+            "Right: the ray fan — transverse focal-plane offset vs pupil height. "
+            "The cubic (S-shape) curve is the signature of spherical aberration; "
+            "coma would give a parabolic (U-shape) ray fan, defocus a linear one. "
+            "Toggle to a parabolic primary to see the curve collapse to ≈ 0 "
+            "across the entire pupil (diffraction-limited)."
         ),
         learn_more_section="Implemented Physics",
         before_telescope=TelescopeConfig(
@@ -470,16 +475,16 @@ SCENARIOS: list[ScenarioDefinition] = [
             enable_obstruction=False, spider_vanes=0,
         ),
         before_source=_POINT,
-        before_label="1D PSF profile",
+        before_label="Ray trace (pupil-coloured)",
         after_telescope=TelescopeConfig(
             telescope_type="Newtonian", diameter=200.0, focal_length=800.0,
             primary_type="spherical",
             enable_obstruction=False, spider_vanes=0,
         ),
         after_source=_POINT,
-        after_label="Geometric spot diagram →",
-        plot_function="plot_psf_profile",
-        secondary_plot_function="plot_spot_diagram_telescope",
+        after_label="Ray fan (h vs Δy) →",
+        plot_function="plot_ray_trace_pupil_colored",
+        secondary_plot_function="plot_ray_fan_telescope",
         theory_function="compute_spherical_aberration_theory",
         tweakable_params=("diameter", "focal_length", "primary_type"),
         both_sides_dynamic=True,
