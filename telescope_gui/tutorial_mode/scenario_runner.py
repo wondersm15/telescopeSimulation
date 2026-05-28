@@ -85,6 +85,7 @@ def run_scenario_side(
     log_scale: bool | None = None,
     focus_wavelength_nm: float = 550.0,
     display_stretch: str = "linear",
+    exposure_level: float = 1.0,
 ) -> tuple[Figure | None, dict, str | None]:
     """Run one side (before or after) of a scenario.
 
@@ -107,6 +108,7 @@ def run_scenario_side(
             log_scale=log_scale,
             focus_wavelength_nm=focus_wavelength_nm,
             display_stretch=display_stretch,
+            exposure_level=exposure_level,
         )
         info["telescope"] = telescope
         info["source"] = source
@@ -129,6 +131,7 @@ def _call_plot_function(
     log_scale: bool | None = None,
     focus_wavelength_nm: float = 550.0,
     display_stretch: str = "linear",
+    exposure_level: float = 1.0,
 ) -> tuple[Figure, dict]:
     """Dispatch to the appropriate telescope_sim plot function."""
     from telescope_sim.plotting import (
@@ -153,10 +156,15 @@ def _call_plot_function(
             figsize=figsize,
             display_stretch=display_stretch,
             focus_wavelength_nm=focus_wavelength_nm,
+            exposure_level=exposure_level,
         )
         if isinstance(fig, list):
             fig = fig[0]
-        return fig, {"plot_function": name, "display_stretch": display_stretch}
+        return fig, {
+            "plot_function": name,
+            "display_stretch": display_stretch,
+            "exposure_level": exposure_level,
+        }
 
     elif name == "plot_psf_2d":
         # log_scale defaults to True (legacy behavior) for plot_psf_2d

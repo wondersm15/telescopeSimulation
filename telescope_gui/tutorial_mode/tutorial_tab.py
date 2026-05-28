@@ -17,7 +17,7 @@ import matplotlib.pyplot as plt
 from PyQt6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QLabel, QPushButton,
     QScrollArea, QGroupBox, QSizePolicy, QDoubleSpinBox,
-    QSpinBox, QComboBox, QFrame, QCheckBox,
+    QSpinBox, QComboBox, QFrame, QCheckBox, QSlider,
 )
 from PyQt6.QtCore import Qt
 
@@ -81,6 +81,10 @@ class TutorialTab(QWidget):
         self._focus_wavelength_combo: QComboBox | None = None
         # Display-stretch toggle (linear / log) for source-image scenarios
         self._display_stretch_combo: QComboBox | None = None
+        # Exposure-level slider (log-scaled) for source-image scenarios.
+        # Default per-scenario via ScenarioDefinition.default_exposure.
+        self._exposure_slider: QSlider | None = None
+        self._exposure_value_label: QLabel | None = None
         self._build_ui()
         # Load the first implemented scenario automatically
         first = get_first_implemented()
@@ -277,6 +281,8 @@ class TutorialTab(QWidget):
         self._show_overlay_check = None
         self._focus_wavelength_combo = None
         self._display_stretch_combo = None
+        self._exposure_slider = None
+        self._exposure_value_label = None
 
         params = scenario.tweakable_params
         params_before = scenario.tweakable_params_before
@@ -356,6 +362,7 @@ class TutorialTab(QWidget):
         )
         if wants_display_combo:
             self._add_display_stretch_combo()
+            self._add_exposure_slider(scenario.default_exposure)
 
         self.controls_layout.addStretch()
 
@@ -609,6 +616,72 @@ class TutorialTab(QWidget):
         self.controls_layout.addLayout(col)
         self._display_stretch_combo = combo
 
+    # Exposure slider — log-scaled, internal range 0..200 maps to
+    # 10^((slider-100)/50) = 0.01× → 1× → 100×. Default position 100
+    # is overridden by ScenarioDefinition.default_exposure.
+    _EXPOSURE_SLIDER_MIN = 0
+    _EXPOSURE_SLIDER_MAX = 200
+    _EXPOSURE_SLIDER_CENTER = 100
+
+    @classmethod
+    def _slider_to_exposure(cls, pos: int) -> float:
+        return 10.0 ** ((pos - cls._EXPOSURE_SLIDER_CENTER) / 50.0)
+
+    @classmethod
+    def _exposure_to_slider(cls, exposure: float) -> int:
+        import math
+        return int(round(cls._EXPOSURE_SLIDER_CENTER
+                          + 50.0 * math.log10(max(exposure, 1e-9))))
+
+    def _add_exposure_slider(self, default_exposure: float):
+        """Exposure-level slider for source-image scenarios.
+
+        Log-scaled: a one-decade move on the slider corresponds to a
+        10× change in collected flux. Default position is read from
+        the scenario's `default_exposure` so Acts 1+2 can preset
+        whatever exposure makes their lesson read clearly without
+        forcing the user to fiddle.
+        """
+        col = QVBoxLayout()
+        header = QHBoxLayout()
+        lbl = QLabel("Exposure")
+        lbl.setStyleSheet(
+            "font-size: 8pt; font-weight: normal; color: #555;")
+        value_lbl = QLabel(f"{default_exposure:.2f}×")
+        value_lbl.setStyleSheet(
+            "font-size: 8pt; font-weight: bold; color: #333;")
+        header.addWidget(lbl)
+        header.addStretch()
+        header.addWidget(value_lbl)
+        col.addLayout(header)
+
+        slider = QSlider(Qt.Orientation.Horizontal)
+        slider.setMinimum(self._EXPOSURE_SLIDER_MIN)
+        slider.setMaximum(self._EXPOSURE_SLIDER_MAX)
+        slider.setValue(self._exposure_to_slider(default_exposure))
+        slider.setToolTip(
+            "Collected flux ∝ exposure. Higher = brighter image.\n"
+            "1.0× is the photometric anchor (mag-0 star, 100 mm,\n"
+            "no seeing → just-below-saturation). Bright sources or\n"
+            "large apertures will saturate at lower exposure; faint\n"
+            "sources need higher exposure to lift above the noise.\n"
+            "Range: 0.01× to 100×, log-scaled."
+        )
+
+        def _on_change(v):
+            value_lbl.setText(f"{self._slider_to_exposure(v):.2f}×")
+
+        def _on_release():
+            self._on_update_clicked()
+
+        slider.valueChanged.connect(_on_change)
+        slider.sliderReleased.connect(_on_release)
+
+        col.addWidget(slider)
+        self.controls_layout.addLayout(col)
+        self._exposure_slider = slider
+        self._exposure_value_label = value_lbl
+
     # Index of the "F=C plane" item in the focus-wavelength combo (kept
     # as a constant so the sync logic doesn't drift from the addItem
     # order in _add_focus_wavelength_combo).
@@ -710,6 +783,12 @@ class TutorialTab(QWidget):
             return None
         return self._psf_scale_combo.currentIndex() == 0  # 0 = "Log"
 
+    def _current_exposure(self, scenario: ScenarioDefinition) -> float:
+        """Return the user-selected exposure level, or scenario default."""
+        if self._exposure_slider is None:
+            return scenario.default_exposure
+        return self._slider_to_exposure(self._exposure_slider.value())
+
     @staticmethod
     def _axis_lock_is_safe(scenario: ScenarioDefinition) -> bool:
         """True when after-side axes can be safely clamped to before-side limits.
@@ -785,6 +864,7 @@ class TutorialTab(QWidget):
         focus_wl_before = (self._focus_wavelength_combo.currentData()
                            if self._focus_wavelength_combo is not None
                            else 550.0)
+        exposure = self._current_exposure(scenario)
         fig, info, err = run_scenario_side(
             before_telescope,
             before_source,
@@ -797,6 +877,7 @@ class TutorialTab(QWidget):
             log_scale=self._current_log_scale(),
             display_stretch=stretch,
             focus_wavelength_nm=focus_wl_before,
+            exposure_level=exposure,
         )
         if err:
             self.status_label.setText("Before render failed")
@@ -881,6 +962,7 @@ class TutorialTab(QWidget):
         stretch = (self._display_stretch_combo.currentData()
                    if self._display_stretch_combo is not None else "linear")
 
+        exposure = self._current_exposure(scenario)
         fig, info, err = run_scenario_side(
             after_config,
             after_source_config,
@@ -893,6 +975,7 @@ class TutorialTab(QWidget):
             log_scale=self._current_log_scale(),
             focus_wavelength_nm=focus_wl,
             display_stretch=stretch,
+            exposure_level=exposure,
         )
 
         if err:

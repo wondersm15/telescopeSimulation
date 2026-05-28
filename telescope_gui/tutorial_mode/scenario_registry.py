@@ -115,6 +115,15 @@ class ScenarioDefinition:
     # Python API terminal command template (use {param} placeholders)
     terminal_template: str = ""
 
+    # Default exposure level for this scenario. 1.0 = anchor (mag 0
+    # through 100 mm peaks just below saturation). Scenarios that
+    # contain only dim stars or that need extra headroom for asinh
+    # stretch can override; Act 1+2 scenarios pick whatever exposure
+    # makes the lesson read cleanly (this is a display knob, not a
+    # physics override). Act 3 ("Brightness, Saturation & Filters")
+    # exposes this directly to the user.
+    default_exposure: float = 1.0
+
 
 # ---------------------------------------------------------------------------
 # Shared telescope configs used across multiple scenarios
@@ -219,7 +228,11 @@ SCENARIOS: list[ScenarioDefinition] = [
             "The Rayleigh limit 1.22\u03bb/D sets the minimum resolvable separation. A 100\u202fmm scope "
             "needs 1.38\u2033 to resolve; a 200\u202fmm scope needs only 0.69\u2033. Drag the slider to see "
             "both sides update simultaneously. "
-            "Scale context: easy doubles ≈ 5\u2033; tough planetary doubles \u2248 1\u2033; typical seeing 1\u20134\u2033 \u2014 atmosphere often dominates."
+            "Scale context: easy doubles ≈ 5\u2033; tough planetary doubles \u2248 1\u2033; typical seeing 1\u20134\u2033 \u2014 atmosphere often dominates.\n"
+            "Note: rendered in vacuum (no atmospheric seeing) so the diffraction "
+            "limit reads cleanly. Real eyepiece views are seeing-dominated and "
+            "rarely show the Airy rings shown here \u2014 see *aperture_vs_seeing* "
+            "for the realistic combined view."
         ),
         learn_more_section="Diffraction",
         before_telescope=TelescopeConfig(
@@ -730,6 +743,11 @@ SCENARIOS: list[ScenarioDefinition] = [
                           "spider_vanes", "spider_vane_width", "seeing"),
         effect_toggles=("obstruction", "spider_vanes", "coma", "vignetting", "seeing"),
         implemented=True,
+        # Jupiter is bright: at 200 mm aperture, the disk surface flux
+        # × aperture² saturates well above 1.0. Lower exposure brings
+        # the disk into the linear range so bands and limb darkening
+        # remain visible without complete clipping.
+        default_exposure=0.25,
         terminal_template=(
             "from telescope_sim.geometry import NewtonianTelescope\n"
             "from telescope_sim.source.sources import Jupiter\n"
@@ -777,6 +795,9 @@ SCENARIOS: list[ScenarioDefinition] = [
                           "spider_vanes", "spider_vane_width", "seeing"),
         effect_toggles=("obstruction", "spider_vanes", "coma", "vignetting", "seeing"),
         implemented=True,
+        # Same reasoning as jupiter_full — bright disk at 200 mm
+        # saturates at exp=1.0; lower exposure preserves ring detail.
+        default_exposure=0.25,
         terminal_template=(
             "from telescope_sim.geometry import NewtonianTelescope\n"
             "from telescope_sim.source.sources import Saturn\n"

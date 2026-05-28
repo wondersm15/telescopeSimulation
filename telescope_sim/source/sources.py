@@ -114,6 +114,9 @@ class DoubleStar(AstronomicalSource):
         ix_a = int(round(center - half_sep_px))
         ix_b = int(round(center + half_sep_px))
 
+        # Absolute fluxes from magnitudes (no peak normalisation —
+        # downstream renderer needs the absolute scale to interact
+        # correctly with aperture × exposure × saturation).
         intensity_a = 10.0 ** (-0.4 * self.magnitude_primary)
         intensity_b = 10.0 ** (-0.4 * self.magnitude_secondary)
 
@@ -122,8 +125,6 @@ class DoubleStar(AstronomicalSource):
         if 0 <= ix_b < num_pixels:
             image[center, ix_b] = intensity_b
 
-        if image.max() > 0:
-            image /= image.max()
         return image
 
     @property

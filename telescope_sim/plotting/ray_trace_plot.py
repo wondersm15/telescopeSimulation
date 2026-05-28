@@ -30,6 +30,36 @@ if TYPE_CHECKING:
                  | SchmidtCassegrainTelescope)
 
 
+# ── Absolute brightness calibration ──────────────────────────────────
+#
+# These two constants form the photometric anchor for source-image
+# rendering. Together they define what "exposure_level = 1.0" means:
+#
+#   APERTURE_REFERENCE_MM
+#       Reference aperture (100 mm). A telescope of diameter D collects
+#       N ∝ D² photons; we scale per-star flux by (D / APERTURE_REFERENCE_MM)²
+#       so a bigger scope genuinely brightens the image (physically correct
+#       — previously the renderer ignored aperture area).
+#
+#   SATURATION_LEVEL
+#       The rendered pixel value that maps to fully-saturated display
+#       (clipped to 1.0). Calibrated empirically so a mag-0 PointSource
+#       through a 100 mm scope at unit exposure, no seeing, default FOV
+#       (20″) and 512 px canvas peaks at ~0.95 — just below saturation.
+#       Brighter stars / larger apertures / longer exposures will then
+#       legitimately saturate; fainter stars / smaller apertures will
+#       sit at their true relative brightness.
+#
+# Empirical anchor measurement (100 mm f/8, mag 0, 20″ FOV, 512 px,
+# no seeing): raw stamped peak ≈ 0.993. SATURATION_LEVEL = 1.0 puts
+# this just below saturation, so the anchor case displays as a bright
+# (but not clipped) star. Larger apertures or brighter magnitudes
+# saturate; smaller apertures or dimmer stars sit at their true
+# relative brightness (mag 4 at 100 mm ≈ 0.025).
+APERTURE_REFERENCE_MM = 100.0
+SATURATION_LEVEL = 1.0
+
+
 def _draw_ray_trace(ax: plt.Axes, rays: list[Ray], components: dict,
                     title: str = "Newtonian Telescope Ray Trace",
                     ray_color: str = "gold",
@@ -3677,6 +3707,7 @@ def _render_source_through_telescope(
         display_stretch: str = "linear",
         focus_wavelength_nm: float = 550.0,
         display_num_pixels: int | None = None,
+        exposure_level: float = 1.0,
 ) -> tuple[np.ndarray, float, dict]:
     """Render an astronomical source as seen through the telescope.
 
@@ -3770,8 +3801,13 @@ def _render_source_through_telescope(
                 pa = np.degrees(np.arctan2(y_as, x_as))
                 stars.append((r, pa, mag))
 
-        # Determine brightest star for intensity normalization
-        min_mag = min(s[2] for s in stars)
+        # Aperture-area photon-collection factor: a real telescope of
+        # diameter D collects N ∝ D² photons. The reference aperture
+        # (APERTURE_REFERENCE_MM = 100 mm) is the absolute brightness
+        # anchor — combined with SATURATION_LEVEL, a mag-0 star through
+        # a 100 mm scope at unit exposure peaks just below saturation.
+        aperture_factor = (telescope.primary_diameter
+                           / APERTURE_REFERENCE_MM) ** 2
 
         # Expand the PSF kernel if the off-axis coma spot for any star
         # exceeds the Airy-only kernel size. Otherwise the spot pattern
@@ -3850,8 +3886,8 @@ def _render_source_through_telescope(
         star_rgb = getattr(source, "star_spectral_rgb", None)
 
         for star_idx, (field_r, pa_deg, mag) in enumerate(stars):
-            # Star intensity relative to brightest
-            intensity = 10.0 ** (-0.4 * (mag - min_mag))
+            # Absolute intensity: photon flux from this magnitude × aperture²
+            intensity = 10.0 ** (-0.4 * mag) * aperture_factor
             # Per-channel RGB weights for THIS star (used by the
             # polychromatic branch). Defaults to (1, 1, 1) — white.
             if star_rgb is not None and star_idx < len(star_rgb):
@@ -3973,6 +4009,14 @@ def _render_source_through_telescope(
         ideal = source.render_ideal(half_fov_arcsec, num_pixels)
         ideal_rgb = source.render_ideal_rgb(half_fov_arcsec, num_pixels)
 
+        # Aperture-area photon-collection factor (see per-star path).
+        # The source's `render_ideal*` returns a peak-normalised disk;
+        # multiply by D²/D_ref² so absolute brightness tracks aperture.
+        aperture_factor = (telescope.primary_diameter
+                           / APERTURE_REFERENCE_MM) ** 2
+        ideal = ideal * aperture_factor
+        ideal_rgb = ideal_rgb * aperture_factor
+
         # Build on-axis PSF kernel on the same angular pixel scale,
         # then convolve in image space.
         psf_angular_half = airy_radius_arcsec * 8
@@ -4061,6 +4105,10 @@ def _render_source_through_telescope(
         # before F1.4). Resample the PSF to match the image pixel scale so
         # different apertures yield different rendered images.
         ideal = source.render_ideal(half_fov_arcsec, num_pixels)
+        # Aperture-area photon-collection factor (see per-star path).
+        aperture_factor = (telescope.primary_diameter
+                           / APERTURE_REFERENCE_MM) ** 2
+        ideal = ideal * aperture_factor
         pixel_scale_arcsec = 2.0 * half_fov_arcsec / num_pixels
         pixel_scale_mm = pixel_scale_arcsec / plate_scale
         psf_pixel_scale_mm = 2.0 * psf_half_mm / psf_n
@@ -4080,8 +4128,15 @@ def _render_source_through_telescope(
                 psf = psf[h - max_half:h + max_half + 1,
                            h - max_half:h + max_half + 1]
 
-        psf_sum = psf.sum()
-        psf_kernel = psf / psf_sum if psf_sum > 0 else psf
+        # Peak-normalised PSF kernel — convolving with a delta of
+        # absolute intensity I yields peak = I. This matches the
+        # per-star path (which stamps the peak-normalised kernel
+        # scaled by intensity). Using a sum-normalised kernel here
+        # would suppress the peak by 1/PSF_area and make point-like
+        # sources via the generic fallback render dim relative to
+        # PointSource/StarField at the same magnitude.
+        psf_peak = psf.max()
+        psf_kernel = psf / psf_peak if psf_peak > 0 else psf
         image = fftconvolve(ideal, psf_kernel, mode="same")
 
     # ── Detector binning (physically-correct flux integration) ────────
@@ -4116,17 +4171,23 @@ def _render_source_through_telescope(
                 ).sum(axis=(1, 3))
             num_pixels = display_num_pixels
 
-    # Capture the PRE-SEEING image max as the normalisation reference.
-    # Without this, normalising by the post-seeing max would push the
-    # peak back to 1.0 regardless of seeing, making wider stars appear
-    # non-physically brighter. By referencing the pre-seeing peak, the
-    # seeing convolution (which conserves total flux but spreads it
-    # over more pixels) visibly dims the per-pixel peak — physically
-    # honest.
-    intrinsic_max = float(image.max()) if image.max() > 0 else 1.0
-    intrinsic_max_rgb = (float(image_rgb.max())
-                         if image_rgb is not None and image_rgb.max() > 0
-                         else 1.0)
+    # Absolute brightness normalisation: divide by a fixed reference
+    # (SATURATION_LEVEL × exposure_level) so a mag-0 star through a
+    # 100 mm scope at unit exposure peaks just below 1.0, brighter
+    # sources/larger apertures legitimately saturate, fainter ones
+    # sit at their true relative brightness. The previous code
+    # divided by image.max(), which forced the brightest pixel of
+    # every frame to 1.0 — that erased absolute brightness
+    # information and made aperture/exposure changes invisible.
+    # Seeing-induced peak dimming is now naturally captured: seeing
+    # convolution spreads flux, so post-seeing peak < pre-seeing peak,
+    # and both are referenced to the same fixed saturation_level.
+    # Higher exposure_level → more photons accumulated → brighter image,
+    # so it scales the *numerator*, equivalent to dividing by
+    # SATURATION_LEVEL / exposure_level. Inverting the divisor keeps the
+    # photometric interpretation honest (long exposure of a faint star
+    # eventually saturates).
+    saturation_divisor = SATURATION_LEVEL / max(exposure_level, 1e-9)
 
     # Optional atmospheric seeing
     if seeing_arcsec is not None and seeing_arcsec > 0:
@@ -4178,12 +4239,28 @@ def _render_source_through_telescope(
                     image_rgb[..., c] = gaussian_filter(
                         image_rgb[..., c], sigma=eye_sigma_pix)
 
-    # Normalise by the pre-seeing intrinsic max so wider seeing visibly
-    # dims the per-pixel peak (physical: same flux spread over more
-    # pixels = lower peak per pixel).
-    image = image / intrinsic_max
+    # Apply the fixed-reference normalisation. Values above 1.0 will
+    # be clipped by the final np.clip — that's the saturation effect.
+    image = image / saturation_divisor
     if image_rgb is not None:
-        image_rgb = image_rgb / intrinsic_max_rgb
+        image_rgb = image_rgb / saturation_divisor
+
+    # Cone-desaturation (Eye-view modes only): at high linear flux the
+    # eye's colour discrimination drops — bright sources appear
+    # whitewashed. Blend RGB toward grey luminance by w = I / (I + I_sat)
+    # so high-flux pixels desaturate smoothly without ad-hoc thresholds.
+    # I_sat = 0.5 means a pixel at the saturation level is ~half-blended
+    # toward grey; very bright (clipped) pixels are nearly white.
+    if (display_stretch in ("log", "log_integrated")
+            and image_rgb is not None):
+        lum = (0.2126 * image_rgb[..., 0]
+               + 0.7152 * image_rgb[..., 1]
+               + 0.0722 * image_rgb[..., 2])
+        I_sat = 0.5
+        w_desat = lum / (lum + I_sat)
+        # Broadcast: blend each channel toward luminance.
+        image_rgb = (image_rgb
+                     + w_desat[..., None] * (lum[..., None] - image_rgb))
 
     if display_stretch in ("log", "log_integrated"):
         a = 0.001
@@ -4374,6 +4451,7 @@ def plot_source_image(telescope: Telescope,
                       apply_vignetting: bool = True,
                       display_stretch: str = "linear",
                       focus_wavelength_nm: float = 550.0,
+                      exposure_level: float = 1.0,
                       ) -> plt.Figure | list[plt.Figure]:
     """Plot a simulated image of an astronomical source through the telescope.
 
@@ -4466,6 +4544,7 @@ def plot_source_image(telescope: Telescope,
         display_stretch=display_stretch,
         focus_wavelength_nm=focus_wavelength_nm,
         display_num_pixels=num_pixels,
+        exposure_level=exposure_level,
     )
     info["display_stretch"] = display_stretch
     info["focus_wavelength_nm"] = focus_wavelength_nm
