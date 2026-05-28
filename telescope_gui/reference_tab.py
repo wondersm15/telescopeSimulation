@@ -485,6 +485,59 @@ Real seeing has a von K&aacute;rm&aacute;n spectrum and is not perfectly
 Gaussian &mdash; bright stars show non-Gaussian wings and temporal variation.</p>
 <p><i>Accuracy: Gaussian approximation &mdash; adequate for average long-exposure
 seeing effects.</i></p>
+
+<h3>9. Photometry, Saturation &amp; Filters</h3>
+<p>Source brightness is anchored to a fixed reference rather than
+re-normalised per frame, so absolute magnitude, aperture, exposure,
+and filter transmission all interact realistically.</p>
+<p><b>Brightness pipeline (linear domain):</b></p>
+<p style="font-family:monospace; margin-left:20px;">
+flux = 10<sup>&minus;0.4 m</sup> &times; (D / D<sub>ref</sub>)<sup>2</sup>
+&times; T(&lambda;) &times; exposure
+</p>
+<p>where D<sub>ref</sub> = 100&nbsp;mm is the calibration aperture and
+T(&lambda;) is the filter transmission. A mag-0 star through a 100&nbsp;mm
+scope at unit exposure with no filter peaks just below the saturation
+level (= 1.0); brighter sources, larger apertures, or longer exposures
+saturate; dimmer sources sit at their true relative brightness.</p>
+<p><b>Display modes</b> (apply to the same simulated data):</p>
+<ul>
+  <li><b>Detector (linear)</b>: raw per-pixel intensity. A real CCD's
+  response to photon counts. Bright objects clip to white; dim ones
+  sit at a few percent. This is what a calibrated detector records
+  before any post-processing.</li>
+  <li><b>Eye (asinh)</b>: an inverse-hyperbolic stretch that
+  approximates the eye's logarithmic intensity response (Pogson scale).
+  Reveals dim features alongside bright ones &mdash; matches the visual
+  impression at the eyepiece.</li>
+  <li><b>Eye + integration</b>: as Eye, plus a 1&Prime; spatial blur
+  approximating the eye's spatial resolution at moderate magnification.</li>
+</ul>
+<p>In the Eye modes, an additional <b>cone-desaturation</b> step blends
+high-flux pixels toward grey luminance by
+<i>w</i> = <i>I</i>/(<i>I</i> + 0.5). This reproduces the &ldquo;Jupiter
+looks washed out&rdquo; effect &mdash; the eye's colour-sensitive cones lose
+discrimination at high brightness, so saturated pixels read as nearly
+white rather than retaining their original hue.</p>
+<p><b>Filters</b> are applied in the linear-flux domain before
+saturation clipping, so they really do reduce the photons delivered to
+the detector:</p>
+<ul>
+  <li><b>Neutral density (ND)</b>: wavelength-flat transmission of
+  10<sup>&minus;OD</sup>. ND-1.0 passes 10&nbsp;%, ND-2.0 1&nbsp;%.
+  Useful for bringing bright targets (Moon, Jupiter at 250&times;) into
+  a comfortable visual range without changing magnification or PSF.</li>
+  <li><b>Wratten colour filters</b> (W25 red, W47 blue, W58 green):
+  Gaussian-approximated passbands. They shift the RGB balance and
+  reduce overall brightness because most of the spectrum is blocked &mdash;
+  use for boosting low-contrast planetary detail (W25 lifts the Great
+  Red Spot, W47 emphasises Jovian zones, W58 increases belt
+  contrast).</li>
+</ul>
+<p><i>Accuracy: filter spectra are Gaussian approximations of the
+published Wratten/Schott curves; the qualitative behaviour matches but
+the absolute transmission can differ a few percent from
+manufacturer specifications. No out-of-band leakage modelled.</i></p>
 """
 
 NOT_IMPLEMENTED_HTML = """

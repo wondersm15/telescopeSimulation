@@ -723,13 +723,251 @@ SCENARIOS: list[ScenarioDefinition] = [
     ),
 
     # ------------------------------------------------------------------
-    # Act 3: Real Objects
+    # Act 3: Brightness, Saturation & Filters
+    # ------------------------------------------------------------------
+    #
+    # Photometry-focused tutorials. These scenarios introduce the
+    # exposure slider, eye/cone desaturation, ND filters, and Wratten
+    # colour filters in isolation, so the user understands each
+    # mechanism before applying them all together on real targets in
+    # Act 4. The brightness pipeline (mag → flux × aperture² × T(λ)
+    # × exposure → saturate) is the same in every Act; the difference
+    # is which knob the scenario asks you to study.
+
+    ScenarioDefinition(
+        id="exposure_demo", applies_to="both",
+        title="Exposure & Saturation",
+        act=3, act_label="Brightness, Saturation & Filters",
+        description=(
+            "Applies to: any telescope. "
+            "A single mag-0 star through a 100 mm scope. Slide the "
+            "Exposure control to see how a real CCD or eye builds up "
+            "signal over time. Short exposure → faint disk, no "
+            "saturation, full colour. Long exposure → bright but the "
+            "core saturates to pure white, colour drained by eye "
+            "cone desaturation. Try the Detector vs Eye view to "
+            "compare linear photometry against the eye's logarithmic "
+            "response."
+        ),
+        learn_more_section="Photometry & Filters",
+        before_telescope=TelescopeConfig(
+            telescope_type="Newtonian", diameter=100.0, focal_length=800.0,
+            enable_obstruction=False, spider_vanes=0,
+        ),
+        before_source=SourceConfig(
+            source_type="PointSource",
+            kwargs={"magnitude": 0.0, "field_angle_arcsec": 0.0},
+        ),
+        before_label="Exposure × 0.1 (short)",
+        after_telescope=TelescopeConfig(
+            telescope_type="Newtonian", diameter=100.0, focal_length=800.0,
+            enable_obstruction=False, spider_vanes=0,
+        ),
+        after_source=SourceConfig(
+            source_type="PointSource",
+            kwargs={"magnitude": 0.0, "field_angle_arcsec": 0.0},
+        ),
+        after_label="Exposure → (adjust slider)",
+        plot_function="plot_source_image",
+        theory_function=None,
+        tweakable_params=("diameter", "focal_length"),
+        before_apply_vignetting=False,
+        before_apply_coma=False,
+        implemented=True,
+        default_exposure=1.0,
+        # Before-side is rendered at exposure × 0.1 by being a dimmer
+        # baseline. We keep before fixed and let the user move the
+        # after-side slider to compare.
+        terminal_template=(
+            "from telescope_gui.telescope_builder import build_telescope\n"
+            "from telescope_sim.source.sources import PointSource\n"
+            "from telescope_sim.plotting import plot_source_image\n\n"
+            "t = build_telescope(telescope_type='reflector',\n"
+            "                    diameter={diameter}, focal_length={focal_length},\n"
+            "                    primary_type='parabolic', enable_obstruction=False,\n"
+            "                    spider_vanes=0)\n"
+            "src = PointSource(magnitude=0.0)\n"
+            "fig = plot_source_image(t, src, wavelength_nm={wavelength_nm},\n"
+            "                        exposure_level=1.0,  # try 0.1, 1.0, 10.0\n"
+            "                        display_stretch='linear')"
+        ),
+    ),
+
+    ScenarioDefinition(
+        id="nd_filter_moon", applies_to="both",
+        title="ND Filter on the Moon",
+        act=3, act_label="Brightness, Saturation & Filters",
+        description=(
+            "Applies to: any telescope. "
+            "Full Moon through a 100 mm scope at moderate magnification "
+            "saturates a real eye — visual observers reach for neutral-"
+            "density filters (typical 1.0 or 2.0 OD) for comfort. The "
+            "Before side shows the unfiltered view; switch the Filter "
+            "control on the After side to ND-1.0 (10 % transmission) or "
+            "ND-2.0 (1 %) and watch detail emerge as saturation lifts. "
+            "ND filters do *not* change the angular size or PSF — only "
+            "the photon count delivered to the detector."
+        ),
+        learn_more_section="Photometry & Filters",
+        before_telescope=TelescopeConfig(
+            telescope_type="Newtonian", diameter=100.0, focal_length=1000.0,
+            enable_obstruction=False, spider_vanes=0,
+        ),
+        before_source=SourceConfig(source_type="Moon"),
+        before_label="No filter",
+        after_telescope=TelescopeConfig(
+            telescope_type="Newtonian", diameter=100.0, focal_length=1000.0,
+            enable_obstruction=False, spider_vanes=0,
+        ),
+        after_source=SourceConfig(source_type="Moon"),
+        after_label="With filter →",
+        plot_function="plot_source_image",
+        theory_function=None,
+        tweakable_params=("diameter",),
+        before_apply_vignetting=False,
+        before_apply_coma=False,
+        implemented=True,
+        default_exposure=1.0,
+        default_filter="ND-1.0",
+        show_filter_combo=True,
+        terminal_template=(
+            "from telescope_gui.telescope_builder import build_telescope\n"
+            "from telescope_sim.source.sources import Moon\n"
+            "from telescope_sim.plotting import plot_source_image\n\n"
+            "t = build_telescope(telescope_type='reflector',\n"
+            "                    diameter={diameter}, focal_length=1000,\n"
+            "                    primary_type='parabolic',\n"
+            "                    enable_obstruction=False, spider_vanes=0)\n"
+            "src = Moon()\n"
+            "fig = plot_source_image(t, src, wavelength_nm={wavelength_nm},\n"
+            "                        filter_name='ND-1.0',\n"
+            "                        exposure_level=1.0)"
+        ),
+    ),
+
+    ScenarioDefinition(
+        id="color_filter_jupiter", applies_to="reflector",
+        title="Colour Filters on Jupiter",
+        act=3, act_label="Brightness, Saturation & Filters",
+        description=(
+            "Applies to: any telescope. "
+            "Planetary observers use Wratten colour filters to lift "
+            "specific surface features: W25 (red) deepens the Great "
+            "Red Spot, W47 (blue) brings out the white zones, W58 "
+            "(green) increases belt contrast. The Before side shows "
+            "Jupiter unfiltered; the After side applies the selected "
+            "filter and rescales — note that the colour balance shifts "
+            "and overall brightness drops because most of the spectrum "
+            "is blocked."
+        ),
+        learn_more_section="Photometry & Filters",
+        before_telescope=_JUPITER_200MM,
+        before_source=SourceConfig(source_type="Jupiter"),
+        before_label="No filter",
+        after_telescope=_JUPITER_200MM,
+        after_source=SourceConfig(source_type="Jupiter"),
+        after_seeing_arcsec=1.5,
+        after_label="With Wratten filter →",
+        plot_function="plot_source_image",
+        theory_function=None,
+        tweakable_params=("diameter", "seeing"),
+        before_apply_vignetting=False,
+        before_apply_coma=False,
+        before_seeing_arcsec=1.5,
+        implemented=True,
+        # Jupiter at 200 mm + filter dimming together — use the same
+        # 0.25× as jupiter_full so the disk surface stays readable.
+        default_exposure=0.25,
+        default_filter="W25 (red)",
+        show_filter_combo=True,
+        terminal_template=(
+            "from telescope_gui.telescope_builder import build_telescope\n"
+            "from telescope_sim.source.sources import Jupiter\n"
+            "from telescope_sim.plotting import plot_source_image\n\n"
+            "t = build_telescope(telescope_type='reflector',\n"
+            "                    diameter={diameter}, focal_length=1000,\n"
+            "                    primary_type='parabolic',\n"
+            "                    enable_obstruction=True, obstruction_ratio=0.20,\n"
+            "                    spider_vanes=4, spider_vane_width=2.0)\n"
+            "src = Jupiter()\n"
+            "fig = plot_source_image(t, src,\n"
+            "                        seeing_arcsec={seeing_arcsec},\n"
+            "                        wavelength_nm={wavelength_nm},\n"
+            "                        filter_name='W25 (red)',\n"
+            "                        exposure_level=0.25)"
+        ),
+    ),
+
+    ScenarioDefinition(
+        id="saturation_demo", applies_to="both",
+        title="Bright + Dim: Dynamic Range",
+        act=3, act_label="Brightness, Saturation & Filters",
+        description=(
+            "Applies to: any telescope. "
+            "Two stars separated by 4 magnitudes (a 40× flux ratio). "
+            "In Detector (linear) view the bright star saturates while "
+            "the dim companion is barely visible — exactly what a real "
+            "CCD records without HDR. In Eye view the asinh stretch "
+            "compresses the dynamic range so both stars read clearly, "
+            "matching how the eye's logarithmic response handles the "
+            "same scene through an eyepiece. No magic gain — just the "
+            "eye-vs-detector distinction made visible."
+        ),
+        learn_more_section="Photometry & Filters",
+        before_telescope=TelescopeConfig(
+            telescope_type="Newtonian", diameter=150.0, focal_length=1200.0,
+            enable_obstruction=False, spider_vanes=0,
+        ),
+        before_source=SourceConfig(
+            source_type="DoubleStar",
+            kwargs={"separation_arcsec": 8.0,
+                    "magnitude_primary": 0.0,
+                    "magnitude_secondary": 4.0},
+        ),
+        before_label="Detector view (linear)",
+        after_telescope=TelescopeConfig(
+            telescope_type="Newtonian", diameter=150.0, focal_length=1200.0,
+            enable_obstruction=False, spider_vanes=0,
+        ),
+        after_source=SourceConfig(
+            source_type="DoubleStar",
+            kwargs={"separation_arcsec": 8.0,
+                    "magnitude_primary": 0.0,
+                    "magnitude_secondary": 4.0},
+        ),
+        after_label="Eye view (asinh) →",
+        plot_function="plot_source_image",
+        theory_function=None,
+        tweakable_params=("diameter",),
+        before_apply_vignetting=False,
+        before_apply_coma=False,
+        implemented=True,
+        default_exposure=1.0,
+        terminal_template=(
+            "from telescope_gui.telescope_builder import build_telescope\n"
+            "from telescope_sim.source.sources import DoubleStar\n"
+            "from telescope_sim.plotting import plot_source_image\n\n"
+            "t = build_telescope(telescope_type='reflector',\n"
+            "                    diameter={diameter}, focal_length=1200,\n"
+            "                    primary_type='parabolic',\n"
+            "                    enable_obstruction=False, spider_vanes=0)\n"
+            "src = DoubleStar(separation_arcsec=8.0,\n"
+            "                 magnitude_primary=0.0, magnitude_secondary=4.0)\n"
+            "fig_det = plot_source_image(t, src, wavelength_nm={wavelength_nm},\n"
+            "                            display_stretch='linear')\n"
+            "fig_eye = plot_source_image(t, src, wavelength_nm={wavelength_nm},\n"
+            "                            display_stretch='log')"
+        ),
+    ),
+
+    # ------------------------------------------------------------------
+    # Act 4: Real Objects
     # ------------------------------------------------------------------
 
     ScenarioDefinition(
         id="jupiter_full", applies_to="reflector",
         title="Jupiter Full Simulation",
-        act=3, act_label="Real Objects",
+        act=4, act_label="Real Objects",
         description=(
             "Simulate Jupiter with all optical effects active. Toggle individual effects "
             "on/off to isolate each contribution: obstruction adds secondary ring contrast, "
@@ -781,7 +1019,7 @@ SCENARIOS: list[ScenarioDefinition] = [
     ScenarioDefinition(
         id="saturn_rings", applies_to="reflector",
         title="Saturn with Rings",
-        act=3, act_label="Real Objects",
+        act=4, act_label="Real Objects",
         description=(
             "Saturn's ring system provides fine angular structure to probe the PSF. "
             "Spider vane diffraction spikes pass across the rings, and seeing blurs "
@@ -831,7 +1069,7 @@ SCENARIOS: list[ScenarioDefinition] = [
     ScenarioDefinition(
         id="starfield_resolution", applies_to="reflector",
         title="Star Field Resolution",
-        act=3, act_label="Real Objects",
+        act=4, act_label="Real Objects",
         description=(
             "Single star (left) shows PSF structure in detail \u2014 Airy rings, diffraction "
             "spikes, and seeing blur. Star field (right) shows how these effects scale "
@@ -885,7 +1123,7 @@ SCENARIOS: list[ScenarioDefinition] = [
 
 def get_scenarios_by_act() -> dict[int, list[ScenarioDefinition]]:
     """Return scenarios grouped by act number."""
-    result: dict[int, list[ScenarioDefinition]] = {1: [], 2: [], 3: []}
+    result: dict[int, list[ScenarioDefinition]] = {1: [], 2: [], 3: [], 4: []}
     for s in SCENARIOS:
         result[s.act].append(s)
     return result

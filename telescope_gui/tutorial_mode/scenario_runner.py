@@ -22,7 +22,7 @@ from telescope_gui.tutorial_mode.theory_computations import (
     THEORY_FUNCTIONS, OVERLAY_FUNCTIONS,
 )
 from telescope_sim.source.sources import (
-    PointSource, DoubleStar, Jupiter, Saturn,
+    PointSource, DoubleStar, Jupiter, Saturn, Moon,
     StarField, TutorialStarField, MultiColorStarField,
     StarFieldResolutionField, ComaDemoField,
 )
@@ -50,6 +50,8 @@ def build_source(config: SourceConfig):
         return StarFieldResolutionField(**kw)
     elif st == "ComaDemoField":
         return ComaDemoField(**kw)
+    elif st == "Moon":
+        return Moon(**kw)
     return PointSource()
 
 

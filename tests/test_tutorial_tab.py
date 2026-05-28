@@ -69,21 +69,22 @@ class TestDoubleStar:
 # ---------------------------------------------------------------------------
 
 class TestScenarioRegistry:
-    def test_fourteen_scenarios_total(self):
+    def test_eighteen_scenarios_total(self):
         from telescope_gui.tutorial_mode.scenario_registry import SCENARIOS
-        assert len(SCENARIOS) == 14
+        assert len(SCENARIOS) == 18
 
     def test_acts_populated(self):
         from telescope_gui.tutorial_mode.scenario_registry import get_scenarios_by_act
         by_act = get_scenarios_by_act()
-        assert len(by_act[1]) == 7
-        assert len(by_act[2]) == 4
-        assert len(by_act[3]) == 3
+        assert len(by_act[1]) == 7      # Isolated Effects
+        assert len(by_act[2]) == 4      # Combined Effects
+        assert len(by_act[3]) == 4      # Brightness, Saturation & Filters (J3)
+        assert len(by_act[4]) == 3      # Real Objects
 
     def test_all_scenarios_implemented(self):
         from telescope_gui.tutorial_mode.scenario_registry import SCENARIOS
         implemented = [s for s in SCENARIOS if s.implemented]
-        assert len(implemented) == 14
+        assert len(implemented) == 18
         ids = {s.id for s in implemented}
         assert ids == {
             "airy_disk", "rayleigh_criterion", "central_obstruction",
@@ -91,6 +92,8 @@ class TestScenarioRegistry:
             "spherical_aberration",
             "obstruction_plus_spiders", "chromatic_plus_seeing",
             "aperture_vs_seeing", "fratio_coma",
+            "exposure_demo", "nd_filter_moon",
+            "color_filter_jupiter", "saturation_demo",
             "jupiter_full", "saturn_rings", "starfield_resolution",
         }
 
