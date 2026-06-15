@@ -891,24 +891,6 @@ class TutorialTab(QWidget):
             return False
         return True
 
-    @staticmethod
-    def _ranges_compatible(lim_before: tuple, lim_after: tuple,
-                            tolerance: float = 1.5) -> bool:
-        """Whether two axis ranges are close enough to share a lock.
-
-        Returns False when one span is more than `tolerance`× the other,
-        i.e. the after side rendered a meaningfully different extent
-        (typically a chromatic FOV auto-expansion or similar). Locking
-        in that case would clip the after side to the wrong window.
-        """
-        span_before = abs(lim_before[1] - lim_before[0])
-        span_after = abs(lim_after[1] - lim_after[0])
-        if span_before <= 0 or span_after <= 0:
-            return False
-        bigger = max(span_before, span_after)
-        smaller = min(span_before, span_after)
-        return bigger <= tolerance * smaller
-
     # ------------------------------------------------------------------
     # Rendering
     # ------------------------------------------------------------------
@@ -1136,12 +1118,20 @@ class TutorialTab(QWidget):
             for i, ax in enumerate(fig.axes):
                 if i < len(self._before_axis_limits):
                     xlim_before, ylim_before = self._before_axis_limits[i]
-                    xlim_after = ax.get_xlim()
-                    ylim_after = ax.get_ylim()
-                    if self._ranges_compatible(xlim_before, xlim_after) \
-                            and self._ranges_compatible(ylim_before, ylim_after):
-                        ax.set_xlim(xlim_before)
-                        ax.set_ylim(ylim_before)
+                    # Apply the before-side window unconditionally. The old
+                    # _ranges_compatible() guard skipped the lock whenever the
+                    # after-side auto-scaled to a >1.5x-different range — but
+                    # that is exactly when a parameter changed meaningfully.
+                    # Example: the Airy PSF is drawn in mm with
+                    # image_scale ∝ f-ratio, so a faster f-ratio shrinks BOTH
+                    # the disk AND the auto-scaled axis, leaving the disk
+                    # visually identical unless the axis is held fixed.
+                    # _axis_lock_is_safe() already excludes the genuinely
+                    # incompatible cases (different plot functions, or sources
+                    # with different fields of view), so locking here is always
+                    # the intended behaviour.
+                    ax.set_xlim(xlim_before)
+                    ax.set_ylim(ylim_before)
 
         self.before_after.set_after(fig, scenario.after_label)
         plt.close(fig)

@@ -2,6 +2,86 @@
 
 ---
 
+## Tutorial Tab — Bug-fix & physics-validation round (Phase 1 in progress)
+
+**Date:** 2026-06-14
+**Branch:** `feature/tutorial-testing-tab`
+**Session:** Diagnosis of user-reported tutorial issues + first infrastructure fixes
+
+### Diagnosis (Phase 0)
+
+Reproduced flagged scenarios at true canvas scale (`figsize=(5,5)`, dpi=100).
+Confirmed five cross-cutting root causes behind most reports:
+
+1. **Axis-lock silently skipped** by a 1.5× "ranges compatible" gate → Airy /
+   Rayleigh / etc. auto-scale so parameter changes are invisible (the PSF is
+   drawn in mm with `image_scale ∝ f-ratio`, so a faster f-ratio shrinks both
+   the disk and the axis).
+2. **"Before" pane frozen at scenario load**, and the display controls
+   (exposure / filter / stretch) are global, not per-side → "fixed left" and a
+   mislabeled detector-vs-eye comparison.
+3. **Square PSF-kernel support** shows as a faint box around stars under the
+   asinh stretch.
+4. **Exposure applied to the Eye view** identically to the Detector view
+   (physically exposure is a detector-only concept).
+5. **PSFs independently peak-normalised** → the central-obstruction Strehl drop
+   is invisible.
+
+### Fixes landed this session
+
+- **Axis lock (1.1):** removed `_ranges_compatible` gate in `tutorial_tab.py`;
+  the before-side window now locks the after-side unconditionally when
+  `_axis_lock_is_safe`. Verified: a 400 mm Airy disk now renders at half the
+  on-screen size of a 200 mm disk in a shared frame (previously identical).
+- **Circular kernel taper (1.3):** new `_apply_circular_taper()` in
+  `ray_trace_plot.py`, applied on the per-star mono, per-star chromatic, and
+  DoubleStar generic-convolution paths. Removes the square box and turns the
+  polychromatic defocus disk into the physically-correct circular disk.
+  Verified on Rayleigh 400 mm.
+- Tests: **342 pass** (no regressions).
+
+### Decisions (this round)
+
+- **Exposure = detector-only.** Eye-view brightness is driven by aperture /
+  exit-pupil (extended source surface brightness ∝ `(p/p_eye)²`, capped at the
+  naked-eye level; stars ∝ aperture²). Perceptual model — to be flagged in UI.
+- **Chromatic scenario singlet idealised to CA-only** (spherical aberration
+  removed) with an explanatory note.
+
+### Remaining Phase 1
+
+- 1.2 before-side live + per-side display controls (`before_display_stretch` /
+  `before_filter`).
+- 1.4 eye/detector exposure split + exit-pupil control.
+- 1.5 shared normalisation (central-obstruction Strehl visibility).
+
+---
+
+## J-series — Brightness, Filters, Ephemeris, Procedural Planets
+
+**Date:** 2026-05-27
+**Branch:** `feature/tutorial-testing-tab`
+**Note:** Backfilled 2026-06-14 from commit history (this arc was previously unlogged).
+
+- **J1** (`bf899d0`): absolute brightness calibration + exposure slider + cone
+  desaturation. `APERTURE_REFERENCE_MM` / `SATURATION_LEVEL` anchor — a mag-0
+  star through 100 mm at unit exposure peaks just below saturation.
+- **J2** (`224bbd2`): optical filter library (`telescope_sim/physics/filters.py`)
+  — ND 0.5/1.0/2.0 + Wratten W25/W47/W58; UI filter dropdown; per-channel T(λ)
+  applied before saturation clipping.
+- **J3** (`93a7992`): new Act 3 "Brightness, Saturation & Filters"
+  (`exposure_demo`, `nd_filter_moon`, `color_filter_jupiter`, `saturation_demo`);
+  Real Objects moved to Act 4; reference-tab Photometry section.
+- **J4** (`0c97327`): ray-fan + pupil-coloured ray trace
+  (`plot_ray_fan_telescope`, `plot_ray_trace_pupil_colored`) replacing the 2D SA
+  spot for the spherical-aberration scenario.
+- **J5** (`cc21323`): live Earth–target geometry via skyfield + DE421
+  (`telescope_sim/source/realtime.py`); "Use live ephemeris" checkbox; Jupiter /
+  Saturn / Moon angular size + Saturn ring tilt + Moon phase.
+- **J5b** (`5220a9b`): high-detail procedural Jupiter and Saturn textures.
+
+---
+
 ## Tutorial & Testing Tab (v1)
 
 **Date:** 2026-04-04

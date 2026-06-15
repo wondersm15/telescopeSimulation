@@ -4054,6 +4054,34 @@ def _compute_psf_at_field_angle(telescope: Telescope,
         )
 
 
+def _apply_circular_taper(kernel: np.ndarray) -> np.ndarray:
+    """Zero a square PSF kernel outside its inscribed circle, with a soft rim.
+
+    A PSF kernel is a square array. The Airy/coma content falls to ~0 well
+    before the array edge, but an asinh/log display stretch lifts the tiny
+    residual in the *corners* into a faint square "box" around every star
+    (and the geometric defocus disk in the polychromatic path fills its
+    square support outright). Masking to the inscribed circle removes the
+    square boundary; a short cosine taper over the outer rim avoids a hard
+    circular edge. Applied only on the star paths (point/double/field) —
+    extended-source spider spikes intentionally reach the kernel edge and
+    must not be tapered.
+    """
+    n = kernel.shape[0]
+    if n < 4:
+        return kernel
+    c = (n - 1) / 2.0
+    yy, xx = np.ogrid[:n, :n]
+    r = np.sqrt((xx - c) ** 2 + (yy - c) ** 2)
+    radius = c  # inscribed-circle radius = half the array width
+    t0 = 0.85 * radius  # begin tapering at 85% of the radius
+    taper = np.ones_like(r)
+    rim = (r > t0) & (r < radius)
+    taper[rim] = 0.5 * (1.0 + np.cos(np.pi * (r[rim] - t0) / (radius - t0)))
+    taper[r >= radius] = 0.0
+    return kernel * taper
+
+
 def _render_source_through_telescope(
         source, telescope: Telescope,
         wavelength_nm: float = 550.0,
@@ -4290,6 +4318,10 @@ def _render_source_through_telescope(
             cy = int(round(num_pixels / 2
                            + star_y_arcsec / pixel_scale_arcsec))
 
+            # Circular taper so the square kernel support doesn't show as a
+            # faint box around the star under an asinh/log display stretch.
+            psf = _apply_circular_taper(psf)
+
             # Stamp PSF into image using array slices (faster than pixel loop)
             psf_h, psf_w = psf.shape
             psf_hh = psf_h // 2
@@ -4339,6 +4371,10 @@ def _render_source_through_telescope(
                     # the in-focus channel core dominates the defocused
                     # disk pixel-for-pixel.
                     psf_ch = _resample_to_canvas(psf_ch)
+                    # Circular taper: removes the square box and turns the
+                    # geometric defocus disk (which fills its square support)
+                    # into the physically-correct circular disk.
+                    psf_ch = _apply_circular_taper(psf_ch)
                     psf_ch_h, psf_ch_w = psf_ch.shape
                     psf_ch_hh = psf_ch_h // 2
 
@@ -4488,6 +4524,11 @@ def _render_source_through_telescope(
             if h > max_half:
                 psf = psf[h - max_half:h + max_half + 1,
                            h - max_half:h + max_half + 1]
+
+        # Circular taper so the square kernel support doesn't print as a
+        # faint box around each star (DoubleStar convolves two deltas with
+        # this kernel, reproducing its square edge at each star location).
+        psf = _apply_circular_taper(psf)
 
         # Peak-normalised PSF kernel — convolving with a delta of
         # absolute intensity I yields peak = I. This matches the
