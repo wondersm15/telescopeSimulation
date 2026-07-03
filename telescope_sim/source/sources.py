@@ -46,14 +46,25 @@ class PointSource(AstronomicalSource):
             from the +x axis (degrees).
         magnitude: Apparent magnitude (used for relative brightness
             in star fields).
+        spectral_rgb: Optional (R, G, B) intrinsic colour tint in [0, 1]
+            representing the star's spectral energy distribution. None
+            (default) = white. When set, the renderer tints the star with
+            this colour — independent of chromatic aberration, so even a
+            reflector shows the star's true colour. Used to demonstrate
+            saturation whiteout / cone desaturation on a coloured star.
     """
 
     def __init__(self, field_angle_arcsec: float = 0.0,
                  position_angle_deg: float = 0.0,
-                 magnitude: float = 0.0):
+                 magnitude: float = 0.0,
+                 spectral_rgb: tuple[float, float, float] | None = None):
         self.field_angle_arcsec = field_angle_arcsec
         self.position_angle_deg = position_angle_deg
         self.magnitude = magnitude
+        # Exposed as a 1-row array so the per-star renderer's
+        # `star_spectral_rgb[idx]` lookup works uniformly with star fields.
+        if spectral_rgb is not None:
+            self.star_spectral_rgb = np.array([spectral_rgb], dtype=float)
 
     def render_ideal(self, half_fov_arcsec: float,
                      num_pixels: int) -> np.ndarray:
@@ -418,6 +429,104 @@ class MultiColorStarField(StarField):
         self.star_x_arcsec = np.array(xs)
         self.star_y_arcsec = np.array(ys)
         self.star_magnitudes = np.array(mags)
+        self.num_stars = len(xs)
+
+
+# Spectral-class RGB palette (approximate visual tints, normalised so the
+# brightest channel ≈ 1.0). Ordered hot → cool. Used by ShowcaseStarField to
+# give the population realistic colour so the star-field showcase reads as a
+# rich, varied field rather than uniform white dots.
+_SPECTRAL_PALETTE = [
+    ("O/B", (0.62, 0.72, 1.00), 25000),   # blue
+    ("A",   (0.80, 0.86, 1.00), 9500),    # blue-white
+    ("F",   (1.00, 0.97, 0.92), 7000),    # white
+    ("G",   (1.00, 0.93, 0.72), 5600),    # yellow (Sun-like)
+    ("K",   (1.00, 0.78, 0.48), 4300),    # orange
+    ("M",   (1.00, 0.52, 0.32), 3400),    # red
+]
+
+
+class ShowcaseStarField(StarField):
+    """Flagship star field for the Act 4 showcase — engineered to exhibit
+    EVERY modelled optical effect at once, with the effect toggles.
+
+    Layout (deterministic planted features + seeded background):
+      - 1 bright blue-white reference star on-axis (diffraction spikes, the
+        cleanest PSF in the field).
+      - 4 bright coloured stars near the edge (~90% of field radius) at
+        non-cardinal position angles — the primary coma + spider-spike +
+        vignetting demonstrators (coma tails point radially, so off-cardinal
+        placement makes the comet orientation obvious).
+      - 3 double stars at 8″ / 4″ / 2″ separation across mid-field — a
+        resolution ladder: the 8″ pair splits trivially, the 2″ pair blends
+        under ~1.5″ seeing (the Rayleigh scenario covers the sub-arcsec limit
+        proper).
+      - ~55 seeded background stars, uniform in area, spanning mag 1.5–4.5
+        and the full spectral palette — the population that shows brightness
+        variation and how halos/spikes overlap in a crowded field.
+
+    All stars carry a spectral RGB tint (`star_spectral_rgb`), so the field
+    renders in colour through any telescope (the renderer tints each star by
+    its SED — colour is intrinsic, not a chromatic-aberration artefact).
+
+    Default field radius 150″ (300″ FOV): wide enough that edge stars sit far
+    off-axis (strong coma / vignetting) yet tight enough that per-star detail
+    (comet shape, spikes) survives rasterisation to the GUI canvas.
+    """
+
+    def __init__(self, field_radius_arcsec: float = 150.0, seed: int = 7):
+        self.field_radius_arcsec = field_radius_arcsec
+        self.seed = seed
+        self.magnitude_range = (-1.0, 4.5)
+        R = field_radius_arcsec
+
+        xs: list[float] = []
+        ys: list[float] = []
+        mags: list[float] = []
+        rgb: list[tuple] = []
+
+        def _add(x, y, mag, tint):
+            xs.append(x); ys.append(y); mags.append(mag); rgb.append(tint)
+
+        pal = {name: tint for name, tint, _T in _SPECTRAL_PALETTE}
+
+        # On-axis bright reference (blue-white A star) — brightest, cleanest.
+        _add(0.0, 0.0, -1.0, pal["A"])
+
+        # Bright edge stars — coma + spikes + vignetting demonstrators.
+        # Non-cardinal PAs so the radial comet orientation is unmistakable.
+        edge_r = R * 0.90
+        edge = [(35, -0.5, "O/B"), (120, 0.0, "K"),
+                (215, 0.2, "G"), (305, -0.2, "M")]
+        for pa_deg, mag, cls in edge:
+            a = np.radians(pa_deg)
+            _add(edge_r * np.cos(a), edge_r * np.sin(a), mag, pal[cls])
+
+        # Double-star resolution ladder at mid-field.
+        doubles = [
+            (-0.45 * R, 0.35 * R, 8.0, 0.6, 1.1, "F", "K"),   # wide, easy
+            (0.50 * R, -0.30 * R, 4.0, 0.9, 1.4, "A", "G"),   # moderate
+            (0.20 * R, 0.55 * R, 2.0, 1.2, 1.6, "G", "M"),    # tight (~seeing)
+        ]
+        for cx, cy, sep, m1, m2, c1, c2 in doubles:
+            _add(cx - sep / 2.0, cy, m1, pal[c1])
+            _add(cx + sep / 2.0, cy, m2, pal[c2])
+
+        # Seeded background population — uniform in area, varied mag + colour.
+        rng = np.random.default_rng(seed)
+        n_bg = 55
+        r_bg = R * np.sqrt(rng.uniform(0, 1, n_bg))
+        th_bg = rng.uniform(0, 2 * np.pi, n_bg)
+        m_bg = rng.uniform(1.5, 4.5, n_bg)
+        palette_tints = [t for _n, t, _T in _SPECTRAL_PALETTE]
+        idx_bg = rng.integers(0, len(palette_tints), n_bg)
+        for r, t, m, ci in zip(r_bg, th_bg, m_bg, idx_bg):
+            _add(r * np.cos(t), r * np.sin(t), float(m), palette_tints[ci])
+
+        self.star_x_arcsec = np.array(xs)
+        self.star_y_arcsec = np.array(ys)
+        self.star_magnitudes = np.array(mags)
+        self.star_spectral_rgb = np.array(rgb, dtype=float)
         self.num_stars = len(xs)
 
 

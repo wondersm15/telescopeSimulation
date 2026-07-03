@@ -88,6 +88,21 @@ class TutorialTab(QWidget):
         # Filter combo (ND / colour). Only shown when the scenario
         # opts in via show_filter_combo (e.g. Act 3 filter scenarios).
         self._filter_combo: QComboBox | None = None
+        # Exit-pupil combo (Phase 1.4). Shown for extended-source image
+        # scenarios; drives the Eye-view surface-brightness model
+        # (∝ (exit_pupil / 7 mm)², capped at naked-eye). Irrelevant in
+        # Detector view (where exposure drives brightness instead).
+        self._exit_pupil_combo: QComboBox | None = None
+        # Focal-zoom combo (Phase B4). Shown for the chromatic scenario;
+        # switches the after-side focal-plane radial-profile x-axis between
+        # a wide view (singlet halo off-panel) and a close view (resolves
+        # achromat/APO differences).
+        self._focal_zoom_combo: QComboBox | None = None
+        # Shared-normalisation reference peak (Phase 1.5): the before-side
+        # (unobstructed) FFT raw peak, captured during _render_before and
+        # applied as the after-side peak_reference so the central-
+        # obstruction Strehl drop is visible. None = independent peaks.
+        self._shared_psf_peak: float | None = None
         # Live ephemeris checkbox. When checked, the after-side source
         # is reconstructed with use_realtime=True so its angular size
         # (and Saturn ring tilt) come from skyfield/DE421 at the time
@@ -247,6 +262,9 @@ class TutorialTab(QWidget):
 
         # Clear old after canvas and reset axis limits for new scenario
         self._before_axis_limits = None
+        # Reset the shared-normalisation reference; _render_before re-captures
+        # it for scenarios that opt in (shared_psf_normalization).
+        self._shared_psf_peak = None
         self.before_after.clear_after()
         self.theory_readout.clear()
         self.terminal_panel.clear()
@@ -293,6 +311,8 @@ class TutorialTab(QWidget):
         self._exposure_slider = None
         self._exposure_value_label = None
         self._filter_combo = None
+        self._exit_pupil_combo = None
+        self._focal_zoom_combo = None
         self._realtime_check = None
 
         params = scenario.tweakable_params
@@ -303,7 +323,15 @@ class TutorialTab(QWidget):
         # 1D radial profiles).
         is_psf_profile_scenario = scenario.plot_function == "plot_psf_profile"
         wants_scale_toggle = is_psf_scenario or is_psf_profile_scenario
-        if not params and not is_psf_scenario and not params_before:
+        # Source-image scenarios always need the controls panel for the
+        # View / Exposure / Filter / Exit-pupil combos, even when they
+        # expose no tweakable telescope params (e.g. a pure filter lesson).
+        wants_display_combo = (
+            scenario.plot_function == "plot_source_image"
+            or scenario.secondary_plot_function == "plot_source_image"
+        )
+        if (not params and not is_psf_scenario and not params_before
+                and not wants_display_combo):
             self.controls_group.setVisible(False)
             return
 
@@ -362,22 +390,31 @@ class TutorialTab(QWidget):
             self._add_focus_wavelength_combo()
             self._sync_focus_combo_for_objective()
 
+        # Focal-zoom toggle (B4) for the chromatic focal-plane image.
+        if scenario.show_focal_zoom_combo:
+            self._add_focal_zoom_combo()
+
         # Display-stretch toggle (linear / log) for any scenario whose
         # after-side renders a source image (so the toggle is available
         # for fratio_coma and spherical_aberration which use a different
         # plot_function but call plot_source_image via
-        # secondary_plot_function).
-        wants_display_combo = (
-            scenario.plot_function == "plot_source_image"
-            or scenario.secondary_plot_function == "plot_source_image"
-        )
+        # secondary_plot_function). `wants_display_combo` computed above.
         if wants_display_combo:
-            self._add_display_stretch_combo()
+            self._add_display_stretch_combo(scenario.default_display_stretch)
             self._add_exposure_slider(scenario.default_exposure)
         if wants_display_combo and scenario.show_filter_combo:
             self._add_filter_combo(scenario.default_filter)
+        # Exit-pupil control (Phase 1.4) — only for extended-source image
+        # scenarios, where the Eye-view surface brightness is exit-pupil
+        # driven. Stars are aperture-driven, so the control is meaningless
+        # for point/double/field sources.
+        if wants_display_combo and self._scenario_has_extended_source(scenario):
+            self._add_exit_pupil_combo(scenario.default_exit_pupil_mm)
         if scenario.supports_realtime:
             self._add_realtime_check()
+
+        # Initial exposure-slider enabled state (greyed in Eye view).
+        self._sync_exposure_enabled()
 
         self.controls_layout.addStretch()
 
@@ -596,7 +633,7 @@ class TutorialTab(QWidget):
         self.controls_layout.addLayout(col)
         self._psf_scale_combo = combo
 
-    def _add_display_stretch_combo(self):
+    def _add_display_stretch_combo(self, default_stretch: str = "log"):
         """View toggle: Detector / Eye / Eye + integration.
 
         Three display mappings of the same underlying simulation:
@@ -615,7 +652,11 @@ class TutorialTab(QWidget):
         combo.addItem("Detector (linear)", "linear")
         combo.addItem("Eye (logarithmic)", "log")
         combo.addItem("Eye + integration (log + spatial)", "log_integrated")
-        combo.setCurrentIndex(1)  # Eye default — matches what you see at the eyepiece
+        # Default per-scenario: "log" (Eye) for most; "linear" (Detector)
+        # for exposure / saturation lessons where the exposure slider and
+        # saturation clipping need to be live. Eye view ignores exposure.
+        _default_idx = combo.findData(default_stretch)
+        combo.setCurrentIndex(_default_idx if _default_idx >= 0 else 1)
         combo.setToolTip(
             "Detector: linear per-pixel intensity (calibrated CCD pixel\n"
             "  response — bright cores dominate, dim features clipped).\n"
@@ -626,10 +667,38 @@ class TutorialTab(QWidget):
             "  chromatic-disk light mixes into the perceived core)."
         )
         combo.currentIndexChanged.connect(self._on_update_clicked)
+        # Keep the exposure slider's enabled state in sync with the view:
+        # exposure is a detector concept, so it's greyed out in Eye view.
+        combo.currentIndexChanged.connect(self._sync_exposure_enabled)
         col.addWidget(lbl)
         col.addWidget(combo)
         self.controls_layout.addLayout(col)
         self._display_stretch_combo = combo
+
+    def _sync_exposure_enabled(self):
+        """Grey out the exposure slider in Eye view (exposure = detector-only).
+
+        Exposure is integration time — a detector concept. In the Eye views
+        (log / log_integrated) brightness is optics-driven (aperture² for
+        stars, exit-pupil for extended objects), so the slider has no effect.
+        Disabling it makes that explicit rather than leaving an inert-looking
+        live control (per the user's feedback)."""
+        if self._exposure_slider is None:
+            return
+        stretch = (self._display_stretch_combo.currentData()
+                   if self._display_stretch_combo is not None else "linear")
+        is_eye = stretch in ("log", "log_integrated")
+        self._exposure_slider.setEnabled(not is_eye)
+        if self._exposure_value_label is not None:
+            if is_eye:
+                self._exposure_value_label.setText("N/A (Eye)")
+                self._exposure_value_label.setStyleSheet(
+                    "font-size: 8pt; font-weight: bold; color: #999;")
+            else:
+                self._exposure_value_label.setText(
+                    f"{self._slider_to_exposure(self._exposure_slider.value()):.2f}×")
+                self._exposure_value_label.setStyleSheet(
+                    "font-size: 8pt; font-weight: bold; color: #333;")
 
     # Exposure slider — log-scaled, internal range 0..200 maps to
     # 10^((slider-100)/50) = 0.01× → 1× → 100×. Default position 100
@@ -762,6 +831,93 @@ class TutorialTab(QWidget):
         self.controls_layout.addLayout(col)
         self._filter_combo = combo
 
+    # Exit-pupil options (mm) for the Eye-view surface-brightness model.
+    # Each maps to a representative observing magnification regime. The
+    # surface-brightness factor (exit_pupil / 7 mm)² is shown so the user
+    # sees how much dimmer-than-naked-eye each choice is.
+    _EXIT_PUPIL_OPTIONS = [
+        (7.0, "7.0 mm — max (naked-eye SB)"),
+        (4.0, "4.0 mm — low power"),
+        (2.0, "2.0 mm — planetary"),
+        (1.0, "1.0 mm — high power"),
+        (0.5, "0.5 mm — very high power"),
+    ]
+
+    def _add_exit_pupil_combo(self, default_exit_pupil_mm: float):
+        """Exit-pupil dropdown driving the Eye-view extended-source brightness.
+
+        Only shown for extended-source image scenarios (planets / Moon).
+        In the Eye view, a telescope cannot raise an extended object's
+        surface brightness above the naked-eye level; at higher
+        magnification (smaller exit pupil) it falls as (p / 7 mm)². This
+        control picks the observing exit pupil. It has NO effect in the
+        Detector view (where exposure drives brightness) or on stars
+        (point sources are aperture-driven, magnification-independent).
+        """
+        col = QVBoxLayout()
+        lbl = QLabel("Exit pupil")
+        lbl.setStyleSheet(
+            "font-size: 8pt; font-weight: normal; color: #555;")
+        combo = QComboBox()
+        for p_mm, text in self._EXIT_PUPIL_OPTIONS:
+            combo.addItem(text, p_mm)
+        idx = combo.findData(default_exit_pupil_mm)
+        combo.setCurrentIndex(idx if idx >= 0 else 2)  # 2.0 mm planetary
+        combo.setToolTip(
+            "Eye-view surface-brightness model (extended objects):\n"
+            "a telescope can't exceed naked-eye surface brightness, and\n"
+            "at higher magnification (smaller exit pupil) it falls as\n"
+            "(exit pupil / 7 mm)². Exit pupil = aperture / magnification.\n"
+            "No effect in Detector view (exposure drives brightness there)\n"
+            "or on point-like stars (aperture-driven). Perceptual model."
+        )
+        combo.currentIndexChanged.connect(self._on_update_clicked)
+        col.addWidget(lbl)
+        col.addWidget(combo)
+        self.controls_layout.addLayout(col)
+        self._exit_pupil_combo = combo
+
+    # Focal-zoom options (arcsec x-range) for the chromatic focal-plane
+    # radial-profile panel. Wide shows the singlet halo off-panel; Close
+    # resolves the achromat / APO-doublet / APO-triplet differences.
+    _FOCAL_ZOOM_OPTIONS = [
+        (120.0, "Wide (±120″) — singlet halo"),
+        (12.0, "Close (±12″) — achromat/APO"),
+    ]
+
+    def _add_focal_zoom_combo(self):
+        """Zoom dropdown for the after-side chromatic focal-plane image (B4).
+
+        Switches the radial-profile x-axis between a wide view (the singlet
+        chromatic halo runs off-panel — the dramatic 'bad' case) and a close
+        view (resolves the much smaller achromat / APO-doublet / APO-triplet
+        residuals that are invisible at the wide scale)."""
+        col = QVBoxLayout()
+        lbl = QLabel("Focal zoom")
+        lbl.setStyleSheet(
+            "font-size: 8pt; font-weight: normal; color: #555;")
+        combo = QComboBox()
+        for arcsec, text in self._FOCAL_ZOOM_OPTIONS:
+            combo.addItem(text, arcsec)
+        combo.setCurrentIndex(0)  # Wide default
+        combo.setToolTip(
+            "Radial-profile x-axis range on the focal-plane panel.\n"
+            "Wide: the singlet's chromatic halo runs off-panel.\n"
+            "Close: zoom in to compare achromat vs APO residuals\n"
+            "(too small to see at the wide scale)."
+        )
+        combo.currentIndexChanged.connect(self._on_update_clicked)
+        col.addWidget(lbl)
+        col.addWidget(combo)
+        self.controls_layout.addLayout(col)
+        self._focal_zoom_combo = combo
+
+    def _current_focal_zoom(self, scenario: ScenarioDefinition):
+        """Return the selected focal-zoom x-range (arcsec), or None."""
+        if self._focal_zoom_combo is None:
+            return None
+        return self._focal_zoom_combo.currentData()
+
     # Index of the "F=C plane" item in the focus-wavelength combo (kept
     # as a constant so the sync logic doesn't drift from the addItem
     # order in _add_focus_wavelength_combo).
@@ -875,6 +1031,56 @@ class TutorialTab(QWidget):
             return scenario.default_filter
         return self._filter_combo.currentData() or scenario.default_filter
 
+    def _current_exit_pupil(self, scenario: ScenarioDefinition) -> float:
+        """Return the user-selected exit pupil (mm), or scenario default."""
+        if self._exit_pupil_combo is None:
+            return scenario.default_exit_pupil_mm
+        data = self._exit_pupil_combo.currentData()
+        return float(data) if data is not None else scenario.default_exit_pupil_mm
+
+    _EXTENDED_SOURCE_TYPES = ("Jupiter", "Saturn", "Moon")
+
+    @classmethod
+    def _scenario_has_extended_source(cls,
+                                      scenario: ScenarioDefinition) -> bool:
+        """True when the after-side source is an extended object (planet/Moon).
+
+        Only extended sources use the exit-pupil surface-brightness model;
+        point/double/field star sources are aperture-driven.
+        """
+        return scenario.after_source.source_type in cls._EXTENDED_SOURCE_TYPES
+
+    def _before_display_settings(self, scenario: ScenarioDefinition) -> dict:
+        """Resolve the Before-side display settings (Phase 1.2).
+
+        The View / Filter / Exposure controls are live and live on the
+        After side. By default the Before side mirrors them; when the
+        scenario pins before_display_stretch / before_filter /
+        before_exposure, the Before side uses those fixed values so the two
+        panels form an honest comparison (e.g. Detector vs Eye, no-filter
+        vs ND). Exit pupil and focus wavelength always mirror the live
+        controls (no per-side pin needed so far).
+        """
+        stretch = scenario.before_display_stretch
+        if stretch is None:
+            stretch = (self._display_stretch_combo.currentData()
+                       if self._display_stretch_combo is not None else "linear")
+        flt = scenario.before_filter
+        if flt is None:
+            flt = self._current_filter(scenario)
+        exposure = scenario.before_exposure
+        if exposure is None:
+            exposure = self._current_exposure(scenario)
+        focus_wl = (self._focus_wavelength_combo.currentData()
+                    if self._focus_wavelength_combo is not None else 550.0)
+        return {
+            "display_stretch": stretch,
+            "filter_name": flt,
+            "exposure_level": exposure,
+            "focus_wavelength_nm": focus_wl,
+            "exit_pupil_mm": self._current_exit_pupil(scenario),
+        }
+
     @staticmethod
     def _axis_lock_is_safe(scenario: ScenarioDefinition) -> bool:
         """True when after-side axes can be safely clamped to before-side limits.
@@ -927,13 +1133,10 @@ class TutorialTab(QWidget):
             if scenario.before_telescope_dynamic and "seeing" in params:
                 before_seeing = params["seeing"]
 
-        stretch = (self._display_stretch_combo.currentData()
-                   if self._display_stretch_combo is not None else "linear")
-        focus_wl_before = (self._focus_wavelength_combo.currentData()
-                           if self._focus_wavelength_combo is not None
-                           else 550.0)
-        exposure = self._current_exposure(scenario)
-        flt = self._current_filter(scenario)
+        # Per-side display settings (Phase 1.2): the Before side may pin its
+        # own View / Filter / Exposure so before-vs-after is an honest
+        # comparison (e.g. Detector vs Eye, no-filter vs ND).
+        disp = self._before_display_settings(scenario)
         fig, info, err = run_scenario_side(
             before_telescope,
             before_source,
@@ -944,15 +1147,35 @@ class TutorialTab(QWidget):
             apply_vignetting=scenario.before_apply_vignetting,
             apply_coma=scenario.before_apply_coma,
             log_scale=self._current_log_scale(),
-            display_stretch=stretch,
-            focus_wavelength_nm=focus_wl_before,
-            exposure_level=exposure,
-            filter_name=flt,
+            display_stretch=disp["display_stretch"],
+            focus_wavelength_nm=disp["focus_wavelength_nm"],
+            exposure_level=disp["exposure_level"],
+            filter_name=disp["filter_name"],
+            exit_pupil_mm=disp["exit_pupil_mm"],
+            idealize_sa=scenario.idealize_singlet_sa,
+            focal_zoom_arcsec=self._current_focal_zoom(scenario),
         )
         if err:
             self.status_label.setText("Before render failed")
             print(f"[Tutorial] Before render error:\n{err}")
             return
+
+        # Shared-normalisation reference (Phase 1.5): capture the before-side
+        # (unobstructed) on-axis FFT raw peak so the after side can display
+        # its obstructed PSF relative to it, making the Strehl drop visible.
+        if scenario.shared_psf_normalization:
+            self._shared_psf_peak = info.get("psf_raw_peak")
+            # Make the before figure self-documenting: it's the reference
+            # the after side is normalised against. (The after side already
+            # annotates "Peak vs unobstructed: <Strehl>".)
+            if fig.axes:
+                fig.axes[0].text(
+                    0.02, 0.98,
+                    "Reference: normalised to own peak (≡ 1.0)",
+                    transform=fig.axes[0].transAxes, fontsize=7,
+                    va="top", ha="left", color="white",
+                    bbox=dict(boxstyle="round,pad=0.3",
+                              facecolor="black", alpha=0.6))
 
         # Theory + scenario overlays. Theory provides numbers/circles; some
         # scenarios (spider_vanes, obstruction_plus_spiders) have no theory
@@ -1034,6 +1257,10 @@ class TutorialTab(QWidget):
 
         exposure = self._current_exposure(scenario)
         flt = self._current_filter(scenario)
+        # Shared-normalisation reference (Phase 1.5): only for scenarios that
+        # opt in (central_obstruction), and only relevant to the 2D PSF path.
+        peak_ref = (self._shared_psf_peak
+                    if scenario.shared_psf_normalization else None)
         fig, info, err = run_scenario_side(
             after_config,
             after_source_config,
@@ -1048,6 +1275,10 @@ class TutorialTab(QWidget):
             display_stretch=stretch,
             exposure_level=exposure,
             filter_name=flt,
+            exit_pupil_mm=self._current_exit_pupil(scenario),
+            peak_reference=peak_ref,
+            idealize_sa=scenario.idealize_singlet_sa,
+            focal_zoom_arcsec=self._current_focal_zoom(scenario),
         )
 
         if err:
@@ -1118,18 +1349,30 @@ class TutorialTab(QWidget):
             for i, ax in enumerate(fig.axes):
                 if i < len(self._before_axis_limits):
                     xlim_before, ylim_before = self._before_axis_limits[i]
-                    # Apply the before-side window unconditionally. The old
-                    # _ranges_compatible() guard skipped the lock whenever the
-                    # after-side auto-scaled to a >1.5x-different range — but
-                    # that is exactly when a parameter changed meaningfully.
-                    # Example: the Airy PSF is drawn in mm with
-                    # image_scale ∝ f-ratio, so a faster f-ratio shrinks BOTH
-                    # the disk AND the auto-scaled axis, leaving the disk
-                    # visually identical unless the axis is held fixed.
-                    # _axis_lock_is_safe() already excludes the genuinely
-                    # incompatible cases (different plot functions, or sources
-                    # with different fields of view), so locking here is always
-                    # the intended behaviour.
+                    # Apply the before-side window. For PSF plots (mm axis)
+                    # this is unconditional — the axis is a display scale
+                    # (image_scale ∝ f-ratio), so a bigger aperture shrinks
+                    # both the disk AND the auto-scaled axis; holding the axis
+                    # fixed is the whole point (the Airy lesson).
+                    #
+                    # For SOURCE-IMAGE plots the axis IS the real angular FOV.
+                    # When the after-side source's FOV genuinely differs from
+                    # the before-side (e.g. live ephemeris shrinks Jupiter
+                    # 60″→47″, or any size change), forcing the before window
+                    # floats the smaller image inside an oversized frame with
+                    # the axes background showing as a grey border. Skip the
+                    # lock per-axis when the natural spans differ >5%, so the
+                    # source is shown at its true angular size. Equal-FOV cases
+                    # (aperture/seeing/filter changes; both_sides_dynamic
+                    # separation) still lock cleanly.
+                    if plot_fn == "plot_source_image":
+                        nat_xlim = ax.get_xlim()
+                        span_before = abs(xlim_before[1] - xlim_before[0])
+                        span_nat = abs(nat_xlim[1] - nat_xlim[0])
+                        if (span_before > 0
+                                and abs(span_nat - span_before) / span_before
+                                > 0.05):
+                            continue  # FOV changed — don't clamp to before
                     ax.set_xlim(xlim_before)
                     ax.set_ylim(ylim_before)
 
@@ -1157,9 +1400,13 @@ class TutorialTab(QWidget):
             # airy_radius_arcsec is in the render info
             return info.get("airy_radius_arcsec")
         elif scenario.id == "central_obstruction":
-            # Estimate Strehl from the PSF peak ratio relative to unobstructed
-            # (approximate: we don't have unobstructed reference in info)
-            return None  # Show theory only for now
+            # With shared normalisation (Phase 1.5), the after-side 2D PSF
+            # is displayed relative to the unobstructed before-side peak, so
+            # the measured displayed peak IS the simulated Strehl ratio —
+            # compare it directly against theory (1−ε²)². (psf_relative_peak
+            # is only present for the 2D view; the 1D profile shows the
+            # Strehl gap via the _obstruction_overlay instead.)
+            return info.get("psf_relative_peak")
         elif scenario.id in ("aperture_vs_seeing", "fratio_coma"):
             # Show the theoretical effective resolution as "sim" value
             # (since the simulation matches by construction)

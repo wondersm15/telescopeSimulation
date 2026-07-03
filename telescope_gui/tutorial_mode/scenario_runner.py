@@ -24,7 +24,7 @@ from telescope_gui.tutorial_mode.theory_computations import (
 from telescope_sim.source.sources import (
     PointSource, DoubleStar, Jupiter, Saturn, Moon,
     StarField, TutorialStarField, MultiColorStarField,
-    StarFieldResolutionField, ComaDemoField,
+    StarFieldResolutionField, ComaDemoField, ShowcaseStarField,
 )
 
 
@@ -48,6 +48,8 @@ def build_source(config: SourceConfig):
         return MultiColorStarField(**kw)
     elif st == "StarFieldResolutionField":
         return StarFieldResolutionField(**kw)
+    elif st == "ShowcaseStarField":
+        return ShowcaseStarField(**kw)
     elif st == "ComaDemoField":
         return ComaDemoField(**kw)
     elif st == "Moon":
@@ -89,6 +91,10 @@ def run_scenario_side(
     display_stretch: str = "linear",
     exposure_level: float = 1.0,
     filter_name: str = "None",
+    exit_pupil_mm: float = 7.0,
+    peak_reference: float | None = None,
+    idealize_sa: bool = False,
+    focal_zoom_arcsec: float | None = None,
 ) -> tuple[Figure | None, dict, str | None]:
     """Run one side (before or after) of a scenario.
 
@@ -113,6 +119,10 @@ def run_scenario_side(
             display_stretch=display_stretch,
             exposure_level=exposure_level,
             filter_name=filter_name,
+            exit_pupil_mm=exit_pupil_mm,
+            peak_reference=peak_reference,
+            idealize_sa=idealize_sa,
+            focal_zoom_arcsec=focal_zoom_arcsec,
         )
         info["telescope"] = telescope
         info["source"] = source
@@ -137,6 +147,10 @@ def _call_plot_function(
     display_stretch: str = "linear",
     exposure_level: float = 1.0,
     filter_name: str = "None",
+    exit_pupil_mm: float = 7.0,
+    peak_reference: float | None = None,
+    idealize_sa: bool = False,
+    focal_zoom_arcsec: float | None = None,
 ) -> tuple[Figure, dict]:
     """Dispatch to the appropriate telescope_sim plot function."""
     from telescope_sim.plotting import (
@@ -165,6 +179,7 @@ def _call_plot_function(
             focus_wavelength_nm=focus_wavelength_nm,
             exposure_level=exposure_level,
             filter_name=filter_name,
+            exit_pupil_mm=exit_pupil_mm,
         )
         if isinstance(fig, list):
             fig = fig[0]
@@ -173,6 +188,7 @@ def _call_plot_function(
             "display_stretch": display_stretch,
             "exposure_level": exposure_level,
             "filter_name": filter_name,
+            "exit_pupil_mm": exit_pupil_mm,
         }
 
     elif name == "plot_psf_2d":
@@ -184,8 +200,15 @@ def _call_plot_function(
             include_obstruction=(telescope.obstruction_ratio > 0.0),
             figsize=figsize,
             log_scale=_log,
+            peak_reference=peak_reference,
         )
-        return fig, {"plot_function": name}
+        # Surface the FFT raw peak so the tutorial can use this frame as the
+        # shared-normalisation reference for a paired frame (1.5).
+        return fig, {
+            "plot_function": name,
+            "psf_raw_peak": getattr(fig, "_psf_raw_peak", None),
+            "psf_relative_peak": getattr(fig, "_psf_relative_peak", 1.0),
+        }
 
     elif name == "plot_psf_profile":
         # When log_scale is None: dual-panel (linear+log) layout.
@@ -216,6 +239,7 @@ def _call_plot_function(
             telescope, figsize=tall_figsize,
             focus_wavelength_nm=focus_wavelength_nm,
             show_inset=False,
+            idealize_sa=idealize_sa,
         )
         return fig, {"plot_function": name}
 
@@ -244,10 +268,18 @@ def _call_plot_function(
         return fig, {"plot_function": name}
 
     elif name == "plot_chromatic_focal_planes":
+        # focal_zoom_arcsec controls the radial-profile x-axis range: a
+        # "wide" view (≈120″) shows the singlet halo running off-panel; a
+        # "close" view (≈12″) resolves the achromat/APO-doublet/APO-triplet
+        # differences. None → the function's default.
+        kw = {}
+        if focal_zoom_arcsec is not None:
+            kw["fixed_xlim_arcsec"] = focal_zoom_arcsec
         fig = plot_chromatic_focal_planes(
             telescope,
             figsize=(figsize[0] * 2.4, figsize[1] * 0.9),
             focus_wavelength_nm=focus_wavelength_nm,
+            **kw,
         )
         return fig, {"plot_function": name}
 

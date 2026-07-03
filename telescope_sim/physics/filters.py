@@ -89,6 +89,26 @@ def _gaussian_transmission(center_nm: float, fwhm_nm: float,
     return T
 
 
+def _longpass_transmission(cutoff_nm: float, edge_nm: float,
+                            peak_t: float) -> Callable[[float], float]:
+    """Sharp long-pass (high-pass in wavelength) transmission.
+
+    Blocks short wavelengths and passes everything above `cutoff_nm` via a
+    logistic edge of width `edge_nm` (smaller = sharper). This matches real
+    Wratten red filters (e.g. W25), which have a steep cut-on near 590 nm
+    and pass the whole red tail — NOT a symmetric Gaussian bump, which leaks
+    green and makes white targets read orange/yellow.
+
+        T(λ) = peak / (1 + exp(-(λ - cutoff) / edge))
+    """
+    def T(wavelength_nm: float,
+          _c: float = cutoff_nm,
+          _e: float = edge_nm,
+          _p: float = peak_t) -> float:
+        return _p / (1.0 + float(np.exp(-(wavelength_nm - _c) / _e)))
+    return T
+
+
 NO_FILTER = Filter(
     name="None",
     description="No filter — full spectrum, all wavelengths transmitted.",
@@ -120,10 +140,14 @@ ND_20 = Filter(
 # curves; gaussian approximation is qualitative.
 WRATTEN_25 = Filter(
     name="W25 (red)",
-    description="Wratten 25 red — blocks blue/green, passes 600 nm+. "
-                "Enhances Great Red Spot and Mars surface features.",
-    transmission=_gaussian_transmission(
-        center_nm=660.0, fwhm_nm=140.0, peak_t=0.85),
+    description="Wratten 25 red — sharp cut-on ~590 nm, passes the whole "
+                "red tail (long-pass). Enhances the Great Red Spot and Mars "
+                "surface features. Blocks blue/green almost completely.",
+    # Long-pass, NOT a Gaussian: a real W25 has a steep cut-on near 590 nm
+    # and transmits all longer wavelengths. The previous 140 nm Gaussian
+    # leaked ~15% green (T_G≈0.15), so white targets read orange/yellow.
+    transmission=_longpass_transmission(
+        cutoff_nm=595.0, edge_nm=12.0, peak_t=0.90),
 )
 
 WRATTEN_47 = Filter(
@@ -136,10 +160,12 @@ WRATTEN_47 = Filter(
 
 WRATTEN_58 = Filter(
     name="W58 (green)",
-    description="Wratten 58 green — passes ~480–580 nm. "
+    description="Wratten 58 green — passes ~500–570 nm. "
                 "Increases Jovian belt contrast.",
+    # Narrowed from 80→55 nm FWHM so the blue tail is rejected more
+    # cleanly (was T_B≈0.17); a real W58 cuts blue and red hard.
     transmission=_gaussian_transmission(
-        center_nm=540.0, fwhm_nm=80.0, peak_t=0.60),
+        center_nm=535.0, fwhm_nm=55.0, peak_t=0.62),
 )
 
 

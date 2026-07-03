@@ -537,3 +537,559 @@ class TestEffectToggles:
         fig = plot_source_image(t, s)
         assert fig is not None
         plt.close(fig)
+
+
+class TestSharedPSFNormalization:
+    """Phase 1.5: shared-normalisation central-obstruction Strehl visibility."""
+
+    def _newt(self, eps):
+        from telescope_gui.telescope_builder import build_telescope
+        return build_telescope(
+            telescope_type="Newtonian", diameter=200.0, focal_length=1000.0,
+            enable_obstruction=(eps > 0), obstruction_ratio=eps)
+
+    def test_plot_psf_2d_exposes_peaks(self):
+        """plot_psf_2d attaches raw + relative peak attributes to the figure."""
+        from telescope_sim.plotting.ray_trace_plot import plot_psf_2d
+        fig = plot_psf_2d(self._newt(0.0), figsize=(4, 4))
+        assert getattr(fig, "_psf_raw_peak", None) is not None
+        assert fig._psf_raw_peak > 0
+        # No reference => displayed relative to its own peak (1.0).
+        assert fig._psf_relative_peak == pytest.approx(1.0)
+        plt.close(fig)
+
+    def test_peak_reference_yields_strehl_drop(self):
+        """With the unobstructed peak as reference, the obstructed PSF's
+        relative peak equals the Strehl ratio (1-eps^2)^2."""
+        from telescope_sim.plotting.ray_trace_plot import plot_psf_2d
+        eps = 0.30
+        fig_un = plot_psf_2d(self._newt(0.0), figsize=(4, 4))
+        ref = fig_un._psf_raw_peak
+        fig_ob = plot_psf_2d(self._newt(eps), figsize=(4, 4),
+                             peak_reference=ref)
+        assert fig_ob._psf_relative_peak == pytest.approx(
+            (1.0 - eps ** 2) ** 2, abs=0.01)
+        plt.close(fig_un)
+        plt.close(fig_ob)
+
+    def test_runner_threads_peak_reference(self):
+        """scenario_runner surfaces psf_raw_peak and applies peak_reference."""
+        from telescope_gui.tutorial_mode.scenario_registry import get_scenario_by_id
+        from telescope_gui.tutorial_mode.scenario_runner import run_scenario_side
+        s = get_scenario_by_id("central_obstruction")
+        # Before side (unobstructed) — capture the reference.
+        fig_b, info_b, err_b = run_scenario_side(
+            s.before_telescope, s.before_source, s.plot_function)
+        assert err_b is None
+        ref = info_b["psf_raw_peak"]
+        assert ref and ref > 0
+        plt.close(fig_b)
+        # After side (obstructed) relative to that reference.
+        fig_a, info_a, err_a = run_scenario_side(
+            s.after_telescope, s.after_source, s.plot_function,
+            peak_reference=ref)
+        assert err_a is None
+        eps = s.after_telescope.obstruction_ratio
+        assert info_a["psf_relative_peak"] == pytest.approx(
+            (1.0 - eps ** 2) ** 2, abs=0.01)
+        plt.close(fig_a)
+
+    def test_scenario_opts_into_shared_normalization(self):
+        from telescope_gui.tutorial_mode.scenario_registry import get_scenario_by_id
+        assert get_scenario_by_id("central_obstruction").shared_psf_normalization
+        # Other PSF scenarios must NOT (aperture/size lessons, not Strehl).
+        assert not get_scenario_by_id("airy_disk").shared_psf_normalization
+
+
+class TestExitPupilEyeModel:
+    """Phase 1.4: exposure is detector-only; eye-view brightness is optics-driven."""
+
+    def _render(self, source, **kw):
+        from telescope_sim.geometry import NewtonianTelescope
+        from telescope_sim.plotting.ray_trace_plot import (
+            _render_source_through_telescope,
+        )
+        t = NewtonianTelescope(200.0, 1000.0, enable_obstruction=False)
+        img, _half, _info = _render_source_through_telescope(
+            source, t, num_pixels=96, **kw)
+        return img
+
+    def _jupiter(self):
+        from telescope_sim.source.sources import Jupiter
+        return Jupiter()
+
+    def _star(self):
+        from telescope_sim.source.sources import PointSource
+        return PointSource(magnitude=2.0)  # not saturated, so exposure shows
+
+    def test_eye_view_ignores_exposure_extended(self):
+        """Eye view: exposure does not change an extended-source render."""
+        lo = self._render(self._jupiter(), display_stretch="log",
+                          exposure_level=0.1)
+        hi = self._render(self._jupiter(), display_stretch="log",
+                          exposure_level=10.0)
+        assert np.allclose(lo, hi)
+
+    def test_eye_view_ignores_exposure_star(self):
+        """Eye view: exposure does not change a point-source render."""
+        lo = self._render(self._star(), display_stretch="log",
+                          exposure_level=0.1)
+        hi = self._render(self._star(), display_stretch="log",
+                          exposure_level=10.0)
+        assert np.allclose(lo, hi)
+
+    def test_detector_view_applies_exposure(self):
+        """Detector view: higher exposure yields a brighter render."""
+        lo = self._render(self._star(), display_stretch="linear",
+                          exposure_level=0.2)
+        hi = self._render(self._star(), display_stretch="linear",
+                          exposure_level=1.0)
+        assert hi.sum() > lo.sum() * 1.5
+
+    def test_eye_view_extended_brightness_scales_with_exit_pupil(self):
+        """Eye view: a larger exit pupil gives a brighter extended surface."""
+        small = self._render(self._jupiter(), display_stretch="log",
+                             exit_pupil_mm=1.0)
+        large = self._render(self._jupiter(), display_stretch="log",
+                             exit_pupil_mm=7.0)
+        assert large.sum() > small.sum() * 1.5
+
+    def test_detector_view_ignores_exit_pupil(self):
+        """Detector view: exit pupil has no effect (exposure drives brightness)."""
+        a = self._render(self._jupiter(), display_stretch="linear",
+                         exit_pupil_mm=1.0)
+        b = self._render(self._jupiter(), display_stretch="linear",
+                         exit_pupil_mm=7.0)
+        assert np.allclose(a, b)
+
+    def test_eye_view_star_ignores_exit_pupil(self):
+        """Eye view: a point source is aperture-driven, not exit-pupil-driven."""
+        a = self._render(self._star(), display_stretch="log",
+                         exit_pupil_mm=1.0)
+        b = self._render(self._star(), display_stretch="log",
+                         exit_pupil_mm=7.0)
+        assert np.allclose(a, b)
+
+    def test_plot_source_image_accepts_exit_pupil(self):
+        """Public API smoke: plot_source_image accepts exit_pupil_mm."""
+        from telescope_sim.geometry import NewtonianTelescope
+        from telescope_sim.plotting import plot_source_image
+        t = NewtonianTelescope(200.0, 1000.0, enable_obstruction=False)
+        fig = plot_source_image(t, self._jupiter(), num_pixels=96,
+                                display_stretch="log", exit_pupil_mm=2.0)
+        assert fig is not None
+        plt.close(fig)
+
+
+class TestPerSideDisplayControls:
+    """Phase 1.2: per-side display controls pin Before-side stretch/filter/exposure."""
+
+    def _scn(self, sid):
+        from telescope_gui.tutorial_mode.scenario_registry import get_scenario_by_id
+        return get_scenario_by_id(sid)
+
+    def test_saturation_demo_detector_vs_eye(self):
+        s = self._scn("saturation_demo")
+        assert s.before_display_stretch == "linear"  # Detector
+        assert s.default_display_stretch == "log"     # Eye (after)
+        assert s.both_sides_dynamic and s.before_telescope_dynamic
+
+    def test_nd_filter_moon_before_unfiltered(self):
+        s = self._scn("nd_filter_moon")
+        assert s.before_filter == "None"
+        assert s.default_filter != "None"            # after applies a filter
+        assert s.default_display_stretch == "linear"  # detector saturation lesson
+
+    def test_exposure_demo_detector_vs_eye_live(self):
+        # B8 redesign: live Detector (left) vs Eye (right), both tracking the
+        # same exposure/aperture — no fixed "before 0.1x" baseline.
+        s = self._scn("exposure_demo")
+        assert s.before_display_stretch == "linear"   # Detector (left)
+        assert s.default_display_stretch == "log"      # Eye (right)
+        assert s.before_exposure is None               # both follow live slider
+        assert s.both_sides_dynamic
+
+    def test_exposure_demo_star_is_coloured(self):
+        # B8: a coloured star so saturation whiteout / cone desaturation
+        # is demonstrable (a mag-0 white star showed no colour).
+        s = self._scn("exposure_demo")
+        assert s.after_source.kwargs.get("spectral_rgb") is not None
+
+    def test_color_filter_jupiter_before_unfiltered(self):
+        s = self._scn("color_filter_jupiter")
+        assert s.before_filter == "None"
+        assert s.default_filter != "None"
+
+    def test_default_display_stretch_defaults_to_log(self):
+        """Scenarios that don't opt in keep the Eye (log) default."""
+        assert self._scn("rayleigh_criterion").default_display_stretch == "log"
+
+
+class TestRound2Batch1:
+    """Round 2 Batch 1: ray-fan floor, axis-lock FOV skip, dropped controls."""
+
+    def _scn(self, sid):
+        from telescope_gui.tutorial_mode.scenario_registry import get_scenario_by_id
+        return get_scenario_by_id(sid)
+
+    def _telescope(self, primary_type):
+        from telescope_gui.telescope_builder import build_telescope
+        return build_telescope(
+            telescope_type="Newtonian", diameter=200.0, focal_length=800.0,
+            primary_type=primary_type, enable_obstruction=False, spider_vanes=0)
+
+    # B6c — ray-fan y-axis is floored to a physical (diffraction) scale so a
+    # corrected primary reads as flat, not a magnified floating-point zigzag.
+    def test_ray_fan_parabolic_floored_not_noise(self):
+        from telescope_sim.plotting.ray_trace_plot import plot_ray_fan_telescope
+        fig = plot_ray_fan_telescope(self._telescope("parabolic"), figsize=(4, 4))
+        ylo, yhi = fig.axes[0].get_ylim()
+        # Floor ≈ 3 × Airy radius (µm); must be ~µm, not the ~1e-11 noise scale.
+        airy_um = 1.22 * (550.0 * 1e-6) * 4.0 * 1000.0
+        assert yhi == pytest.approx(3.0 * airy_um, rel=0.01)
+        assert yhi > 1.0  # decisively above floating-point noise
+        plt.close(fig)
+
+    def test_ray_fan_spherical_autoscales_above_floor(self):
+        from telescope_sim.plotting.ray_trace_plot import plot_ray_fan_telescope
+        fig = plot_ray_fan_telescope(self._telescope("spherical"), figsize=(4, 4))
+        _, yhi = fig.axes[0].get_ylim()
+        # Real SA spans tens–hundreds of µm — well above the diffraction floor.
+        assert yhi > 50.0
+        plt.close(fig)
+
+    # B5/B8/B9 — confounding controls dropped.
+    def test_nd_filter_moon_drops_diameter(self):
+        assert "diameter" not in self._scn("nd_filter_moon").tweakable_params
+
+    def test_exposure_demo_drops_focal_length_keeps_diameter(self):
+        params = self._scn("exposure_demo").tweakable_params
+        assert "focal_length" not in params
+        assert "diameter" in params
+
+    # B3 — central-obstruction panes labelled with their normalisation.
+    def test_central_obstruction_labels_mention_normalization(self):
+        s = self._scn("central_obstruction")
+        assert "reference" in s.before_label.lower()
+        assert "strehl" in s.after_label.lower()
+
+
+class TestRound2Batch2:
+    """Round 2 Batch 2: chromatic idealisation/zoom, chroma asinh, coloured stars."""
+
+    def _scn(self, sid):
+        from telescope_gui.tutorial_mode.scenario_registry import get_scenario_by_id
+        return get_scenario_by_id(sid)
+
+    # B4 — chromatic scenario opts into SA idealisation + the focal-zoom combo.
+    def test_chromatic_scenario_flags(self):
+        s = self._scn("chromatic_aberration")
+        assert s.idealize_singlet_sa is True
+        assert s.show_focal_zoom_combo is True
+
+    def test_idealize_sa_converges_rays_to_focus(self):
+        """idealize_sa=True draws each colour converging to its focal point.
+
+        With idealisation the per-colour rays meet at a point, so the spread
+        of axis-crossing x-positions for one wavelength collapses toward 0.
+        We assert the figure renders and is flagged; geometric convergence is
+        validated visually (the ray bundles meet at the star markers)."""
+        from telescope_sim.plotting.ray_trace_plot import (
+            plot_polychromatic_ray_trace,
+        )
+        from telescope_gui.telescope_builder import build_telescope
+        t = build_telescope(telescope_type="Refractor", diameter=100,
+                            focal_length=500, objective_type="singlet")
+        fig_ideal = plot_polychromatic_ray_trace(t, figsize=(4, 5),
+                                                 idealize_sa=True,
+                                                 show_inset=False)
+        # The idealisation note is present on the axes.
+        texts = " ".join(t.get_text().lower() for t in fig_ideal.axes[0].texts)
+        assert "spherical aberration removed" in texts
+        plt.close(fig_ideal)
+
+    def test_focal_zoom_changes_xlim(self):
+        from telescope_sim.plotting.ray_trace_plot import (
+            plot_chromatic_focal_planes,
+        )
+        from telescope_gui.telescope_builder import build_telescope
+        t = build_telescope(telescope_type="Refractor", diameter=100,
+                            focal_length=500, objective_type="achromat")
+        wide = plot_chromatic_focal_planes(t, fixed_xlim_arcsec=120.0)
+        close = plot_chromatic_focal_planes(t, fixed_xlim_arcsec=12.0)
+        # The 1D radial-profile panel is the one labelled in arcsec.
+        def _profile_xmax(fig):
+            for ax in fig.axes:
+                if "radial distance" in (ax.get_xlabel() or "").lower():
+                    return ax.get_xlim()[1]
+            return None
+        assert _profile_xmax(wide) == pytest.approx(120.0, rel=0.02)
+        assert _profile_xmax(close) == pytest.approx(12.0, rel=0.02)
+        plt.close(wide); plt.close(close)
+
+    # B8 — coloured PointSource renders RGB even through a reflector
+    # (intrinsic stellar colour, independent of chromatic aberration).
+    def test_pointsource_spectral_rgb_renders_colour(self):
+        from telescope_sim.geometry import NewtonianTelescope
+        from telescope_sim.source.sources import PointSource
+        from telescope_sim.plotting.ray_trace_plot import (
+            _render_source_through_telescope as R,
+        )
+        t = NewtonianTelescope(100.0, 800.0, enable_obstruction=False)
+        s = PointSource(magnitude=0.0, spectral_rgb=(1.0, 0.5, 0.2))
+        assert hasattr(s, "star_spectral_rgb")
+        # Reflector + non-polychromatic → still produces a tinted RGB image.
+        _img, _half, info = R(s, t, num_pixels=128, display_stretch="linear")
+        rgb = info["image_rgb"]
+        assert rgb is not None
+        # Peak pixel is red-dominant (matches the SED tint), not grey.
+        flat = rgb.reshape(-1, 3)
+        peak = flat[np.argmax(flat.sum(axis=1))]
+        assert peak[0] > peak[1] > peak[2]
+
+    def test_white_pointsource_stays_grayscale(self):
+        """No regression: a plain (uncoloured) PointSource still renders on
+        the grayscale path (no image_rgb) through a reflector."""
+        from telescope_sim.geometry import NewtonianTelescope
+        from telescope_sim.source.sources import PointSource
+        from telescope_sim.plotting.ray_trace_plot import (
+            _render_source_through_telescope as R,
+        )
+        t = NewtonianTelescope(100.0, 800.0, enable_obstruction=False)
+        s = PointSource(magnitude=0.0)  # no spectral_rgb
+        _img, _half, info = R(s, t, num_pixels=128, display_stretch="linear")
+        assert info["image_rgb"] is None
+
+    # B7/B10 — chroma-preserving asinh keeps hue in eye view.
+    def test_chroma_preserving_asinh_keeps_hue(self):
+        """A red-dominant linear image stays red-dominant after the eye-view
+        asinh (per-channel asinh would lift G/B and wash it toward grey)."""
+        from telescope_sim.geometry import NewtonianTelescope
+        from telescope_sim.source.sources import Jupiter
+        from telescope_sim.plotting.ray_trace_plot import (
+            _render_source_through_telescope as R,
+        )
+        t = NewtonianTelescope(200.0, 1000.0, enable_obstruction=False)
+        j = Jupiter()
+        # W25 red filter → red-dominant; eye view must preserve that.
+        _img, _half, info = R(j, t, num_pixels=128, display_stretch="log",
+                              filter_name="W25 (red)")
+        rgb = info["image_rgb"]
+        disk = rgb.reshape(-1, 3)
+        disk = disk[disk.sum(axis=1) > 0.1]
+        assert len(disk) > 0
+        mean = disk.mean(axis=0)
+        assert mean[0] > 2.0 * mean[1]  # red ≫ green (hue preserved)
+
+
+class TestShowcaseStarField:
+    """B12: the flagship star-field showcase source + scenario."""
+
+    def _tel(self, obs=True, spider=4, coma_ok=True):
+        from telescope_gui.telescope_builder import build_telescope
+        return build_telescope(
+            telescope_type="Newtonian", diameter=200, focal_length=800,
+            enable_obstruction=obs, obstruction_ratio=0.2 if obs else 0.0,
+            spider_vanes=spider, spider_vane_width=2.5)
+
+    def _render(self, tel, **kw):
+        from telescope_sim.source.sources import ShowcaseStarField
+        from telescope_sim.plotting.ray_trace_plot import (
+            _render_source_through_telescope as R,
+        )
+        _img, _half, info = R(ShowcaseStarField(), tel, num_pixels=192,
+                              display_stretch="log", **kw)
+        return info["image_rgb"]
+
+    def test_field_has_colour_and_population(self):
+        from telescope_sim.source.sources import ShowcaseStarField
+        s = ShowcaseStarField()
+        assert s.num_stars > 40
+        assert hasattr(s, "star_spectral_rgb")
+        assert s.star_spectral_rgb.shape == (s.num_stars, 3)
+        # Not all one colour: several distinct tints present.
+        uniq = {tuple(np.round(c, 2)) for c in s.star_spectral_rgb}
+        assert len(uniq) >= 4
+
+    def test_renders_in_colour_through_reflector(self):
+        rgb = self._render(self._tel())
+        assert rgb is not None
+        # Some pixels are meaningfully non-grey (chroma present).
+        flat = rgb.reshape(-1, 3)
+        lit = flat[flat.sum(axis=1) > 0.05]
+        chroma = (lit.max(axis=1) - lit.min(axis=1))
+        assert (chroma > 0.1).sum() > 20
+
+    def _changed(self, a, b):
+        d = np.abs(a - b)
+        return int((d.sum(axis=2) > 0.02).sum())
+
+    def test_each_effect_visibly_changes_field(self):
+        """coma / spider / obstruction / seeing each change the render.
+        (Vignetting is intentionally excluded — FIF ≫ field, see scenario.)"""
+        base = self._render(self._tel(), apply_coma=True, seeing_arcsec=1.5)
+        no_coma = self._render(self._tel(), apply_coma=False, seeing_arcsec=1.5)
+        no_spider = self._render(self._tel(spider=0), apply_coma=True,
+                                 seeing_arcsec=1.5)
+        no_obs = self._render(self._tel(obs=False), apply_coma=True,
+                              seeing_arcsec=1.5)
+        no_seeing = self._render(self._tel(), apply_coma=True,
+                                 seeing_arcsec=None)
+        assert self._changed(base, no_coma) > 50
+        assert self._changed(base, no_spider) > 50
+        assert self._changed(base, no_obs) > 50
+        assert self._changed(base, no_seeing) > 50
+
+    def test_scenario_uses_showcase_and_drops_vignetting_toggle(self):
+        from telescope_gui.tutorial_mode.scenario_registry import get_scenario_by_id
+        s = get_scenario_by_id("starfield_resolution")
+        assert s.after_source.source_type == "ShowcaseStarField"
+        assert s.before_source.source_type == "ShowcaseStarField"
+        # Vignetting omitted (dead toggle); the other four remain.
+        assert "vignetting" not in s.effect_toggles
+        assert set(s.effect_toggles) == {"obstruction", "spider_vanes",
+                                         "coma", "seeing"}
+
+
+class TestPlanetPipeline:
+    """B14: planets render at full intrinsic resolution, then the telescope
+    sim degrades them (sum-bin to display + PSF/seeing) — no premature cap,
+    no double blur. Confirms the A5 answer."""
+
+    def _tel(self):
+        from telescope_gui.telescope_builder import build_telescope
+        return build_telescope(telescope_type="Newtonian", diameter=200,
+                               focal_length=1000, enable_obstruction=False)
+
+    def test_texture_is_high_resolution(self):
+        from telescope_sim.source.sources import Jupiter, Saturn, Moon
+        for cls in (Jupiter, Saturn, Moon):
+            s = cls()
+            half = s.field_extent_arcsec / 2.0
+            for n in (256, 1024):
+                rgb = s.render_ideal_rgb(half, n)
+                assert rgb.shape == (n, n, 3)  # renders at the requested res
+
+    def test_extended_source_oversamples_then_sumbins(self):
+        """Jupiter at a modest display size renders at higher internal
+        resolution and sum-bins down (high-res-then-degrade)."""
+        import telescope_sim.plotting.ray_trace_plot as rp
+        from telescope_sim.source.sources import Jupiter
+        seen = {}
+        orig = rp._render_source_through_telescope
+
+        def wrap(source, telescope, **kw):
+            seen["eff"] = kw.get("num_pixels")
+            seen["disp"] = kw.get("display_num_pixels")
+            return orig(source, telescope, **kw)
+        rp._render_source_through_telescope = wrap
+        try:
+            fig = rp.plot_source_image(self._tel(), Jupiter(), num_pixels=120,
+                                       seeing_arcsec=None)
+            plt.close(fig)
+        finally:
+            rp._render_source_through_telescope = orig
+        assert seen["eff"] > seen["disp"]   # oversampled internally
+        assert seen["disp"] == 120          # displayed at requested size
+
+    def test_star_source_renders_at_display_resolution(self):
+        """Stars are points — no benefit to internal oversampling; render ==
+        display (a sub-pixel Airy → one bright pixel, what a CCD records)."""
+        import telescope_sim.plotting.ray_trace_plot as rp
+        from telescope_sim.source.sources import PointSource
+        seen = {}
+        orig = rp._render_source_through_telescope
+
+        def wrap(source, telescope, **kw):
+            seen["eff"] = kw.get("num_pixels")
+            seen["disp"] = kw.get("display_num_pixels")
+            return orig(source, telescope, **kw)
+        rp._render_source_through_telescope = wrap
+        try:
+            fig = rp.plot_source_image(self._tel(), PointSource(),
+                                       num_pixels=120, seeing_arcsec=None)
+            plt.close(fig)
+        finally:
+            rp._render_source_through_telescope = orig
+        assert seen["eff"] == seen["disp"] == 120
+
+    def test_seeing_degrades_monotonically(self):
+        """More seeing spreads flux → lower high-vs-median contrast."""
+        from telescope_sim.source.sources import Jupiter
+        from telescope_sim.plotting.ray_trace_plot import (
+            _render_source_through_telescope as R,
+        )
+        t = self._tel()
+
+        def contrast(seeing):
+            img, _h, _i = R(Jupiter(), t, num_pixels=200,
+                            seeing_arcsec=seeing, display_stretch="linear")
+            return float(np.percentile(img, 99.5) - np.percentile(img, 50))
+        sharp = contrast(None)
+        blurred = contrast(6.0)
+        assert blurred < sharp  # atmosphere softens the disk
+
+    def test_colour_preserved_through_degradation(self):
+        """Jupiter stays warm/tan (R>G>B) after PSF + seeing + eye view."""
+        from telescope_sim.source.sources import Jupiter
+        from telescope_sim.plotting.ray_trace_plot import (
+            _render_source_through_telescope as R,
+        )
+        _img, _h, info = R(Jupiter(), self._tel(), num_pixels=200,
+                           seeing_arcsec=1.5, display_stretch="log")
+        rgb = info["image_rgb"]
+        disk = rgb.reshape(-1, 3)
+        disk = disk[disk.sum(axis=1) > 0.1]
+        mean = disk.mean(axis=0)
+        assert mean[0] > mean[1] > mean[2]  # warm tan
+
+
+class TestBrightnessModelPropagation:
+    """B13: the detector-vs-eye brightness model must hold for EVERY source
+    type — eye view ignores exposure, detector view responds to it. This is a
+    generic renderer invariant; verifying it across source types guards against
+    a per-source-path regression."""
+
+    def _sources(self):
+        from telescope_sim.source.sources import (
+            PointSource, DoubleStar, MultiColorStarField, ShowcaseStarField,
+            Jupiter, Moon,
+        )
+        from telescope_gui.telescope_builder import build_telescope
+        refl = build_telescope(telescope_type="Newtonian", diameter=150,
+                               focal_length=1200, enable_obstruction=False)
+        refr = build_telescope(telescope_type="Refractor", diameter=80,
+                               focal_length=640, objective_type="achromat")
+        return [
+            (PointSource(magnitude=2.0), refl, {}),
+            (DoubleStar(separation_arcsec=8.0, magnitude_primary=0.0,
+                        magnitude_secondary=4.0), refl, {}),
+            (MultiColorStarField(), refr, dict(polychromatic=True)),
+            (ShowcaseStarField(), refl, {}),
+            (Jupiter(), refl, dict(seeing_arcsec=1.5)),
+            (Moon(), refl, dict(seeing_arcsec=1.5)),
+        ]
+
+    def test_eye_view_exposure_invariant_all_sources(self):
+        from telescope_sim.plotting.ray_trace_plot import (
+            _render_source_through_telescope as R,
+        )
+        for src, tel, extra in self._sources():
+            e1, _h, _i = R(src, tel, num_pixels=96, display_stretch="log",
+                           exposure_level=0.1, **extra)
+            e2, _h, _i = R(src, tel, num_pixels=96, display_stretch="log",
+                           exposure_level=10.0, **extra)
+            assert np.allclose(e1, e2), (
+                f"{type(src).__name__}: eye view changed with exposure")
+
+    def test_detector_view_exposure_sensitive_all_sources(self):
+        from telescope_sim.plotting.ray_trace_plot import (
+            _render_source_through_telescope as R,
+        )
+        for src, tel, extra in self._sources():
+            d1, _h, _i = R(src, tel, num_pixels=96, display_stretch="linear",
+                           exposure_level=0.3, **extra)
+            d2, _h, _i = R(src, tel, num_pixels=96, display_stretch="linear",
+                           exposure_level=2.0, **extra)
+            assert not np.allclose(d1, d2), (
+                f"{type(src).__name__}: detector view ignored exposure")

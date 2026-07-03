@@ -333,3 +333,27 @@ class TestGetSeeing:
         assert get_seeing("good") == 1.5
         assert get_seeing("GOOD") == 1.5
         assert get_seeing("Good") == 1.5
+
+
+# ------------------------------------------------------------------
+# Parameters & Physics reference tab — vignetting diagram
+# ------------------------------------------------------------------
+
+class TestReferenceTabVignettingDiagram:
+    """The static vignetting diagram (user-requested; vignetting can't be
+    shown on the star field, so it's illustrated here instead)."""
+
+    def test_diagram_builds_with_two_panels(self):
+        import matplotlib
+        matplotlib.use("Agg")
+        from telescope_gui.reference_tab import _build_vignetting_diagram
+        fig = _build_vignetting_diagram()
+        # Side view + secondary-face panels.
+        assert len(fig.axes) == 2
+        import matplotlib.pyplot as plt
+        plt.close(fig)
+
+    def test_reference_tab_constructs_with_diagram(self, qapp):
+        from telescope_gui.reference_tab import ParametersPhysicsTab
+        tab = ParametersPhysicsTab()
+        assert tab is not None

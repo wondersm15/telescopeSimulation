@@ -2,11 +2,164 @@
 
 ---
 
-## Tutorial Tab — Bug-fix & physics-validation round (Phase 1 in progress)
+## Tutorial Tab — Round 2 (user-feedback redesign): Batch 1 DONE
 
-**Date:** 2026-06-14
+**Date:** 2026-06-29
 **Branch:** `feature/tutorial-testing-tab`
-**Session:** Diagnosis of user-reported tutorial issues + first infrastructure fixes
+**Plan:** `PLAN_TUTORIAL_ROUND2.md` (item-level plan built from the user's
+verbatim post–Phase-1 feedback + diagnosis §D + answers §A). **Read that file
+to resume.**
+
+Diagnosed every feedback item through the canvas pipeline (§D). Confirmed
+B1/B2/B11/B14 were already fixed in Phase 1; answered the 5 questions (§A:
+exposure is detector-only; idealise singlet to CA-only; drop aperture on ND
+Moon; ray fan already transverse; planets already render hi-res then degrade).
+
+**Vignetting diagram in Parameters & Physics (2026-07-02). 392 pass (+2).**
+User decision on the two open items: (1) B7 green-star core — leave for now;
+(2) vignetting — add a static diagram (their own suggested alternative). Built
+`_build_vignetting_diagram()` in `reference_tab.py`: a 2-panel figure (side-view
+cone clipped by the secondary + the secondary-face circle-overlap model), with a
+caption incl. θ_fif and why vignetting can't show on the star field. Rendered to
+a QPixmap via `_figure_to_pixmap` / `_make_figure_section` (no temp files) and
+added as a "Vignetting (diagram)" section. Showcase description now points to it.
+New tests: `TestReferenceTabVignettingDiagram`.
+
+**Batch 4 — B14 planet validation + B13 propagation (2026-06-30). 390 pass (+7).**
+- B14: confirmed planets render at full intrinsic resolution then degrade
+  (extended sources oversample → sum-bin: Jupiter 260→120, Moon 2048→512;
+  stars render==display); degradation monotonic with seeing; colour preserved.
+  New `TestPlanetPipeline` (5 tests). A5 answer locked in.
+- B13: per-scenario config matrix across all 18 — no inconsistencies. Verified
+  the detector-vs-eye brightness invariant at runtime for all 6 source types
+  (eye exposure-invariant, detector exposure-sensitive). Cross-cutting fixes
+  are in generic paths → auto-propagate. New `TestBrightnessModelPropagation`.
+- **Round 2 complete: all feedback items B1–B14 addressed.** Two documented
+  model-limitation/judgement calls await a user decision: B7 green-star core;
+  vignetting-on-starfield (FIF ≫ field).
+
+**Batch 3 — B12 star-field showcase (2026-06-30). Tests: 383 pass (+4).**
+- New `ShowcaseStarField` (66 stars, 300" FOV): bright on-axis reference,
+  4 coloured edge stars (coma+spikes), 8"/4"/2" double ladder, ~55 seeded
+  background, all with spectral-class RGB tints. Renders in colour through a
+  reflector (reuses B8 colour path) — was grayscale sub-pixel dots.
+- Per-star spider-spike kernel fix: expand kernel to ~45× Airy when
+  spider_vanes>0 (was 8× → spikes cropped to a stub). Bright stars now show
+  real spikes on the per-star path.
+- Scenario `starfield_resolution` → "Star Field Showcase": ideal (left) vs
+  realistic 200mm f/4 + toggles (right). coma/spider/obstruction/seeing each
+  visibly change the render (verified quantitatively; offscreen Qt hides the
+  toggle checkboxes so the tab harness can't read them, wiring unchanged from
+  Phase-1).
+- Vignetting dropped from the showcase toggles (finding): FIF ~75' ≫ 5' field,
+  so no star is ever vignetted — a dead toggle. Explained in description;
+  covered by the dedicated Vignetting scenario. Flagged for user (contradicts
+  the request to show vignetting on the star field — model limitation).
+- New tests: `TestShowcaseStarField`.
+
+**Open user decisions:** (1) B7 green-star core (physically defensible per-pixel
+vs SED colour); (2) vignetting-on-starfield not showable under current model.
+
+**Next:** B14 planet render-then-degrade tests, B13 propagation pass.
+
+**Batch 2 — per-scenario redesigns (2026-06-29). Tests: 379 pass (+7).**
+All verified through the canvas pipeline; 18/18 scenarios smoke-test clean.
+- **B4** chromatic: `idealize_sa` removes singlet SA in the ray trace (each
+  colour converges to a point, flagged) so the comparison isolates colour;
+  new "Focal zoom" combo (Wide/Close) via `fixed_xlim_arcsec` resolves the
+  achromat/APO residuals.
+- **B7** chromatic+seeing: default Eye view + before pinned/labelled Eye so the
+  spectral stars always show. Finding flagged for a user decision: stars render
+  green-cored (flux-normalised chromatic kernel + real achromat secondary
+  spectrum → in-focus G peaks highest; integrated flux is the true SED).
+- **B8** exposure: live Detector-vs-Eye (dropped fixed before-0.1×); new
+  `PointSource(spectral_rgb=…)` + non-chromatic colour stamping so a star shows
+  its intrinsic colour through a reflector and saturates to white.
+- **B6a** spherical ray-trace: extension rays solid (was dotted) → checkerboard
+  moiré + solid/dotted transition gone; SA crossover reads clearly.
+- **Cross-cutting:** chroma-preserving asinh in eye view (stretch luminance,
+  preserve RGB ratio) — fixes the per-channel-asinh colour wash; plain Jupiter
+  now shows bands + red GRS, W25 Jupiter saturated red (much of B10).
+- New tests: `TestRound2Batch2` + `test_filters.py` extensions.
+
+**Next:** B12 star-field showcase (sub-pixel dots → needs redesign), B14 planet
+tests, B13 propagation. Open user decision: B7 green-star core.
+
+**Batch 1 — quick correctness fixes (2026-06-29). Tests: 372 pass (+12).**
+- **B9** W25/W58 filters: new `_longpass_transmission`; W25 now sharp long-pass
+  red (T_G 0.15→0.02) → Moon/Jupiter render red, not yellow. `tests/test_filters.py`.
+- **B10a** axis-lock × FOV: `_render_after` skips the lock for `plot_source_image`
+  when before/after spans differ >5% → live-ephemeris Jupiter shows at its own
+  FOV (no grey oversized frame); Airy/Rayleigh still lock.
+- **B6c** ray-fan y-axis floored to 3× Airy radius → parabolic reads flat (was
+  ±1e-11 µm zigzag); spherical still autoscales.
+- **B3** central-obstruction panes labelled with their normalisation.
+- **A1** exposure slider greys out + "N/A (Eye)" in Eye views (detector-only).
+- **B5/B8/B9** dropped confounding controls (ND-Moon diameter; exposure
+  focal-length) + fixed controls-panel early-return for no-param source scenes.
+
+**Next:** Batch 2 per-scenario redesigns (B4 chromatic CA-only+zoom, B7
+chromatic+seeing, B8 exposure detector-vs-eye+colour, B6a spherical cleanup) →
+B12 star-field showcase → B14 planet tests + B13 propagation.
+
+---
+
+## Tutorial Tab — Bug-fix & physics-validation round (Phase 1 COMPLETE)
+
+**Date:** 2026-06-14 (1.1/1.3) → 2026-06-20 (1.2/1.4/1.5)
+**Branch:** `feature/tutorial-testing-tab`
+**Session:** Diagnosis of user-reported tutorial issues + Phase 1 fixes (all five
+landed). Tests: **360 pass** (was 342; +18 new for 1.2/1.4/1.5).
+
+### Phase 1 completion (1.2, 1.4, 1.5) — 2026-06-20
+
+All three remaining items implemented and verified through the real GUI canvas
+pipeline (TutorialTab driven offscreen, figures rasterised at figsize=(5,5),
+dpi=100 exactly as `MatplotlibCanvas.set_figure` does).
+
+- **Per-side display controls + live before-side (1.2):** new
+  `ScenarioDefinition` fields `before_display_stretch` / `before_filter` /
+  `before_exposure` (None = mirror the live after-side control) and
+  `default_display_stretch`. `_render_before` now resolves its display
+  settings via `_before_display_settings()`. Wired the Act 3 scenarios so the
+  two panels form an honest comparison and both track shared params
+  (`both_sides_dynamic` + `before_telescope_dynamic`):
+  - `saturation_demo`: before = Detector(linear), after default = Eye(log).
+    Verified: dim mag-4 companion is a bare speck on the left, clearly visible
+    on the right.
+  - `nd_filter_moon`: before = no filter, after = ND-1.0; default Detector
+    view. Verified: left = saturated white disk, right = full crater detail.
+  - `exposure_demo`: before pinned exposure 0.1×, after = live slider; default
+    Detector view (so the slider + saturation are live).
+  - `color_filter_jupiter`: before = no filter, after = W25 (red). Verified:
+    neutral disk → strongly red-shifted with GRS enhanced.
+- **Exposure = detector-only + exit-pupil eye model (1.4):** new
+  `EYE_PUPIL_MM = 7.0`; `_render_source_through_telescope` brightness step is
+  now view-dependent. Detector(linear): brightness ∝ collected photons ×
+  exposure. Eye(log/log_integrated): exposure is N/A — stars ∝ aperture²
+  (magnification-independent); extended sources use surface brightness
+  ∝ (exit_pupil / 7 mm)² capped at naked-eye (the early D² `aperture_factor`
+  is divided back out and replaced). New `exit_pupil_mm` param threaded
+  through `plot_source_image` → `run_scenario_side`; new exit-pupil combo in
+  the UI (extended-source scenarios only); perceptual model flagged in the
+  plot annotation. Verified: eye-view exposure 0.1× vs 10× → identical
+  pixels; exit pupil 7→2→1 mm dims Jupiter 1.00→0.08→0.02× naked-eye with
+  detail/contrast improving; detector view ignores exit pupil; stars ignore
+  exit pupil.
+- **Shared normalisation for central-obstruction Strehl (1.5):**
+  `compute_fft_psf(..., return_raw_peak=True)` exposes the pre-normalisation
+  FFT peak (= (open-area)² at fixed sampling). `plot_psf_2d(..., peak_reference=)`
+  displays the PSF relative to a paired reference and attaches
+  `fig._psf_raw_peak` / `fig._psf_relative_peak`. Tutorial captures the
+  before-side (unobstructed) peak and renders the after-side obstructed PSF
+  relative to it (`shared_psf_normalization=True` on `central_obstruction`).
+  The measured displayed peak is now the simulated Strehl and feeds the
+  theory-vs-sim readout. Verified: sim Strehl matches theory (1−ε²)² to 4
+  decimals across ε=0→0.55; 2D log view shows dimmer core + brighter rings;
+  linear view shows energy redistribution; 1D profile + annotation also carry
+  the number.
+
+### Diagnosis (Phase 0)
 
 ### Diagnosis (Phase 0)
 
@@ -48,12 +201,15 @@ Confirmed five cross-cutting root causes behind most reports:
 - **Chromatic scenario singlet idealised to CA-only** (spherical aberration
   removed) with an explanatory note.
 
-### Remaining Phase 1
+### Remaining Phase 1 — DONE (see "Phase 1 completion" above, 2026-06-20)
 
-- 1.2 before-side live + per-side display controls (`before_display_stretch` /
-  `before_filter`).
-- 1.4 eye/detector exposure split + exit-pupil control.
-- 1.5 shared normalisation (central-obstruction Strehl visibility).
+- ~~1.2 before-side live + per-side display controls (`before_display_stretch` /
+  `before_filter`).~~ ✅
+- ~~1.4 eye/detector exposure split + exit-pupil control.~~ ✅
+- ~~1.5 shared normalisation (central-obstruction Strehl visibility).~~ ✅
+
+Next: Phases 2–5 (filters/colour deep-dive, per-scenario redesigns, the
+star-field showcase, planet render-high-then-degrade validation + tests).
 
 ---
 

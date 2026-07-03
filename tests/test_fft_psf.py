@@ -84,6 +84,33 @@ class TestComputeFFTPSF:
                                         grid_size=256)
         assert half_size > 0
 
+    def test_return_raw_peak_tuple(self):
+        """return_raw_peak=True yields a 3-tuple with a positive raw peak."""
+        result = compute_fft_psf(200.0, 1000.0, 550e-6,
+                                 grid_size=256, return_raw_peak=True)
+        assert len(result) == 3
+        psf, half_size, raw_peak = result
+        assert psf.max() == pytest.approx(1.0)  # still peak-normalised
+        assert raw_peak > 0
+
+    def test_raw_peak_ratio_is_strehl_for_obstruction(self):
+        """Raw-peak ratio of obstructed/unobstructed equals (1-eps^2)^2.
+
+        At identical grid/oversample/aperture the FFT raw peak is
+        (open-area)^2, so a central obstruction of ratio eps drops it by the
+        Strehl factor (1-eps^2)^2. This is the basis of the tutorial's
+        shared-normalisation central-obstruction view (Phase 1.5).
+        """
+        eps = 0.30
+        _, _, raw_unobs = compute_fft_psf(
+            200.0, 1000.0, 550e-6, obstruction_ratio=0.0,
+            grid_size=512, oversample=4, return_raw_peak=True)
+        _, _, raw_obs = compute_fft_psf(
+            200.0, 1000.0, 550e-6, obstruction_ratio=eps,
+            grid_size=512, oversample=4, return_raw_peak=True)
+        strehl = raw_obs / raw_unobs
+        assert strehl == pytest.approx((1.0 - eps ** 2) ** 2, abs=0.01)
+
     def test_matches_analytical_airy_no_vanes(self):
         """Without vanes, FFT PSF azimuthal average should match Airy.
 

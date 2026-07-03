@@ -59,6 +59,16 @@ if TYPE_CHECKING:
 APERTURE_REFERENCE_MM = 100.0
 SATURATION_LEVEL = 1.0
 
+# Dark-adapted human eye pupil diameter (mm). This is the reference exit
+# pupil at which an extended object reaches naked-eye surface brightness:
+# a telescope can never make an extended object's surface brightness exceed
+# the naked-eye value, and at smaller exit pupils (higher magnification)
+# the surface brightness falls as (exit_pupil / EYE_PUPIL_MM)². Used by the
+# Eye-view brightness model, where exposure (a detector concept) does not
+# apply — brightness comes from the optics instead. Visual-astronomy
+# standard ~7 mm. Perceptual model — flagged in the plot annotation.
+EYE_PUPIL_MM = 7.0
+
 
 def _draw_ray_trace(ax: plt.Axes, rays: list[Ray], components: dict,
                     title: str = "Newtonian Telescope Ray Trace",
@@ -939,6 +949,19 @@ def plot_ray_fan_telescope(telescope: Telescope,
     ax.set_ylabel("Transverse focal-plane offset Δy (µm)")
     ax.grid(True, alpha=0.3)
 
+    # Floor the y-axis to a physical (diffraction) scale so a corrected
+    # system reads as FLAT, not a magnified floating-point zigzag. A
+    # parabolic primary has Δy ≈ 1e-11 µm (numerical noise); left to
+    # autoscale, matplotlib blows that up into a fake S/zigzag even though
+    # RMS = 0.00 µm. Referencing the axis to the Airy radius makes
+    # "aberration ≪ diffraction limit" look diffraction-limited (a flat
+    # line through zero), while a real aberration (max |Δy| ≫ Airy)
+    # autoscales normally and shows its full curve.
+    airy_um = 1.22 * (wavelength_nm * 1e-6) * f_ratio * 1000.0
+    y_floor_um = 3.0 * airy_um  # half-range floor ≈ 3 Airy radii
+    y_half = max(max_um * 1.15, y_floor_um)
+    ax.set_ylim(-y_half, y_half)
+
     # Pupil-zone colorbar (matches the companion ray-trace panel)
     cbar = fig.colorbar(sm, ax=ax, shrink=0.85,
                         label="|Pupil zone| (mm)")
@@ -1068,10 +1091,17 @@ def plot_ray_trace_pupil_colored(telescope: Telescope,
                     c = colors[ray_idx]
                 else:
                     c = "gold"
+                # Draw the extension SOLID (not dotted) so each ray reads as
+                # one continuous line from primary → focal plane. The old
+                # dotted style created a picket-fence/checkerboard moiré
+                # across the ~21 near-parallel converging rays and a jarring
+                # solid→dotted transition mid-ray (user-reported). Match the
+                # traced segment's weight; slight transparency keeps the
+                # crossover region legible where many rays overlap.
                 ax.plot([p1[0], ext_pt[0]],
                         [p1[1], ext_pt[1]],
-                        color=c, alpha=0.6, linewidth=1.0,
-                        linestyle=":", zorder=2)
+                        color=c, alpha=0.7, linewidth=1.0,
+                        linestyle="-", zorder=2)
 
             # Mark the paraxial focal plane with a horizontal/vertical
             # guide line + a star at the on-axis position.
@@ -1923,6 +1953,7 @@ def plot_polychromatic_ray_trace(
     save_path: str | None = None,
     focus_wavelength_nm: float | None = None,
     show_inset: bool = True,
+    idealize_sa: bool = False,
 ) -> plt.Figure:
     """Plot a polychromatic ray trace showing R/G/B colored rays.
 
@@ -1938,6 +1969,14 @@ def plot_polychromatic_ray_trace(
             Defaults to R/G/B Fraunhofer lines.
         figsize: Figure size in inches.
         save_path: If provided, save the figure to this path.
+        idealize_sa: When True, draw each wavelength's post-lens rays as
+            idealised convergence to that wavelength's focal point — i.e.
+            spherical aberration is removed so ONLY the chromatic focal
+            shift between colours remains. This is a deliberate teaching
+            idealisation (flagged on the plot); the default (False) draws
+            the real refracted ray paths, so a spherical singlet shows its
+            true SA. Used by the chromatic-aberration tutorial so the
+            singlet/achromat/APO comparison isolates colour.
 
     Returns:
         The matplotlib Figure object.
@@ -2052,15 +2091,31 @@ def plot_polychromatic_ray_trace(
             if len(ray.history) < 2:
                 continue
             path = np.array(ray.history)
-            # Extend the last segment forward past the focal plane.
-            p_last = path[-1]
-            p_prev = path[-2]
-            direction = p_last - p_prev
-            norm = float(np.linalg.norm(direction))
-            if norm > 0:
-                unit = direction / norm
-                p_ext = p_last + unit * extension_length
-                path = np.vstack([path, p_ext])
+            if idealize_sa and focal_y is not None:
+                # Idealised convergence: keep the real path through the lens
+                # (history ends at the lens exit surface), then redirect this
+                # ray straight to the wavelength's focal point and beyond.
+                # All rays of a wavelength then meet at one point — spherical
+                # aberration removed, chromatic focal shift preserved.
+                exit_pt = path[-1]
+                focal_pt = np.array([0.0, focal_y])
+                d = focal_pt - exit_pt
+                norm = float(np.linalg.norm(d))
+                if norm > 0:
+                    unit = d / norm
+                    p_ext = focal_pt + unit * extension_length
+                    path = np.vstack([path, focal_pt, p_ext])
+            else:
+                # Real refracted path: extend the last segment forward past
+                # the focal plane (a singlet then shows its true SA spread).
+                p_last = path[-1]
+                p_prev = path[-2]
+                direction = p_last - p_prev
+                norm = float(np.linalg.norm(direction))
+                if norm > 0:
+                    unit = direction / norm
+                    p_ext = p_last + unit * extension_length
+                    path = np.vstack([path, p_ext])
             ax.plot(path[:, 0], path[:, 1],
                     color=color, alpha=0.8, linewidth=lw)
 
@@ -2097,6 +2152,19 @@ def plot_polychromatic_ray_trace(
                 verticalalignment="top", fontfamily="monospace",
                 bbox=dict(boxstyle="round,pad=0.3", facecolor="white",
                           alpha=0.85, edgecolor="gray"))
+
+    # Flag the teaching idealisation so the user knows the within-colour
+    # convergence is not real physics (spherical aberration suppressed).
+    if idealize_sa:
+        ax.text(0.02, 0.02,
+                "Idealised: spherical aberration removed —\n"
+                "each colour converges to a point so only\n"
+                "the chromatic focal shift is shown.",
+                transform=ax.transAxes, fontsize=7,
+                verticalalignment="bottom", horizontalalignment="left",
+                style="italic", color="#444",
+                bbox=dict(boxstyle="round,pad=0.3", facecolor="#fffbe6",
+                          alpha=0.9, edgecolor="#ccaa44"))
 
     # Draw a horizontal dashed line at the user's chosen focal plane so
     # the user can see WHICH plane the AFTER-side plots are taken at.
@@ -3162,6 +3230,7 @@ def plot_psf_2d(
     autoscale: bool = False,
     log_scale: bool = True,
     save_path: str | None = None,
+    peak_reference: float | None = None,
 ) -> plt.Figure:
     """Show the 2D PSF image on a log scale, revealing diffraction spikes.
 
@@ -3180,9 +3249,22 @@ def plot_psf_2d(
         autoscale: If True, auto-scale the color range to show full dynamic range.
                   If False, use fixed vmin=-4, vmax=0 for consistency.
         save_path: If provided, save the figure to this path.
+        peak_reference: If provided, display the PSF *relative* to this raw
+            on-axis peak (from a paired compute_fft_psf call with identical
+            sampling) instead of independently peak-normalising to 1.0. This
+            preserves the cross-frame peak-intensity ratio — e.g. an
+            obstructed PSF then peaks at its Strehl ratio (1−ε²)² rather than
+            at 1.0, making the central-obstruction peak loss visible against
+            an unobstructed reference. The computed raw peak is attached to
+            the returned figure as ``fig._psf_raw_peak`` so the caller can
+            use this frame as the reference for a paired frame.
 
     Returns:
-        The matplotlib Figure object.
+        The matplotlib Figure object. The figure carries two extra
+        attributes for paired/shared-normalisation rendering:
+        ``_psf_raw_peak`` (this frame's pre-normalisation peak) and
+        ``_psf_relative_peak`` (displayed peak relative to peak_reference;
+        1.0 when peak_reference is None).
     """
     wavelength_mm = wavelength_nm * 1e-6
     obs_ratio = telescope.obstruction_ratio if include_obstruction else 0.0
@@ -3198,13 +3280,24 @@ def plot_psf_2d(
     oversample = max(1, int(np.ceil(8.0 / pixels_per_airy)))
     oversample = min(oversample, 16)
 
-    psf_2d, half_size = compute_fft_psf(
+    psf_2d, half_size, raw_peak = compute_fft_psf(
         telescope.primary_diameter, telescope.focal_length,
         wavelength_mm, obs_ratio,
         telescope.spider_vanes, telescope.spider_vane_width,
         grid_size=grid_size,
         oversample=oversample,
+        return_raw_peak=True,
     )
+
+    # Shared normalisation: rescale this (peak=1.0) PSF so its on-axis peak
+    # is expressed relative to a reference raw peak from a paired frame. The
+    # obstructed PSF then peaks at raw_peak/peak_reference = (1−ε²)² instead
+    # of 1.0, so the Strehl peak loss is visible (and the rings, carrying the
+    # redistributed energy, read correctly against the unobstructed core).
+    relative_peak = 1.0
+    if peak_reference is not None and peak_reference > 0:
+        relative_peak = raw_peak / peak_reference
+        psf_2d = psf_2d * relative_peak
 
     fig, ax = plt.subplots(figsize=figsize)
 
@@ -3260,6 +3353,13 @@ def plot_psf_2d(
         f"Spider vanes: {telescope.spider_vanes}\n"
         f"Vane width: {telescope.spider_vane_width:.1f} mm"
     )
+    if peak_reference is not None and relative_peak < 0.999:
+        # Shared-normalisation view: surface the peak loss explicitly so the
+        # Strehl drop is a number, not just a subtle colour shift.
+        info_text += (
+            f"\nPeak vs unobstructed: {relative_peak:.3f}\n"
+            f"  (Strehl-type peak loss)"
+        )
     ax.text(0.02, 0.02, info_text,
             transform=ax.transAxes, fontsize=8,
             verticalalignment="bottom", color="white",
@@ -3268,6 +3368,9 @@ def plot_psf_2d(
     plt.tight_layout()
     if save_path:
         fig.savefig(save_path, dpi=150, bbox_inches="tight")
+    # Expose peaks for shared-normalisation pairing (see peak_reference).
+    fig._psf_raw_peak = raw_peak
+    fig._psf_relative_peak = relative_peak
     return fig
 
 
@@ -4097,6 +4200,7 @@ def _render_source_through_telescope(
         display_num_pixels: int | None = None,
         exposure_level: float = 1.0,
         filter_name: str = "None",
+        exit_pupil_mm: float = EYE_PUPIL_MM,
 ) -> tuple[np.ndarray, float, dict]:
     """Render an astronomical source as seen through the telescope.
 
@@ -4140,6 +4244,15 @@ def _render_source_through_telescope(
     f_ratio = focal_length / telescope.primary_diameter
     airy_radius_mm = 1.22 * wavelength_mm * f_ratio
     airy_radius_arcsec = airy_radius_mm * plate_scale
+
+    # Aperture-area photon-collection factor: a telescope of diameter D
+    # collects N ∝ D² photons. The reference aperture (APERTURE_REFERENCE_MM
+    # = 100 mm) is the absolute brightness anchor — combined with
+    # SATURATION_LEVEL, a mag-0 star through a 100 mm scope at unit exposure
+    # peaks just below saturation. Computed once and reused by every source
+    # branch + the final brightness normalisation.
+    aperture_factor = (telescope.primary_diameter
+                       / APERTURE_REFERENCE_MM) ** 2
 
     # FOV is taken directly from the source. We do NOT auto-expand the
     # FOV for severe-chromatic cases (singlet) — that made the singlet
@@ -4190,13 +4303,7 @@ def _render_source_through_telescope(
                 pa = np.degrees(np.arctan2(y_as, x_as))
                 stars.append((r, pa, mag))
 
-        # Aperture-area photon-collection factor: a real telescope of
-        # diameter D collects N ∝ D² photons. The reference aperture
-        # (APERTURE_REFERENCE_MM = 100 mm) is the absolute brightness
-        # anchor — combined with SATURATION_LEVEL, a mag-0 star through
-        # a 100 mm scope at unit exposure peaks just below saturation.
-        aperture_factor = (telescope.primary_diameter
-                           / APERTURE_REFERENCE_MM) ** 2
+        # aperture_factor (photon-collection ∝ D²) is computed once above.
 
         # Expand the PSF kernel if the off-axis coma spot for any star
         # exceeds the Airy-only kernel size. Otherwise the spot pattern
@@ -4225,6 +4332,26 @@ def _render_source_through_telescope(
             psf_n = max(psf_n, new_psf_n)
             psf_pixel_scale_mm = 2.0 * psf_half_mm / psf_n
             psf_zoom = psf_pixel_scale_mm / pixel_scale_mm
+
+        # Expand the kernel for spider-vane diffraction spikes. The FFT PSF
+        # spans ~100× the Airy radius, but the Airy-only kernel (8×) crops the
+        # spikes to a stub — so a spider'd star showed no spikes on the
+        # per-star path (only the extended-source path expanded for spiders).
+        # Widen to ~45× Airy so the spikes read out to a useful length; the
+        # per-star stamp is additive and scaled by intensity, so faint stars
+        # contribute correspondingly faint spikes.
+        if telescope.spider_vanes > 0:
+            needed_for_spikes = airy_radius_mm * 45.0
+            if needed_for_spikes > psf_half_mm:
+                old_pixel_scale_mm = 2.0 * psf_half_mm / psf_n
+                new_psf_n = int(2 * needed_for_spikes / old_pixel_scale_mm)
+                if new_psf_n % 2 == 0:
+                    new_psf_n += 1
+                new_psf_n = min(new_psf_n, num_pixels)
+                psf_half_mm = needed_for_spikes
+                psf_n = max(psf_n, new_psf_n)
+                psf_pixel_scale_mm = 2.0 * psf_half_mm / psf_n
+                psf_zoom = psf_pixel_scale_mm / pixel_scale_mm
 
         if _star_use_chromatic:
             image_rgb = np.zeros((num_pixels, num_pixels, 3))
@@ -4342,6 +4469,24 @@ def _render_source_through_telescope(
                     psf[py1:py2, px1:px2] * intensity * vignetting
                 )
 
+            # Intrinsic stellar colour (non-chromatic path): when the source
+            # carries spectral tints but we're NOT doing the per-wavelength
+            # chromatic render (reflector, or refractor with polychromatic
+            # off), still tint the star by its SED. A star's colour is
+            # intrinsic — it is NOT an artefact of chromatic aberration, so a
+            # reflector must show it too. Same PSF for all channels (no
+            # chromatic halo); saturation then clips all channels → white,
+            # demonstrating saturation whiteout / cone desaturation on a
+            # coloured star. Gated on star_rgb so plain white stars stay on
+            # the grayscale path unchanged.
+            if (star_rgb is not None and not _star_use_chromatic
+                    and y2 > y1 and x2 > x1):
+                if image_rgb is None:
+                    image_rgb = np.zeros((num_pixels, num_pixels, 3))
+                stamp = psf[py1:py2, px1:px2] * intensity * vignetting
+                for ch in range(3):
+                    image_rgb[y1:y2, x1:x2, ch] += stamp * star_color[ch]
+
             # Polychromatic per-channel stamping. Each R/G/B PSF includes
             # the chromatic defocus for its wavelength so a singlet refractor
             # produces visible colored halos around each star.
@@ -4406,11 +4551,11 @@ def _render_source_through_telescope(
         ideal = source.render_ideal(half_fov_arcsec, num_pixels)
         ideal_rgb = source.render_ideal_rgb(half_fov_arcsec, num_pixels)
 
-        # Aperture-area photon-collection factor (see per-star path).
+        # aperture_factor (photon-collection ∝ D²) is computed once above.
         # The source's `render_ideal*` returns a peak-normalised disk;
-        # multiply by D²/D_ref² so absolute brightness tracks aperture.
-        aperture_factor = (telescope.primary_diameter
-                           / APERTURE_REFERENCE_MM) ** 2
+        # multiply by D²/D_ref² so absolute brightness tracks aperture in
+        # the detector view. (The eye view rescales this at the brightness
+        # step, where surface brightness is exit-pupil-driven instead.)
         ideal = ideal * aperture_factor
         ideal_rgb = ideal_rgb * aperture_factor
 
@@ -4502,9 +4647,7 @@ def _render_source_through_telescope(
         # before F1.4). Resample the PSF to match the image pixel scale so
         # different apertures yield different rendered images.
         ideal = source.render_ideal(half_fov_arcsec, num_pixels)
-        # Aperture-area photon-collection factor (see per-star path).
-        aperture_factor = (telescope.primary_diameter
-                           / APERTURE_REFERENCE_MM) ** 2
+        # aperture_factor (photon-collection ∝ D²) is computed once above.
         ideal = ideal * aperture_factor
         pixel_scale_arcsec = 2.0 * half_fov_arcsec / num_pixels
         pixel_scale_mm = pixel_scale_arcsec / plate_scale
@@ -4573,23 +4716,51 @@ def _render_source_through_telescope(
                 ).sum(axis=(1, 3))
             num_pixels = display_num_pixels
 
-    # Absolute brightness normalisation: divide by a fixed reference
-    # (SATURATION_LEVEL × exposure_level) so a mag-0 star through a
-    # 100 mm scope at unit exposure peaks just below 1.0, brighter
-    # sources/larger apertures legitimately saturate, fainter ones
-    # sit at their true relative brightness. The previous code
-    # divided by image.max(), which forced the brightest pixel of
-    # every frame to 1.0 — that erased absolute brightness
-    # information and made aperture/exposure changes invisible.
-    # Seeing-induced peak dimming is now naturally captured: seeing
-    # convolution spreads flux, so post-seeing peak < pre-seeing peak,
-    # and both are referenced to the same fixed saturation_level.
-    # Higher exposure_level → more photons accumulated → brighter image,
-    # so it scales the *numerator*, equivalent to dividing by
-    # SATURATION_LEVEL / exposure_level. Inverting the divisor keeps the
-    # photometric interpretation honest (long exposure of a faint star
-    # eventually saturates).
-    saturation_divisor = SATURATION_LEVEL / max(exposure_level, 1e-9)
+    # ── Absolute brightness normalisation (view-dependent) ───────────────
+    # Divide by a fixed reference so a mag-0 star through a 100 mm scope at
+    # unit exposure peaks just below 1.0; brighter sources / larger apertures
+    # legitimately saturate, fainter ones sit at their true relative
+    # brightness. (The previous code divided by image.max(), forcing every
+    # frame's brightest pixel to 1.0 — that erased absolute brightness and
+    # made aperture/exposure changes invisible.) Seeing-induced peak dimming
+    # is captured naturally: seeing spreads flux so post-seeing peak <
+    # pre-seeing peak, both referenced to the same fixed level.
+    #
+    # WHAT DRIVES BRIGHTNESS depends on the display view (Phase 1.4):
+    #   Detector (linear): brightness ∝ collected photons × exposure time.
+    #     exposure_level scales the signal linearly — a long exposure of a
+    #     faint star eventually saturates. This is what a CCD records.
+    #   Eye (log / log_integrated): exposure does NOT apply — the eye has a
+    #     fixed ~0.1 s integration, it can't "expose longer". Brightness
+    #     comes from the optics instead:
+    #       • point-like sources (stars): retinal illuminance ∝ collected
+    #         photons (∝ D², already in aperture_factor), magnification-
+    #         independent — a bigger scope shows brighter stars.
+    #       • extended sources (planets/Moon): a telescope can never raise
+    #         surface brightness above the naked-eye level, and at higher
+    #         magnification (smaller exit pupil) it falls as
+    #         (exit_pupil / eye_pupil)². So the D² aperture_factor baked into
+    #         `ideal*` is divided back out and replaced by the exit-pupil
+    #         surface-brightness factor (aperture-independent surface
+    #         brightness — bigger scope buys resolution, not surface
+    #         brightness). Perceptual model — flagged in the UI annotation.
+    is_eye_view = display_stretch in ("log", "log_integrated")
+    is_extended_source = hasattr(source, "render_ideal_rgb")
+    eye_surface_brightness_factor = None
+    if is_eye_view:
+        effective_exposure = 1.0
+        if is_extended_source:
+            eye_surface_brightness_factor = min(
+                1.0, (exit_pupil_mm / EYE_PUPIL_MM) ** 2)
+            brightness_scale = eye_surface_brightness_factor / aperture_factor
+        else:
+            brightness_scale = 1.0
+    else:
+        effective_exposure = exposure_level
+        brightness_scale = 1.0
+
+    saturation_divisor = SATURATION_LEVEL / (
+        max(effective_exposure, 1e-9) * max(brightness_scale, 1e-12))
 
     # Optional atmospheric seeing
     if seeing_arcsec is not None and seeing_arcsec > 0:
@@ -4683,9 +4854,25 @@ def _render_source_through_telescope(
 
     if display_stretch in ("log", "log_integrated"):
         a = 0.001
-        image = np.arcsinh(image / a) / np.arcsinh(1.0 / a)
+        norm = np.arcsinh(1.0 / a)
+        image = np.arcsinh(image / a) / norm
         if image_rgb is not None:
-            image_rgb = np.arcsinh(image_rgb / a) / np.arcsinh(1.0 / a)
+            # Chroma-preserving asinh: stretch the LUMINANCE and scale the
+            # RGB triplet by the same factor, instead of stretching each
+            # channel independently. Per-channel asinh over-lifts the dim
+            # channels (a 2%-green leak becomes ~50% after asinh), collapsing
+            # every dim colour toward grey-green — which made the spectral
+            # stars render uniformly green and washed out colour-filtered
+            # planets. Preserving the RGB ratio keeps hue intact while still
+            # boosting dim features; bright pixels are already desaturated by
+            # the cone-desaturation step above.
+            lum = (0.2126 * image_rgb[..., 0]
+                   + 0.7152 * image_rgb[..., 1]
+                   + 0.0722 * image_rgb[..., 2])
+            lum_stretched = np.arcsinh(lum / a) / norm
+            with np.errstate(divide="ignore", invalid="ignore"):
+                scale = np.where(lum > 1e-9, lum_stretched / lum, 0.0)
+            image_rgb = image_rgb * scale[..., None]
 
     image = np.clip(image, 0.0, 1.0)
     if image_rgb is not None:
@@ -4703,6 +4890,11 @@ def _render_source_through_telescope(
         source_type=type(source).__name__,
         image_rgb=image_rgb,
         polychromatic=polychromatic,
+        # Brightness-model metadata (Phase 1.4) for the UI annotation.
+        is_eye_view=is_eye_view,
+        exposure_applied=(not is_eye_view),
+        exit_pupil_mm=exit_pupil_mm,
+        eye_surface_brightness_factor=eye_surface_brightness_factor,
     )
     return image, half_fov_arcsec, info
 
@@ -4872,6 +5064,7 @@ def plot_source_image(telescope: Telescope,
                       focus_wavelength_nm: float = 550.0,
                       exposure_level: float = 1.0,
                       filter_name: str = "None",
+                      exit_pupil_mm: float = EYE_PUPIL_MM,
                       ) -> plt.Figure | list[plt.Figure]:
     """Plot a simulated image of an astronomical source through the telescope.
 
@@ -4966,6 +5159,7 @@ def plot_source_image(telescope: Telescope,
         display_num_pixels=num_pixels,
         exposure_level=exposure_level,
         filter_name=filter_name,
+        exit_pupil_mm=exit_pupil_mm,
     )
     info["display_stretch"] = display_stretch
     info["focus_wavelength_nm"] = focus_wavelength_nm
@@ -5022,9 +5216,35 @@ def plot_source_image(telescope: Telescope,
     else:
         ann_lines.append("Approx: Monochromatic, no atmospheric dispersion")
 
-    if info.get("display_stretch") == "log":
+    # ── Brightness-model flag (Phase 1.4) ────────────────────────────
+    # Make the eye-vs-detector brightness model explicit so the user knows
+    # why the exposure slider is (or isn't) doing anything. Flagged as a
+    # perceptual approximation in the Eye views.
+    if info.get("is_eye_view"):
         ann_lines.append(
             "Display: asinh stretch (boosts dim features; data unchanged)"
+        )
+        sb = info.get("eye_surface_brightness_factor")
+        if sb is not None:
+            # Extended source: exit-pupil-driven surface brightness.
+            ann_lines.append(
+                f"Eye view (perceptual): exposure N/A — surface brightness "
+                f"≈ {sb:.2f}× naked-eye"
+            )
+            ann_lines.append(
+                f"  (exit pupil {info.get('exit_pupil_mm', EYE_PUPIL_MM):.1f}"
+                f"mm; ∝ (p/{EYE_PUPIL_MM:.0f}mm)², capped)"
+            )
+        else:
+            # Point-like source: aperture-driven.
+            ann_lines.append(
+                "Eye view (perceptual): exposure N/A — "
+                "star brightness ∝ aperture²"
+            )
+    else:
+        ann_lines.append(
+            f"Detector view (linear): exposure "
+            f"{exposure_level:.2f}× applied"
         )
 
     # ── Eyepiece calculations ────────────────────────────────────────

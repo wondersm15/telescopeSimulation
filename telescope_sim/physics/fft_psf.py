@@ -69,7 +69,8 @@ def compute_fft_psf(aperture_diameter: float, focal_length: float,
                     wavelength_mm: float, obstruction_ratio: float = 0.0,
                     spider_vanes: int = 0, spider_vane_width: float = 1.0,
                     grid_size: int = 1024,
-                    oversample: int = 1):
+                    oversample: int = 1,
+                    return_raw_peak: bool = False):
     """Compute the 2D PSF via Fraunhofer diffraction (FFT of the pupil).
 
     PSF = |FFT(pupil)|^2, normalized so peak = 1.0.
@@ -93,11 +94,20 @@ def compute_fft_psf(aperture_diameter: float, focal_length: float,
         oversample: Zero-padding factor for finer image-plane sampling.
             Higher values give more pixels across the Airy disk.
             Default 1 (no padding).
+        return_raw_peak: When True, also return the pre-normalisation peak
+            intensity. For a binary pupil this is (open-pixel count)² — i.e.
+            it scales with collected area² at fixed grid sampling. Two PSFs
+            computed with the same grid_size/oversample/aperture are then
+            directly comparable (their raw-peak ratio is the Strehl-type
+            peak-intensity ratio, e.g. (1−ε²)² for a central obstruction).
 
     Returns:
-        Tuple of (psf_2d, half_size_mm) where:
+        Tuple of (psf_2d, half_size_mm) — or, when return_raw_peak is True,
+        (psf_2d, half_size_mm, raw_peak) where:
         - psf_2d: 2D array normalized to peak = 1.0
         - half_size_mm: half-width of the image in mm
+        - raw_peak: pre-normalisation peak intensity (arbitrary but
+          comparable across calls with identical sampling)
     """
     mask = build_pupil_mask(grid_size, aperture_diameter, obstruction_ratio,
                             spider_vanes, spider_vane_width)
@@ -125,4 +135,6 @@ def compute_fft_psf(aperture_diameter: float, focal_length: float,
     di = wavelength_mm * focal_length / (fft_size * dp)  # image plane pixel size (mm)
     half_size_mm = (fft_size / 2.0) * di
 
+    if return_raw_peak:
+        return psf, half_size_mm, float(peak)
     return psf, half_size_mm

@@ -5,10 +5,13 @@ A read-only, scrollable guide covering telescope types, GUI parameters,
 plot descriptions, and implemented physics.
 """
 
+import io
+
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QScrollArea, QGroupBox, QLabel
 )
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QPixmap
 
 
 # ---------------------------------------------------------------------------
@@ -599,6 +602,209 @@ temperature.</i></p>
 # Widget
 # ---------------------------------------------------------------------------
 
+VIGNETTING_DIAGRAM_CAPTION_HTML = (
+    "<p>A star on the optical axis sends a light cone that lands squarely on "
+    "the secondary mirror &mdash; every ray is caught and the image is "
+    "<b>fully illuminated</b>. A star <i>off</i> the axis sends its cone in "
+    "at an angle, so by the time the cone reaches the secondary it has "
+    "shifted sideways (left panel). Once the shift is large enough, the far "
+    "edge of the cone <b>misses the secondary</b> and that light is lost "
+    "(red) &mdash; the star is dimmed. The right panel is the same effect "
+    "seen face-on: the circular beam footprint slides off the circular "
+    "secondary aperture, and the non-overlapping sliver is the vignetted "
+    "light (the <i>circle&ndash;circle overlap</i> model the simulation "
+    "uses).</p>"
+    "<p style='font-family:monospace; margin-left:20px;'>"
+    "Fully-illuminated field &theta;<sub>fif</sub> = (r<sub>sec</sub> "
+    "&minus; r<sub>beam</sub>) / d<sub>sec</sub> &times; 206265&Prime;</p>"
+    "<p>Inside &theta;<sub>fif</sub> illumination is 100%; beyond it the "
+    "overlap fraction &mdash; and the illumination &mdash; falls smoothly "
+    "toward the 50% edge. A larger secondary pushes &theta;<sub>fif</sub> "
+    "outward (less vignetting) at the cost of a larger central obstruction.</p>"
+    "<p><b>Why you don't see vignetting on the Star Field Showcase:</b> for a "
+    "normally-sized secondary, &theta;<sub>fif</sub> is huge &mdash; a 200&nbsp;mm "
+    "f/4 Newtonian is fully illuminated out to roughly 75&prime; (arcminutes), "
+    "far beyond the few-arcminute star field, so no star there is measurably "
+    "dimmed. Vignetting matters for wide-field astrophotography and undersized "
+    "secondaries, not a high-power visual field. (Tube/focuser vignetting is "
+    "not modelled.)</p>"
+    "<p><i>Accuracy: schematic geometry (an unfolded Newtonian) for the "
+    "picture; the illumination fraction itself uses the exact circle&ndash;"
+    "circle overlap in the physics engine.</i></p>"
+)
+
+
+def _build_vignetting_diagram():
+    """Build a static illustrative diagram of vignetting geometry.
+
+    Two panels:
+      (A) Side view — the converging light cone from an off-axis star is
+          laterally shifted at the secondary and its far edge misses the
+          secondary's clear aperture (the lost light is shaded red).
+      (B) Secondary-face view — the "circle overlap" model the simulation
+          uses: the beam footprint (blue) slides off the secondary aperture
+          (grey) as the field angle grows; the non-overlapping fraction is
+          the vignetted (lost) light.
+
+    Schematic (an unfolded Newtonian, drawn to scale in relative units) — it
+    illustrates the geometry, it is not a ray trace. Returns a matplotlib
+    Figure.
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import Circle
+    import numpy as np
+
+    fig, (axA, axB) = plt.subplots(1, 2, figsize=(10.0, 4.6))
+
+    # ── Panel A: side view ────────────────────────────────────────────────
+    D = 2.0                 # primary aperture (relative units)
+    F = 4.2                 # primary → focus distance
+    y_sec = 0.70 * F        # secondary height along the axis
+    sec_half = 0.32         # secondary clear half-width
+    # Beam half-width at the secondary (cone narrows from D/2 at primary to 0
+    # at focus): r_beam(y) = (D/2) * (1 - y/F)
+    r_beam_sec = (D / 2.0) * (1.0 - y_sec / F)
+
+    axA.set_title("Side view (schematic): off-axis cone clipped\n"
+                  "by the secondary", fontsize=9)
+    # Primary mirror
+    axA.plot([-D / 2, D / 2], [0, 0], color="black", lw=3, solid_capstyle="butt")
+    axA.text(0, -0.22, "Primary mirror (aperture D)", ha="center",
+             va="top", fontsize=7.5)
+
+    # On-axis cone (blue): edges from primary rim converge to focus at (0, F)
+    axA.fill([-D / 2, D / 2, 0], [0, 0, F], color="#3b7fd0", alpha=0.14,
+             zorder=0)
+    for x0 in (-D / 2, D / 2):
+        axA.plot([x0, 0], [0, F], color="#3b7fd0", lw=1.0)
+    axA.plot(0, F, marker="*", color="#3b7fd0", ms=11)
+    axA.text(-0.1, F + 0.05, "on-axis focus\n(fully illuminated)", ha="right",
+             va="center", fontsize=7, color="#245a9e")
+
+    # Off-axis cone (orange): star at field angle θ → focus shifts to (+dx, F).
+    # dx chosen so the beam is PARTIALLY clipped at the secondary (clearest
+    # illustration): part of the cone lands on the secondary, part misses.
+    dx = 0.5
+    axA.fill([-D / 2, D / 2, dx], [0, 0, F], color="#e08a2b", alpha=0.12,
+             zorder=0)
+    for x0 in (-D / 2, D / 2):
+        axA.plot([x0, dx], [0, F], color="#e08a2b", lw=1.0)
+    axA.plot(dx, F, marker="*", color="#e08a2b", ms=11)
+    axA.text(dx + 0.12, F + 0.05, "off-axis focus", ha="left", va="center",
+             fontsize=7, color="#a9631a")
+
+    # Secondary clear aperture (grey bar) at y_sec.
+    axA.plot([-sec_half, sec_half], [y_sec, y_sec], color="0.3", lw=7,
+             solid_capstyle="butt", zorder=4)
+    axA.text(-sec_half - 0.08, y_sec, "secondary\nclear\naperture",
+             ha="right", va="center", fontsize=7, color="0.3")
+
+    # Off-axis beam footprint at the secondary height: centre is shifted; the
+    # part beyond the secondary's clear aperture is lost.
+    cx_off = dx * (y_sec / F)  # cone centre at the secondary height
+    right_edge = cx_off + r_beam_sec
+    # Shade the clipped (lost) portion: the beam beyond +sec_half.
+    if right_edge > sec_half:
+        axA.fill_between([sec_half, right_edge],
+                         [y_sec - 0.16, y_sec - 0.16],
+                         [y_sec + 0.16, y_sec + 0.16],
+                         color="#d0342b", alpha=0.55, zorder=5)
+        axA.annotate("clipped rays\n(lost light → dimmer)",
+                     xy=((sec_half + right_edge) / 2, y_sec + 0.16),
+                     xytext=(sec_half + 0.35, y_sec - 1.05),
+                     fontsize=7, color="#a11", ha="left",
+                     arrowprops=dict(arrowstyle="->", color="#a11", lw=0.9))
+    axA.set_xlim(-D / 2 - 0.75, D / 2 + 0.75)
+    axA.set_ylim(-0.6, F + 0.6)
+    axA.set_aspect("equal")
+    axA.axis("off")
+
+    # ── Panel B: secondary-face circle-overlap model ──────────────────────
+    axB.set_title("Secondary face: beam footprint vs clear aperture",
+                  fontsize=9)
+    r_sec = 1.0             # secondary clear radius (drawn)
+    r_bm = 0.9              # beam footprint radius
+    # Three field angles → three offsets of the beam footprint centre.
+    cases = [
+        (0.0, "#2f9e44", "on-axis: 100%"),
+        (r_sec - r_bm, "#f59f00", "θ_fif: onset"),
+        (0.55, "#d0342b", "off-axis: vignetted"),
+    ]
+    # Secondary aperture (grey disk)
+    axB.add_patch(Circle((0, 0), r_sec, facecolor="0.85", edgecolor="0.4",
+                         lw=1.3, zorder=1))
+    axB.text(0, -r_sec - 0.18, "secondary clear aperture", ha="center",
+             va="top", fontsize=7.5, color="0.3")
+    th = np.linspace(0, 2 * np.pi, 100)
+    for off, color, label in cases:
+        axB.plot(off + r_bm * np.cos(th), r_bm * np.sin(th), color=color,
+                 lw=1.6, zorder=3)
+    # Shade the lost sliver for the vignetted case (beam outside the aperture)
+    off_v = cases[-1][0]
+    xs = np.linspace(-r_bm, r_bm, 400) + off_v
+    y_top = np.sqrt(np.clip(r_bm ** 2 - (xs - off_v) ** 2, 0, None))
+    outside = xs ** 2 > r_sec ** 2  # beam pixels outside the secondary disk
+    axB.fill_between(xs, -y_top, y_top, where=outside, color="#d0342b",
+                     alpha=0.30, zorder=2)
+    # Legend-ish labels
+    for i, (off, color, label) in enumerate(cases):
+        axB.text(1.35, 0.7 - 0.45 * i, label, color=color, fontsize=7.5,
+                 va="center")
+        axB.plot(1.22, 0.7 - 0.45 * i, marker="o", color=color, ms=6)
+    axB.set_xlim(-1.4, 2.9)
+    axB.set_ylim(-1.5, 1.5)
+    axB.set_aspect("equal")
+    axB.axis("off")
+
+    fig.suptitle("Vignetting — off-axis light clipped by the secondary mirror",
+                 fontsize=11, fontweight="bold")
+    fig.tight_layout(rect=(0, 0, 1, 0.94))
+    return fig
+
+
+def _figure_to_pixmap(fig, dpi: int = 110) -> QPixmap:
+    """Rasterise a matplotlib Figure to a QPixmap (no temp files)."""
+    import matplotlib.pyplot as plt
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=dpi, bbox_inches="tight",
+                facecolor="white")
+    plt.close(fig)
+    buf.seek(0)
+    pix = QPixmap()
+    pix.loadFromData(buf.getvalue(), "PNG")
+    buf.close()
+    return pix
+
+
+def _make_figure_section(title: str, fig, caption_html: str) -> QGroupBox:
+    """Section with a rendered matplotlib figure above a rich-text caption."""
+    box = QGroupBox(title)
+    box.setStyleSheet(
+        "QGroupBox { font-weight: bold; font-size: 13px; "
+        "margin-top: 18px; padding: 24px 8px 8px 8px; "
+        "border: 1px solid palette(mid); border-radius: 4px; }"
+        "QGroupBox::title { subcontrol-origin: margin; "
+        "subcontrol-position: top left; padding: 4px 8px; "
+        "background: palette(window); }"
+    )
+    layout = QVBoxLayout()
+    img = QLabel()
+    img.setPixmap(_figure_to_pixmap(fig))
+    img.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+    layout.addWidget(img)
+    caption = QLabel(caption_html)
+    caption.setWordWrap(True)
+    caption.setTextFormat(Qt.TextFormat.RichText)
+    caption.setStyleSheet("QLabel { font-weight: normal; }")
+    caption.setTextInteractionFlags(
+        Qt.TextInteractionFlag.TextSelectableByMouse)
+    layout.addWidget(caption)
+    box.setLayout(layout)
+    return box
+
+
 def _make_section(title: str, html: str) -> QGroupBox:
     """Create a styled QGroupBox with rich-text content."""
     box = QGroupBox(title)
@@ -654,6 +860,9 @@ class ParametersPhysicsTab(QWidget):
         layout.addWidget(_make_section("Telescope Types", TELESCOPE_TYPES_HTML))
         layout.addWidget(_make_section("Telescope Parameters", PARAMETERS_HTML))
         layout.addWidget(_make_section("Understanding the Plots", PLOTS_HTML))
+        layout.addWidget(_make_figure_section(
+            "Vignetting (diagram)", _build_vignetting_diagram(),
+            VIGNETTING_DIAGRAM_CAPTION_HTML))
         layout.addWidget(_make_section(
             "Implemented Physics", PHYSICS_HTML
         ))

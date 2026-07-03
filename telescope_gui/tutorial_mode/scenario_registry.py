@@ -141,6 +141,51 @@ class ScenarioDefinition:
     # tilt value would mislead.
     supports_realtime: bool = False
 
+    # ── Per-side display controls (Phase 1.2) ────────────────────────────
+    # The View / Filter / Exposure controls live on the After side and are
+    # live. By default the Before side mirrors them (both sides track the
+    # same control). Pin any of these on the Before side so the two panels
+    # form an honest comparison — e.g. before = Detector(linear)+no filter
+    # while after = Eye(log)+ND. None = mirror the live after-side control.
+    before_display_stretch: str | None = None   # "linear" | "log" | "log_integrated"
+    before_filter: str | None = None            # filter name, e.g. "None"
+    before_exposure: float | None = None        # fixed exposure multiplier
+
+    # Default for the After-side View combo. "log" (Eye) matches what you
+    # see at the eyepiece and is the right default for most scenarios.
+    # Detector-centric lessons (exposure / saturation / ND filter) set
+    # "linear" so the exposure slider and saturation clipping are live.
+    default_display_stretch: str = "log"
+
+    # ── Shared PSF normalisation (Phase 1.5) ─────────────────────────────
+    # When True, the after-side 2D PSF is displayed relative to the
+    # before-side (unobstructed) on-axis peak instead of being independently
+    # peak-normalised to 1.0. This makes the central-obstruction Strehl drop
+    # (1−ε²)² visible in the 2D view rather than erased by per-frame
+    # normalisation. Only meaningful for plot_psf_2d scenarios whose before
+    # side is the unobstructed reference.
+    shared_psf_normalization: bool = False
+
+    # ── Exit-pupil eye model (Phase 1.4) ─────────────────────────────────
+    # Default exit pupil (mm) for the Eye-view brightness model on extended
+    # sources: surface brightness ∝ (exit_pupil / 7 mm)², capped at the
+    # naked-eye level. ~2 mm is a typical planetary exit pupil. Only used
+    # when the exit-pupil control is shown (extended-source scenarios).
+    default_exit_pupil_mm: float = 2.0
+
+    # ── Chromatic ray-trace idealisation (Phase B4) ──────────────────────
+    # When True, the polychromatic ray trace draws each colour converging to
+    # a point (spherical aberration removed) so the singlet/achromat/APO
+    # comparison isolates *chromatic* focal shift. Flagged on the plot as a
+    # teaching idealisation. Only meaningful for plot_polychromatic_ray_trace.
+    idealize_singlet_sa: bool = False
+
+    # When True, expose a "Focal zoom" combo (Wide / Close) on the after-side
+    # chromatic focal-plane image: Wide shows the singlet halo running
+    # off-panel; Close resolves the achromat/APO-doublet/APO-triplet
+    # differences. Only meaningful for plot_chromatic_focal_planes.
+    show_focal_zoom_combo: bool = False
+
 
 # ---------------------------------------------------------------------------
 # Shared telescope configs used across multiple scenarios
@@ -298,13 +343,17 @@ SCENARIOS: list[ScenarioDefinition] = [
         learn_more_section="Central Obstruction",
         before_telescope=_CLEAN_200MM,
         before_source=_POINT,
-        before_label="No obstruction",
+        before_label="No obstruction \u2014 reference (PSF peak \u2261 1.0)",
         after_telescope=_OBSTRUCTED_200MM,
         after_source=_POINT,
-        after_label="With obstruction \u2192",
+        after_label="With obstruction \u2192 (same scale; peak = Strehl)",
         plot_function="plot_psf_2d",
         theory_function="compute_central_obstruction_theory",
         tweakable_params=("obstruction_ratio",),
+        # Display the obstructed PSF relative to the unobstructed before-side
+        # peak so the Strehl drop (1−ε²)² is visible in the 2D view (Phase
+        # 1.5) instead of erased by per-frame peak normalisation.
+        shared_psf_normalization=True,
         implemented=True,
         terminal_template=(
             "from telescope_sim.geometry import NewtonianTelescope\n"
@@ -376,11 +425,14 @@ SCENARIOS: list[ScenarioDefinition] = [
             "correction across the visible band; ~200\u00d7 smaller residual.\n"
             "Try changing the f-ratio (focal length) \u2014 chromatic blur scales as 1/F, "
             "so a slow scope tames the same glass.\n"
-            "Note: the singlet ray trace also shows spherical aberration \u2014 within a "
-            "single colour, marginal rays cross the axis closer to the lens than "
-            "paraxial rays, so same-colour rays do not all converge to one point. A "
-            "spherical singlet has both CA and SA; the achromat reduces both; the APO "
-            "models here are idealised to zero SA so only CA remains visible."
+            "Note: to isolate the chromatic lesson, the ray trace is idealised "
+            "so each colour converges to a point (spherical aberration removed) "
+            "for every objective \u2014 the only difference you see is the chromatic "
+            "focal shift between colours. A real spherical singlet would also "
+            "show spherical aberration (marginal rays focusing short); see the "
+            "Spherical Aberration scenario for that effect on its own. Use the "
+            "Focal zoom control on the right panel: Wide shows the singlet halo "
+            "running off-frame; Close resolves the achromat vs APO differences."
         ),
         learn_more_section="Chromatic Aberration",
         before_telescope=_SINGLET_100MM_F5,
@@ -394,6 +446,8 @@ SCENARIOS: list[ScenarioDefinition] = [
         plot_function="plot_polychromatic_ray_trace",
         secondary_plot_function="plot_chromatic_focal_planes",
         theory_function=None,
+        idealize_singlet_sa=True,
+        show_focal_zoom_combo=True,
         tweakable_params=("objective_type", "focal_length"),
         both_sides_dynamic=True,
         before_telescope_dynamic=True,
@@ -603,16 +657,23 @@ SCENARIOS: list[ScenarioDefinition] = [
         before_source=SourceConfig(source_type="MultiColorStarField"),
         before_seeing_arcsec=1.5,
         before_polychromatic=True,
-        before_label="Achromat, 1.5″ seeing",
+        before_label="Reference — Eye view (achromat, 1.5″)",
         after_telescope=_ACHROMAT_80MM,
         after_source=SourceConfig(source_type="MultiColorStarField"),
         after_seeing_arcsec=1.5,
         after_polychromatic=True,
-        after_label="With seeing \u2192",
+        after_label="Adjust seeing / objective / view \u2192",
         plot_function="plot_source_image",
         theory_function=None,
         tweakable_params=("seeing", "objective_type"),
         implemented=True,
+        # Eye view by default: an 80 mm scope under 1.5" seeing spreads the
+        # five faint stars too thin to read in the linear Detector view even
+        # at max exposure (try it \u2014 that's a real lesson, not a bug). Pin the
+        # left reference to Eye so the spectral colours are always visible;
+        # the right can be switched to Detector to see the dim linear truth.
+        default_display_stretch="log",
+        before_display_stretch="log",
         terminal_template=(
             "from telescope_gui.telescope_builder import build_telescope\n"
             "from telescope_sim.source.sources import PointSource\n"
@@ -753,14 +814,17 @@ SCENARIOS: list[ScenarioDefinition] = [
         act=3, act_label="Brightness, Saturation & Filters",
         description=(
             "Applies to: any telescope. "
-            "A single mag-0 star through a 100 mm scope. Slide the "
-            "Exposure control to see how a real CCD or eye builds up "
-            "signal over time. Short exposure → faint disk, no "
-            "saturation, full colour. Long exposure → bright but the "
-            "core saturates to pure white, colour drained by eye "
-            "cone desaturation. Try the Detector vs Eye view to "
-            "compare linear photometry against the eye's logarithmic "
-            "response."
+            "A single warm-orange star (mag 0) through a 100 mm scope, shown "
+            "two ways at once: Detector (left) and Eye (right).\n"
+            "Slide Exposure: on the DETECTOR (left, linear) signal builds with "
+            "exposure time — short exposure → faint and fully coloured; long "
+            "exposure → the core saturates and clips to pure white (the colour "
+            "burns out channel-by-channel). The EYE (right) does not integrate "
+            "over time, so exposure has no effect there — its brightness comes "
+            "from aperture instead; raising aperture brightens it until cone "
+            "desaturation washes the colour toward white. That exposure moves "
+            "the left but not the right IS the lesson: exposure is a detector "
+            "concept, not an eye one."
         ),
         learn_more_section="Photometry & Filters",
         before_telescope=TelescopeConfig(
@@ -769,28 +833,40 @@ SCENARIOS: list[ScenarioDefinition] = [
         ),
         before_source=SourceConfig(
             source_type="PointSource",
-            kwargs={"magnitude": 0.0, "field_angle_arcsec": 0.0},
+            kwargs={"magnitude": 0.0, "field_angle_arcsec": 0.0,
+                    "spectral_rgb": (1.0, 0.7, 0.35)},
         ),
-        before_label="Exposure × 0.1 (short)",
+        before_label="Detector view (linear)",
         after_telescope=TelescopeConfig(
             telescope_type="Newtonian", diameter=100.0, focal_length=800.0,
             enable_obstruction=False, spider_vanes=0,
         ),
         after_source=SourceConfig(
             source_type="PointSource",
-            kwargs={"magnitude": 0.0, "field_angle_arcsec": 0.0},
+            kwargs={"magnitude": 0.0, "field_angle_arcsec": 0.0,
+                    "spectral_rgb": (1.0, 0.7, 0.35)},
         ),
-        after_label="Exposure → (adjust slider)",
+        after_label="Eye view (logarithmic) →",
         plot_function="plot_source_image",
         theory_function=None,
-        tweakable_params=("diameter", "focal_length"),
+        # Keep aperture (D² changes how fast the star saturates — relevant
+        # to the exposure/saturation lesson). Drop focal length: for a point
+        # source it changes only the PSF-kernel mm-scale, not the star's
+        # angular look, so it read as "no effect" (user feedback).
+        tweakable_params=("diameter",),
         before_apply_vignetting=False,
         before_apply_coma=False,
         implemented=True,
         default_exposure=1.0,
-        # Before-side is rendered at exposure × 0.1 by being a dimmer
-        # baseline. We keep before fixed and let the user move the
-        # after-side slider to compare.
+        # Live Detector-vs-Eye comparison (B8): pin the LEFT to Detector
+        # (linear — exposure + saturation live) and default the RIGHT to Eye
+        # (logarithmic — exposure N/A, aperture-driven). Both update together
+        # as the user changes aperture; the exposure slider moves only the
+        # Detector side, which is exactly the lesson.
+        default_display_stretch="log",
+        before_display_stretch="linear",
+        both_sides_dynamic=True,
+        before_telescope_dynamic=True,
         terminal_template=(
             "from telescope_gui.telescope_builder import build_telescope\n"
             "from telescope_sim.source.sources import PointSource\n"
@@ -836,7 +912,10 @@ SCENARIOS: list[ScenarioDefinition] = [
         after_label="With filter →",
         plot_function="plot_source_image",
         theory_function=None,
-        tweakable_params=("diameter",),
+        # No telescope tweakables: the lesson is the FILTER. Aperture would
+        # change brightness too (a confound for "what does the filter do"),
+        # so it's dropped — same call as the vignetting scenario.
+        tweakable_params=(),
         before_apply_vignetting=False,
         before_apply_coma=False,
         implemented=True,
@@ -844,6 +923,13 @@ SCENARIOS: list[ScenarioDefinition] = [
         default_filter="ND-1.0",
         show_filter_combo=True,
         supports_realtime=True,
+        # ND filter is a DETECTOR/saturation lesson → default Detector view.
+        # Before side is pinned unfiltered so the comparison isolates the
+        # filter; both sides follow the live exposure (before-side dynamic).
+        default_display_stretch="linear",
+        before_filter="None",
+        both_sides_dynamic=True,
+        before_telescope_dynamic=True,
         terminal_template=(
             "from telescope_gui.telescope_builder import build_telescope\n"
             "from telescope_sim.source.sources import Moon\n"
@@ -895,6 +981,14 @@ SCENARIOS: list[ScenarioDefinition] = [
         default_filter="W25 (red)",
         show_filter_combo=True,
         supports_realtime=True,
+        # Before side pinned unfiltered so the comparison isolates the
+        # Wratten filter's colour-balance shift; both sides track
+        # aperture/seeing (live before-side). Eye view is kept as the
+        # default (planet detail reads well under asinh); the filter still
+        # shifts colour balance + dims in both views.
+        before_filter="None",
+        both_sides_dynamic=True,
+        before_telescope_dynamic=True,
         terminal_template=(
             "from telescope_gui.telescope_builder import build_telescope\n"
             "from telescope_sim.source.sources import Jupiter\n"
@@ -958,6 +1052,14 @@ SCENARIOS: list[ScenarioDefinition] = [
         before_apply_coma=False,
         implemented=True,
         default_exposure=1.0,
+        # The lesson IS the Detector-vs-Eye comparison: pin the before side
+        # to the linear Detector view (bright star saturates, dim companion
+        # barely visible) and default the after side to the Eye/asinh view
+        # (both stars read). Both sides track aperture (live before-side).
+        before_display_stretch="linear",
+        default_display_stretch="log",
+        both_sides_dynamic=True,
+        before_telescope_dynamic=True,
         terminal_template=(
             "from telescope_gui.telescope_builder import build_telescope\n"
             "from telescope_sim.source.sources import DoubleStar\n"
@@ -1085,39 +1187,76 @@ SCENARIOS: list[ScenarioDefinition] = [
 
     ScenarioDefinition(
         id="starfield_resolution", applies_to="reflector",
-        title="Star Field Resolution",
+        title="Star Field Showcase",
         act=4, act_label="Real Objects",
         description=(
-            "Single star (left) shows PSF structure in detail \u2014 Airy rings, diffraction "
-            "spikes, and seeing blur. Star field (right) shows how these effects scale "
-            "across a crowded field: halos overlap, spikes cross neighbours, bright stars "
-            "bleed into faint ones. Toggle effects to see each contribution."
+            "The capstone field \u2014 the same richly-populated, spectrally-"
+            "coloured star field through IDEAL optics (left) and a REALISTIC "
+            "200 mm f/4 Newtonian (right), with every effect individually "
+            "toggleable so you can peel them back one at a time.\n"
+            "The field is engineered to exercise all of them at once:\n"
+            " \u2022 Bright edge stars (off-axis) \u2014 watch comet-shaped COMA appear "
+            "when you toggle it, tails pointing radially outward.\n"
+            " \u2022 The bright on-axis star \u2014 SPIDER-VANE spikes (toggle the "
+            "vanes) and the modified ring contrast from the central "
+            "OBSTRUCTION.\n"
+            " \u2022 SEEING blurs the whole field (1.5\u2033), softening the fine "
+            "structure the space-like left panel keeps sharp.\n"
+            "(Vignetting is not toggled here: for a 200 mm f/4 with a normally-"
+            "sized secondary the fully-illuminated field is ~75 arcmin \u2014 far "
+            "larger than this 5-arcmin field, so no star is dimmed. See the "
+            "dedicated Vignetting scenario for the falloff curve, and the "
+            "Vignetting diagram in Parameters & Physics for the geometry.)\n"
+            " \u2022 A double-star ladder (8\u2033/4\u2033/2\u2033) \u2014 the tight pair blends under "
+            "seeing; the wide pair stays split.\n"
+            " \u2022 Spectral colours + a wide magnitude range show how halos and "
+            "spikes from bright stars overlap faint neighbours in a crowd.\n"
+            "Left is shown in the same view as the right so the comparison is "
+            "honest; switch Detector/Eye to compare linear vs perceptual."
         ),
         learn_more_section="Diffraction",
-        before_telescope=_SPIDER_200MM,
-        before_source=_POINT,
-        before_label="Single star \u2014 PSF detail",
-        after_telescope=_SPIDER_200MM,
-        after_source=SourceConfig(
-            source_type="StarFieldResolutionField",
-            kwargs={"field_radius_arcsec": 300.0},
+        before_telescope=TelescopeConfig(
+            telescope_type="Newtonian", diameter=200.0, focal_length=800.0,
+            primary_type="parabolic",
+            enable_obstruction=False, spider_vanes=0,
         ),
-        # 1.5\u2033 "good seeing". Narrow enough that the global normalisation
-        # by intrinsic peak keeps stars bright; the f/4 scope makes edge
-        # coma visible without atmospheric blur swamping it.
+        before_source=SourceConfig(
+            source_type="ShowcaseStarField",
+            kwargs={"field_radius_arcsec": 150.0},
+        ),
+        before_label="Ideal optics (no aberrations)",
+        # Left = clean reference: no obstruction/spider/coma/vignetting/seeing.
+        before_apply_coma=False,
+        before_apply_vignetting=False,
+        after_telescope=TelescopeConfig(
+            telescope_type="Newtonian", diameter=200.0, focal_length=800.0,
+            primary_type="parabolic",
+            enable_obstruction=True, obstruction_ratio=0.20,
+            spider_vanes=4, spider_vane_width=2.5,
+        ),
+        after_source=SourceConfig(
+            source_type="ShowcaseStarField",
+            kwargs={"field_radius_arcsec": 150.0},
+        ),
+        # 1.5\u2033 "good seeing" \u2014 softens but doesn't erase the spikes/coma;
+        # toggle seeing off to see the field at space-like sharpness.
         after_seeing_arcsec=1.5,
-        after_label="Star field \u2014 population effects \u2192",
+        after_label="Realistic 200 mm f/4 \u2014 toggle effects \u2192",
         plot_function="plot_source_image",
         theory_function=None,
         tweakable_params=("diameter", "focal_length", "obstruction_ratio",
                           "spider_vanes", "spider_vane_width", "seeing"),
-        effect_toggles=("obstruction", "spider_vanes", "coma", "vignetting", "seeing"),
+        # Vignetting omitted: the fully-illuminated field (~75\u2032) dwarfs this
+        # 5\u2032 field, so a vignetting toggle would be a dead no-op. Covered by
+        # the dedicated Vignetting scenario (curve plot).
+        effect_toggles=("obstruction", "spider_vanes", "coma", "seeing"),
         both_sides_dynamic=True,
-        before_telescope_dynamic=True,
+        before_telescope_dynamic=False,  # left stays the ideal reference
+        default_display_stretch="log",
         implemented=True,
         terminal_template=(
             "from telescope_sim.geometry import NewtonianTelescope\n"
-            "from telescope_sim.source.sources import StarField\n"
+            "from telescope_sim.source.sources import ShowcaseStarField\n"
             "from telescope_sim.plotting import plot_source_image\n\n"
             "telescope = NewtonianTelescope(\n"
             "    primary_diameter={diameter},\n"
@@ -1127,7 +1266,7 @@ SCENARIOS: list[ScenarioDefinition] = [
             "    spider_vane_width={spider_vane_width},\n"
             "    enable_obstruction={enable_obstruction},\n"
             ")\n"
-            "source = StarField()\n"
+            "source = ShowcaseStarField()\n"
             "fig = plot_source_image(\n"
             "    telescope, source,\n"
             "    seeing_arcsec={seeing_arcsec},\n"
