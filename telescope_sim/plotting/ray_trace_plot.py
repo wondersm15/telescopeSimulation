@@ -4527,23 +4527,38 @@ def _render_source_through_telescope(
             # Computation is roughly 3x the monochrome path; only enabled
             # when polychromatic and a refractor objective is present.
             if _star_use_chromatic:
-                for ch, wl_ch in enumerate(channel_wavelengths):
+                # Build all three channel kernels (sum-normalised, so the
+                # in-focus channel keeps a high peak and defocused channels
+                # spread into dim disks — the chromatic effect).
+                ch_kernels = []
+                for wl_ch in channel_wavelengths:
                     psf_ch = chromatic_psf_kernel(
                         telescope, wl_ch, psf_n, psf_half_mm,
                         include_obstruction,
                         focus_wavelength_nm=focus_wavelength_nm,
                     )
-                    # No peak normalisation — keep sum-normalised PSF so
-                    # the in-focus channel core dominates the defocused
-                    # disk pixel-for-pixel.
                     psf_ch = _resample_to_canvas(psf_ch)
                     # Circular taper: removes the square box and turns the
                     # geometric defocus disk (which fills its square support)
                     # into the physically-correct circular disk.
                     psf_ch = _apply_circular_taper(psf_ch)
+                    ch_kernels.append(psf_ch)
+                # Anchor brightness to the peak-normalised convention used by
+                # the (monochrome) per-star path: divide all channels by the
+                # SHARPEST channel's peak so the in-focus channel peaks at ~1
+                # (× intensity), matching a non-chromatic star of the same
+                # magnitude. Without this, the sum-normalised kernels made
+                # chromatic stars render ~6× too faint (peak 0.16 vs 0.89) —
+                # the "chromatic + seeing everything is too dim" bug. The
+                # RELATIVE peaks are preserved, so defocused channels still
+                # show as dim colour halos.
+                common_peak = max((float(k.max()) for k in ch_kernels),
+                                  default=0.0)
+                if common_peak > 0:
+                    ch_kernels = [k / common_peak for k in ch_kernels]
+                for ch, psf_ch in enumerate(ch_kernels):
                     psf_ch_h, psf_ch_w = psf_ch.shape
                     psf_ch_hh = psf_ch_h // 2
-
                     y_start_c = cy - psf_ch_hh
                     x_start_c = cx - psf_ch_hh
                     y1c = max(0, y_start_c)
@@ -4554,7 +4569,6 @@ def _render_source_through_telescope(
                     py2c = py1c + (y2c - y1c)
                     px1c = x1c - x_start_c
                     px2c = px1c + (x2c - x1c)
-
                     if y2c > y1c and x2c > x1c:
                         # Modulate by the star's spectral RGB weight so a
                         # red star contributes mostly to R, etc. White

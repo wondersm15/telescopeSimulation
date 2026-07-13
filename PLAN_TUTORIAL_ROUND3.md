@@ -338,6 +338,25 @@ user input · 💤 deferred by user.
     f-ratio & Coma scenario for the dramatic version. Removed the false
     "comet-shaped coma appears" claim.
   - 393 tests pass. Verified the full showcase render through the tab.
+- 2026-07-12 (Batch B start): **R3.9 dimness ✅** ROOT CAUSE: the chromatic
+  per-star path used SUM-normalised kernels (low peak) while the monochrome
+  path uses PEAK-normalised (high peak) → chromatic stars rendered ~6× too
+  faint (peak 0.16 vs 0.89). Fixed by rescaling the 3 channel kernels by the
+  sharpest channel's peak → in-focus channel peak‑normalised (matches the
+  monochrome brightness anchor); defocused channels keep their lower relative
+  peaks (chromatic halos preserved). Now peak 0.83. Contained to the chromatic
+  per-star path (chromatic_plus_seeing only; B4 uses a different path).
+  - **COUPLED ISSUE surfaced:** with the stars now bright, the deferred B7
+    GREEN-CORE is prominent (every star has a green core; singlet = green
+    blobs). log_integrated does NOT fix it (1″ integration ≪ 5–8″ chromatic
+    spread). This is the achromat-secondary-spectrum over-defocus. **Needs user
+    decision: un-defer and fix (reduce achromat defocus / render SED core) or
+    leave green.**
+- **R3.12 (Exposure reframe) — CLARIFICATION NEEDED:** the feedback says both
+  "the right plot should stay fixed as the eye view" AND "swap the order so eye
+  is on the left and detector on the right" — apparent contradiction. Need the
+  intended final layout before building (it's a redesign: pin both panes, drop
+  the View combo, add an eye-blur toggle).
 
 ---
 
