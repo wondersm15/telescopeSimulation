@@ -3140,14 +3140,26 @@ def plot_vignetting_curve(
         ax.axvline(fif, color="green", linestyle="--", alpha=0.7,
                     label=f"Fully illuminated: {fif:.1f}\"")
 
+    # Obstruction ratio drives vignetting (a larger secondary catches more of
+    # the off-axis cone → larger fully-illuminated field). Label it on BOTH
+    # the title and an info box so the baseline's ε is explicit (R3.7c).
+    obs_ratio = telescope.obstruction_ratio
     ax.set_xlabel("Off-axis angle (arcsec)")
     ax.set_ylabel("Illumination fraction")
     ax.set_title(f"Vignetting — {telescope.primary_diameter:.0f}mm "
-                 f"f/{telescope.focal_ratio:.1f}")
+                 f"f/{telescope.focal_ratio:.1f}, "
+                 f"obstruction ε = {obs_ratio:.2f} ({obs_ratio:.0%})")
     ax.set_ylim(-0.05, 1.1)
-    ax.legend()
+    ax.legend(loc="lower left")
     ax.grid(True, alpha=0.3)
 
+    ax.text(0.98, 0.20,
+            f"Obstruction ratio ε = {obs_ratio:.2f}\n"
+            f"(secondary Ø / primary Ø)\n"
+            f"Larger ε → less vignetting,\n"
+            f"but more central obstruction.",
+            transform=ax.transAxes, fontsize=8, ha="right", va="bottom",
+            bbox=dict(boxstyle="round", facecolor="lightyellow", alpha=0.9))
     ax.text(0.98, 0.02,
             "Approx: tube wall vignetting not modeled",
             transform=ax.transAxes, fontsize=7, ha="right",
@@ -4387,7 +4399,16 @@ def _render_source_through_telescope(
         def _resample_to_canvas(psf):
             """Resample a PSF kernel to match the image-canvas pixel scale."""
             if abs(psf_zoom - 1.0) > 0.02:
-                from scipy.ndimage import zoom as _ndz
+                from scipy.ndimage import zoom as _ndz, gaussian_filter as _gf
+                if psf_zoom < 1.0:
+                    # Anti-alias BEFORE downsampling. The spider-vane FFT PSF
+                    # has fine high-frequency ring structure between the
+                    # spikes; point/bilinear downsampling to the coarser
+                    # canvas scale aliases it into a checkerboard moiré that
+                    # fills the field and reads as "general blur". A Gaussian
+                    # low-pass sized to the downsample factor removes the
+                    # moiré while keeping the core + spikes.
+                    psf = _gf(psf, sigma=0.5 / psf_zoom)
                 psf = _ndz(psf, psf_zoom, order=1)
                 psf = np.maximum(psf, 0.0)
                 max_half = num_pixels // 2
@@ -4659,7 +4680,11 @@ def _render_source_through_telescope(
             psf_half_mm, include_obstruction, apply_coma,
         )
         if abs(psf_zoom - 1.0) > 0.02:
-            from scipy.ndimage import zoom as _ndz
+            from scipy.ndimage import zoom as _ndz, gaussian_filter as _gf
+            if psf_zoom < 1.0:
+                # Anti-alias before downsampling (same rationale as the
+                # per-star path): avoid a spider-spike checkerboard moiré.
+                psf = _gf(psf, sigma=0.5 / psf_zoom)
             psf = _ndz(psf, psf_zoom, order=1)
             psf = np.maximum(psf, 0.0)
             max_half = num_pixels // 2

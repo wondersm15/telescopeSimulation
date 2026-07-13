@@ -69,9 +69,11 @@ class TestDoubleStar:
 # ---------------------------------------------------------------------------
 
 class TestScenarioRegistry:
-    def test_eighteen_scenarios_total(self):
+    def test_seventeen_scenarios_total(self):
+        # 17 after Jupiter Full Simulation was dropped (redundant with Saturn
+        # with Rings + Colour Filters on Jupiter).
         from telescope_gui.tutorial_mode.scenario_registry import SCENARIOS
-        assert len(SCENARIOS) == 18
+        assert len(SCENARIOS) == 17
 
     def test_acts_populated(self):
         from telescope_gui.tutorial_mode.scenario_registry import get_scenarios_by_act
@@ -79,12 +81,12 @@ class TestScenarioRegistry:
         assert len(by_act[1]) == 7      # Isolated Effects
         assert len(by_act[2]) == 4      # Combined Effects
         assert len(by_act[3]) == 4      # Brightness, Saturation & Filters (J3)
-        assert len(by_act[4]) == 3      # Real Objects
+        assert len(by_act[4]) == 2      # Real Objects (Saturn, Star Field)
 
     def test_all_scenarios_implemented(self):
         from telescope_gui.tutorial_mode.scenario_registry import SCENARIOS
         implemented = [s for s in SCENARIOS if s.implemented]
-        assert len(implemented) == 18
+        assert len(implemented) == 17
         ids = {s.id for s in implemented}
         assert ids == {
             "airy_disk", "rayleigh_criterion", "central_obstruction",
@@ -94,7 +96,7 @@ class TestScenarioRegistry:
             "aperture_vs_seeing", "fratio_coma",
             "exposure_demo", "nd_filter_moon",
             "color_filter_jupiter", "saturation_demo",
-            "jupiter_full", "saturn_rings", "starfield_resolution",
+            "saturn_rings", "starfield_resolution",
         }
 
     def test_get_scenario_by_id(self):
@@ -281,10 +283,10 @@ class TestScenarioRunner:
         assert err is None
         plt.close(fig)
 
-    def test_run_jupiter_full(self):
+    def test_run_saturn_rings(self):
         from telescope_gui.tutorial_mode.scenario_registry import get_scenario_by_id
         from telescope_gui.tutorial_mode.scenario_runner import run_scenario_side
-        s = get_scenario_by_id("jupiter_full")
+        s = get_scenario_by_id("saturn_rings")
         fig, info, err = run_scenario_side(
             s.after_telescope, s.after_source, s.plot_function,
             seeing_arcsec=s.after_seeing_arcsec)
@@ -910,6 +912,20 @@ class TestShowcaseStarField:
         # Not all one colour: several distinct tints present.
         uniq = {tuple(np.round(c, 2)) for c in s.star_spectral_rgb}
         assert len(uniq) >= 4
+
+    def test_faint_stars_more_desaturated_than_bright(self):
+        """R3.20: colour is magnitude-dependent — bright stars carry a tint,
+        faint stars trend white (chroma ≈ how far the tint is from grey)."""
+        from telescope_sim.source.sources import ShowcaseStarField
+        s = ShowcaseStarField()
+        rgb = s.star_spectral_rgb
+        chroma = rgb.max(axis=1) - rgb.min(axis=1)   # 0 = white/grey
+        mags = s.star_magnitudes
+        bright = chroma[mags < 0.0]
+        faint = chroma[mags > 3.0]
+        assert bright.size and faint.size
+        # Brightest stars are meaningfully more saturated than the faintest.
+        assert bright.mean() > faint.mean() + 0.1
 
     def test_renders_in_colour_through_reflector(self):
         rgb = self._render(self._tel())

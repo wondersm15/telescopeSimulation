@@ -173,13 +173,36 @@ class TutorialTab(QWidget):
         self.theory_readout = TheoryReadoutPanel()
         self.main_layout.addWidget(self.theory_readout)
 
-        # Tweakable controls area
+        # Tweakable controls area. The controls live in a single horizontal
+        # row; scenarios with many controls (planets: 6 tweakables + toggles +
+        # view/exposure/exit-pupil/realtime) made that row ~1400px wide, which
+        # forced the whole page wider than the viewport → horizontal page
+        # scroll AND stretched the Expanding before/after canvases to that
+        # width (planets rendered oversized, needing scroll to see the disk).
+        # Wrapping the controls in their own horizontal scroll strip decouples
+        # the control-row width from the page width: the row scrolls inside a
+        # fixed-height strip, the page stays at the viewport width, and the
+        # canvases keep a sane size.
         self.controls_group = QGroupBox("Adjust parameters")
         self.controls_group.setStyleSheet("font-weight: bold; font-size: 9pt;")
         self.controls_layout = QHBoxLayout(self.controls_group)
         self.controls_layout.setContentsMargins(8, 4, 8, 4)
         self.controls_layout.setSpacing(12)
-        self.main_layout.addWidget(self.controls_group)
+        self.controls_scroll = QScrollArea()
+        self.controls_scroll.setWidgetResizable(True)
+        self.controls_scroll.setWidget(self.controls_group)
+        self.controls_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.controls_scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.controls_scroll.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        # Keep the strip from claiming the controls' full min width for the
+        # page, and hold it to roughly one control-row tall.
+        self.controls_scroll.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.controls_scroll.setMinimumWidth(200)
+        self.controls_scroll.setMaximumHeight(120)
+        self.main_layout.addWidget(self.controls_scroll)
 
         # Controls auto-update on edit; only a Reset is exposed.
         btn_row = QHBoxLayout()
@@ -332,10 +355,10 @@ class TutorialTab(QWidget):
         )
         if (not params and not is_psf_scenario and not params_before
                 and not wants_display_combo):
-            self.controls_group.setVisible(False)
+            self.controls_scroll.setVisible(False)
             return
 
-        self.controls_group.setVisible(True)
+        self.controls_scroll.setVisible(True)
 
         # When tweakable_params_before is set, render TWO labelled groups
         if params_before is not None:
@@ -1165,10 +1188,12 @@ class TutorialTab(QWidget):
         # its obstructed PSF relative to it, making the Strehl drop visible.
         if scenario.shared_psf_normalization:
             self._shared_psf_peak = info.get("psf_raw_peak")
-            # Make the before figure self-documenting: it's the reference
-            # the after side is normalised against. (The after side already
-            # annotates "Peak vs unobstructed: <Strehl>".)
-            if fig.axes:
+            # Make the before figure self-documenting in the 2D view: it's the
+            # reference the after side is normalised against. (The 1D view
+            # states the per-side normalisation basis in its side column via
+            # the obstruction overlay, so this in-plot note would be redundant
+            # there — restrict it to the 2D PSF map.)
+            if fig.axes and plot_fn == "plot_psf_2d":
                 fig.axes[0].text(
                     0.02, 0.98,
                     "Reference: normalised to own peak (≡ 1.0)",

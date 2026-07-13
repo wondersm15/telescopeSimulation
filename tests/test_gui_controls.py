@@ -357,3 +357,44 @@ class TestReferenceTabVignettingDiagram:
         from telescope_gui.reference_tab import ParametersPhysicsTab
         tab = ParametersPhysicsTab()
         assert tab is not None
+
+
+# ------------------------------------------------------------------
+# Tutorial sidebar — every act must be reachable (regression: Act 4
+# was hardcoded out, hiding Jupiter/Saturn/Star Field Showcase)
+# ------------------------------------------------------------------
+
+class TestScenarioSidebarActs:
+    def test_all_acts_and_scenarios_listed(self, qapp):
+        from PyQt6.QtWidgets import QLabel, QPushButton, QScrollArea
+        from telescope_gui.tutorial_mode.widgets.scenario_sidebar import (
+            ScenarioSidebar,
+        )
+        from telescope_gui.tutorial_mode.scenario_registry import (
+            get_scenarios_by_act, SCENARIOS,
+        )
+        sb = ScenarioSidebar()
+
+        # Every act present in the registry must have a heading in the sidebar.
+        labels = [w.text() for w in sb.findChildren(QLabel)]
+        acts = sorted(get_scenarios_by_act().keys())
+        for act_num in acts:
+            assert any(f"Act {act_num}" in t for t in labels), (
+                f"Act {act_num} heading missing from sidebar")
+        # Act 4 (Real Objects) specifically — the one that was dropped.
+        assert any("Act 4" in t and "Real Objects" in t for t in labels)
+
+        # Every implemented scenario must have a button.
+        implemented = [s for s in SCENARIOS if s.implemented]
+        assert len(sb._buttons) == len(implemented)
+        for s in implemented:
+            assert s.id in sb._buttons
+
+    def test_act4_scenarios_are_reachable(self, qapp):
+        from telescope_gui.tutorial_mode.widgets.scenario_sidebar import (
+            ScenarioSidebar,
+        )
+        sb = ScenarioSidebar()
+        for sid in ("saturn_rings", "starfield_resolution"):
+            assert sid in sb._buttons, f"{sid} not reachable in sidebar"
+            assert sb._buttons[sid].isEnabled()

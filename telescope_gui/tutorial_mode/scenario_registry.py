@@ -481,7 +481,10 @@ SCENARIOS: list[ScenarioDefinition] = [
             "these. Below the fully-illuminated field angle "
             "\u03b8_fif the on-axis cone is unobstructed; beyond it, illumination falls "
             "smoothly toward zero at the 50% edge. Adjust the parameters to see how "
-            "each shifts the curve."
+            "each shifts the curve.\n"
+            "See also the labelled Vignetting diagram in the Parameters & Physics "
+            "tab, which shows the clipped-cone geometry and the secondary-face "
+            "circle-overlap picture."
         ),
         learn_more_section="Vignetting",
         before_telescope=_SPIDER_200MM,
@@ -1081,58 +1084,11 @@ SCENARIOS: list[ScenarioDefinition] = [
     # Act 4: Real Objects
     # ------------------------------------------------------------------
 
-    ScenarioDefinition(
-        id="jupiter_full", applies_to="reflector",
-        title="Jupiter Full Simulation",
-        act=4, act_label="Real Objects",
-        description=(
-            "Simulate Jupiter with all optical effects active. Toggle individual effects "
-            "on/off to isolate each contribution: obstruction adds secondary ring contrast, "
-            "spider vanes create diffraction spikes, seeing blurs fine detail."
-        ),
-        learn_more_section="Implemented Physics",
-        before_telescope=TelescopeConfig(
-            telescope_type="Newtonian", diameter=200.0, focal_length=2000.0,
-            enable_obstruction=False, spider_vanes=0,
-        ),
-        before_source=_JUPITER,
-        before_label="Ideal (no aberrations)",
-        after_telescope=_JUPITER_200MM,
-        after_source=_JUPITER,
-        after_seeing_arcsec=1.5,
-        after_label="Realistic 200 mm Newtonian \u2192",
-        plot_function="plot_source_image",
-        theory_function=None,
-        tweakable_params=("diameter", "focal_length", "obstruction_ratio",
-                          "spider_vanes", "spider_vane_width", "seeing"),
-        effect_toggles=("obstruction", "spider_vanes", "coma", "vignetting", "seeing"),
-        implemented=True,
-        # Jupiter is bright: at 200 mm aperture, the disk surface flux
-        # × aperture² saturates well above 1.0. Lower exposure brings
-        # the disk into the linear range so bands and limb darkening
-        # remain visible without complete clipping.
-        default_exposure=0.25,
-        supports_realtime=True,
-        terminal_template=(
-            "from telescope_sim.geometry import NewtonianTelescope\n"
-            "from telescope_sim.source.sources import Jupiter\n"
-            "from telescope_sim.plotting import plot_source_image\n\n"
-            "telescope = NewtonianTelescope(\n"
-            "    primary_diameter={diameter},\n"
-            "    focal_length={focal_length},\n"
-            "    obstruction_ratio={obstruction_ratio:.2f},\n"
-            "    spider_vanes={spider_vanes},\n"
-            "    spider_vane_width={spider_vane_width},\n"
-            "    enable_obstruction={enable_obstruction},\n"
-            ")\n"
-            "source = Jupiter()\n"
-            "fig = plot_source_image(\n"
-            "    telescope, source,\n"
-            "    seeing_arcsec={seeing_arcsec},\n"
-            "    wavelength_nm={wavelength_nm},\n"
-            ")"
-        ),
-    ),
+    # (Jupiter Full Simulation removed 2026-07-12 — redundant: the same
+    # effect toggles on a planet are shown by "Saturn with Rings" below,
+    # whose ring structure shows PSF/seeing far better than Jupiter's
+    # coarse bands; Jupiter itself is covered by "Colour Filters on
+    # Jupiter" in Act 3.)
 
     ScenarioDefinition(
         id="saturn_rings", applies_to="reflector",
@@ -1195,13 +1151,19 @@ SCENARIOS: list[ScenarioDefinition] = [
             "200 mm f/4 Newtonian (right), with every effect individually "
             "toggleable so you can peel them back one at a time.\n"
             "The field is engineered to exercise all of them at once:\n"
-            " \u2022 Bright edge stars (off-axis) \u2014 watch comet-shaped COMA appear "
-            "when you toggle it, tails pointing radially outward.\n"
             " \u2022 The bright on-axis star \u2014 SPIDER-VANE spikes (toggle the "
             "vanes) and the modified ring contrast from the central "
             "OBSTRUCTION.\n"
+            " \u2022 COMA (toggle) affects the off-axis edge stars, but note: for a "
+            "200 mm f/4 at this field the comatic blur (~0.5\u2033) is SMALLER than "
+            "both the Airy disk and the 1.5\u2033 seeing, so the edge stars stay "
+            "essentially round \u2014 toggling coma only slightly changes them. "
+            "That is realistic. For the dramatic, obviously comet-shaped "
+            "version, see the f-ratio & Coma scenario (Act 2), which isolates "
+            "coma with spot diagrams at a fast f-ratio and no atmosphere.\n"
             " \u2022 SEEING blurs the whole field (1.5\u2033), softening the fine "
-            "structure the space-like left panel keeps sharp.\n"
+            "structure (including the spikes) that the space-like left panel "
+            "keeps sharp.\n"
             "(Vignetting is not toggled here: for a 200 mm f/4 with a normally-"
             "sized secondary the fully-illuminated field is ~75 arcmin \u2014 far "
             "larger than this 5-arcmin field, so no star is dimmed. See the "
@@ -1209,8 +1171,11 @@ SCENARIOS: list[ScenarioDefinition] = [
             "Vignetting diagram in Parameters & Physics for the geometry.)\n"
             " \u2022 A double-star ladder (8\u2033/4\u2033/2\u2033) \u2014 the tight pair blends under "
             "seeing; the wide pair stays split.\n"
-            " \u2022 Spectral colours + a wide magnitude range show how halos and "
-            "spikes from bright stars overlap faint neighbours in a crowd.\n"
+            " \u2022 Colour + a wide magnitude range: only the BRIGHT stars carry a "
+            "visible spectral tint (blue, orange, red); faint stars read "
+            "near-white, as they do to the eye (colour vision needs flux). "
+            "Watch bright-star halos and spikes overlap faint neighbours in "
+            "the crowd.\n"
             "Left is shown in the same view as the right so the comparison is "
             "honest; switch Detector/Eye to compare linear vs perceptual."
         ),

@@ -526,7 +526,20 @@ class ShowcaseStarField(StarField):
         self.star_x_arcsec = np.array(xs)
         self.star_y_arcsec = np.array(ys)
         self.star_magnitudes = np.array(mags)
-        self.star_spectral_rgb = np.array(rgb, dtype=float)
+        # Magnitude-dependent colour desaturation. Through a real telescope
+        # most stars look white/pale — only the BRIGHT ones show a tint,
+        # because faint sources fall below the eye's cone (photopic) colour
+        # threshold. Blend each star's spectral tint toward white by an amount
+        # set by its magnitude: the brightest stars keep their full tint, the
+        # faintest go nearly white. (Previously every star carried a fully
+        # saturated tint, which read as unrealistically "candy"-coloured.)
+        tints = np.array(rgb, dtype=float)
+        mags_arr = np.array(mags)
+        m_bright, m_faint, sat_min = -1.0, 4.5, 0.15
+        frac = np.clip((mags_arr - m_bright) / (m_faint - m_bright), 0.0, 1.0)
+        sat = 1.0 - frac * (1.0 - sat_min)          # 1.0 (bright) → sat_min (faint)
+        white = np.ones((len(mags_arr), 3))
+        self.star_spectral_rgb = white + sat[:, None] * (tints - white)
         self.num_stars = len(xs)
 
 

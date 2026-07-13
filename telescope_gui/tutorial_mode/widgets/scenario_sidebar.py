@@ -8,7 +8,8 @@ from PyQt6.QtCore import pyqtSignal, Qt
 from telescope_gui.tutorial_mode.scenario_registry import get_scenarios_by_act
 
 
-_ACT_COLORS = {1: "#2a6496", 2: "#5a3e7a", 3: "#2e6b4f"}
+_ACT_COLORS = {1: "#2a6496", 2: "#5a3e7a", 3: "#2e6b4f", 4: "#8a4b2a"}
+_ACT_COLOR_FALLBACK = "#444"
 _BTN_ACTIVE = "text-align: left; padding: 4px 8px 4px 16px; background-color: #d6e8f7; font-weight: bold; border-left: 3px solid #2a6496;"
 _BTN_ENABLED = "text-align: left; padding: 4px 8px 4px 16px; border-left: 3px solid transparent;"
 _BTN_DISABLED = "text-align: left; padding: 4px 8px 4px 16px; color: #aaa; border-left: 3px solid transparent;"
@@ -46,19 +47,21 @@ class ScenarioSidebar(QWidget):
         content_layout.setSpacing(0)
 
         scenarios_by_act = get_scenarios_by_act()
-        act_titles = {
-            1: "Act 1 — Isolated Effects",
-            2: "Act 2 — Compounding",
-            3: "Act 3 — Real Objects",
-        }
 
-        for act_num in [1, 2, 3]:
+        # Iterate EVERY act present in the registry (data-driven) rather than a
+        # hardcoded [1, 2, 3] — the old code silently dropped Act 4 (Real
+        # Objects: Jupiter, Saturn, Star Field Showcase) from the sidebar, so
+        # those scenarios were unreachable. The act heading text comes from the
+        # scenarios' own `act_label`, so the sidebar can never desync from the
+        # registry's act names again.
+        for act_num in sorted(scenarios_by_act.keys()):
             scenarios = scenarios_by_act.get(act_num, [])
             if not scenarios:
                 continue
 
-            act_label = QLabel(act_titles[act_num])
-            color = _ACT_COLORS[act_num]
+            act_label_text = scenarios[0].act_label or ""
+            act_label = QLabel(f"Act {act_num} — {act_label_text}")
+            color = _ACT_COLORS.get(act_num, _ACT_COLOR_FALLBACK)
             act_label.setStyleSheet(
                 f"font-weight: bold; font-size: 9pt; color: {color}; "
                 f"padding: 8px 8px 4px 8px; background: transparent;"

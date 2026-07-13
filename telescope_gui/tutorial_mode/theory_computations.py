@@ -467,6 +467,26 @@ def _starfield_markers_overlay(fig: Figure, theory_result: dict, telescope) -> N
                label="Star positions")
 
 
+def _find_reference_side_panel(fig: Figure, plot_ax):
+    """Find the axis-off 'side column' panel (metrics/formulas) in a
+    plot_psf_profile figure, so legends/notes can be placed there instead of
+    on top of the curves. Returns the rightmost text-only axis, or None.
+    """
+    candidates = []
+    for ax in fig.axes:
+        if ax is plot_ax:
+            continue
+        # The side panel has axis turned off and carries text but no lines.
+        has_lines = len(ax.get_lines()) > 0
+        axis_off = not ax.axison
+        if axis_off and not has_lines:
+            candidates.append(ax)
+    if not candidates:
+        return None
+    # Rightmost by axes position (the metrics/formulas column).
+    return max(candidates, key=lambda a: a.get_position().x0)
+
+
 def _obstruction_overlay(fig: Figure, theory_result: dict, telescope,
                          scenario=None) -> None:
     """For central_obstruction in 1D PSF view, plot the comparison curve.
@@ -567,7 +587,46 @@ def _obstruction_overlay(fig: Figure, theory_result: dict, telescope,
             ax.fill_between([0, r_max_um], strehl_obs, 1.0,
                             color="red", alpha=0.08, zorder=0)
 
-        ax.legend(fontsize=7)
+        # Legend + per-side NORMALISATION BASIS pulled OUT of the plot into
+        # the side column (with the metrics/formulas) so they don't block the
+        # curves (R3.5). The two sides use DIFFERENT normalisations, so each
+        # states its own basis:
+        #   before (unobstructed): each curve to its own peak = 1.0 → SHAPE
+        #     comparison (energy pushed from core into rings).
+        #   after  (obstructed): obstructed curve scaled to its Strehl
+        #     (1−ε²)² vs the unobstructed reference at 1.0 → PEAK-INTENSITY
+        #     (Strehl) loss (shaded).
+        # Remove the in-plot legend that plot_psf_profile added (e.g.
+        # "PSF = Airy") so nothing blocks the curves; we re-place a richer
+        # one in the side column below.
+        if ax.get_legend() is not None:
+            ax.get_legend().remove()
+        handles, labels = ax.get_legend_handles_labels()
+        side_panel = _find_reference_side_panel(fig, plot_ax=ax)
+        if is_before_side:
+            norm_title = ("Normalisation — LEFT (this side):\n"
+                          "each curve to its OWN peak = 1.0.\n"
+                          "Shows PSF SHAPE: energy pushed from\n"
+                          "the core out into the rings.\n"
+                          "(Peak-intensity loss shown on the right.)")
+        else:
+            norm_title = ("Normalisation — RIGHT (this side):\n"
+                          "obstructed curve scaled to its Strehl\n"
+                          f"(1−ε²)² ≈ {strehl_obs:.3f}; unobstructed\n"
+                          "reference at 1.0. Shows PEAK-INTENSITY\n"
+                          "(Strehl) loss — the shaded gap.")
+        if side_panel is not None and handles:
+            leg = side_panel.legend(
+                handles, labels, title=norm_title, fontsize=7,
+                title_fontsize=7.5, loc="lower center",
+                bbox_to_anchor=(0.5, -0.02), framealpha=0.95,
+                borderpad=0.6)
+            leg._legend_box.align = "left"
+        elif handles:
+            # Fallback: at least keep the legend OUT of the data area.
+            ax.legend(handles, labels, title=norm_title, fontsize=7,
+                      title_fontsize=7.5, loc="upper center",
+                      bbox_to_anchor=(0.5, -0.16), ncol=2)
 
 
 def _chromatic_star_labels_overlay(fig: Figure, theory_result: dict,
