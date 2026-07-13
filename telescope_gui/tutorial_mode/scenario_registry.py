@@ -537,13 +537,19 @@ SCENARIOS: list[ScenarioDefinition] = [
             "A spherical primary mirror does not focus all rays to the same point — "
             "marginal rays focus closer than paraxial rays.\n"
             "Left: the ray trace, with each ray coloured by its pupil entry zone "
-            "(dark = central, bright = marginal). Notice how the bright marginal "
-            "rays cross the axis short of the dim paraxial rays.\n"
-            "Right: the ray fan — transverse focal-plane offset vs pupil height. "
-            "The cubic (S-shape) curve is the signature of spherical aberration; "
-            "coma would give a parabolic (U-shape) ray fan, defocus a linear one. "
-            "Toggle to a parabolic primary to see the curve collapse to ≈ 0 "
-            "across the entire pupil (diffraction-limited)."
+            "(dark = central, bright = marginal). The magnified inset zooms into "
+            "the focal region so you can SEE the bright marginal rays crossing "
+            "the axis short of the dim paraxial rays.\n"
+            "Right: the ray fan. The vertical axis, Δx, is the TRANSVERSE RAY "
+            "ERROR — for a ray entering the pupil at height h, how far from the "
+            "ideal focus it actually lands, measured ACROSS the optical axis "
+            "(the same x-direction as the ray trace on the left). Plotting Δx "
+            "against h reveals the aberration by its curve shape: a cubic "
+            "(S-shape) is the signature of spherical aberration; coma gives a "
+            "parabolic (U-shape) fan, defocus a linear one, and a perfect "
+            "system gives Δx ≈ 0 at every h.\n"
+            "Toggle to a parabolic primary to see both the inset spread vanish "
+            "and the ray-fan curve collapse to ≈ 0 (diffraction-limited)."
         ),
         learn_more_section="Implemented Physics",
         before_telescope=TelescopeConfig(
@@ -559,7 +565,7 @@ SCENARIOS: list[ScenarioDefinition] = [
             enable_obstruction=False, spider_vanes=0,
         ),
         after_source=_POINT,
-        after_label="Ray fan (h vs Δy) →",
+        after_label="Ray fan (h vs Δx) →",
         plot_function="plot_ray_trace_pupil_colored",
         secondary_plot_function="plot_ray_fan_telescope",
         theory_function="compute_spherical_aberration_theory",

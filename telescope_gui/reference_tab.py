@@ -448,6 +448,30 @@ A 200mm f/4 spherical mirror has &sim;25&Prime; blur; at f/8 this falls to
 &sim;3&Prime;.</p>
 <p><i>Accuracy: Accurate &mdash; exact ray tracing for spherical surfaces.</i></p>
 
+<h3>Reading the ray fan (aberration signatures)</h3>
+<p>The Spherical Aberration scenario's ray fan plots the <b>transverse ray
+error &Delta;x</b> &mdash; where a ray lands at the focal plane relative to the
+ideal focus, measured across the optical axis &mdash; against the ray's pupil
+entry height <i>h</i>. The <b>shape</b> of that &Delta;x(h) curve identifies the
+aberration:</p>
+<ul>
+<li><b>Spherical aberration</b> &mdash; cubic, &Delta;x &prop; h&sup3; (an
+S-shape): outer-zone rays miss most.</li>
+<li><b>Coma</b> &mdash; quadratic, &Delta;x &prop; h&sup2; (a U-shape); an
+off-axis aberration (see &sect;5).</li>
+<li><b>Defocus</b> &mdash; <i>linear</i>, &Delta;x &prop; h: the image plane is
+simply at the wrong distance, so every zone is displaced in proportion to h.
+Not a lens fault &mdash; it is what refocusing corrects.</li>
+<li><b>Tilt</b> &mdash; <i>constant</i>, &Delta;x independent of h: the whole
+bundle is shifted sideways (e.g. a misaligned/decentred element or an off-axis
+chief ray). Shifts the image without blurring it.</li>
+<li><b>Diffraction-limited</b> &mdash; &Delta;x &asymp; 0 at every h: geometric
+errors are below the diffraction limit.</li>
+</ul>
+<p>Defocus and tilt are the two lowest-order terms &mdash; a real wavefront is a
+sum of these plus the higher-order aberrations above; the ray-fan curve shape is
+how you tell them apart.</p>
+
 <h3>7. Vignetting</h3>
 <p>At off-axis field angles, the cone of light from the primary is partially
 clipped by the secondary mirror (or tube walls), reducing illumination toward

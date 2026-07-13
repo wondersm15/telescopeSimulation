@@ -817,8 +817,10 @@ class TestRound2Batch2:
         fig_ideal = plot_polychromatic_ray_trace(t, figsize=(4, 5),
                                                  idealize_sa=True,
                                                  show_inset=False)
-        # The idealisation note is present on the axes.
+        # The idealisation note is present on the axes (whitespace-normalised,
+        # since the note may wrap across lines).
         texts = " ".join(t.get_text().lower() for t in fig_ideal.axes[0].texts)
+        texts = " ".join(texts.split())
         assert "spherical aberration removed" in texts
         plt.close(fig_ideal)
 

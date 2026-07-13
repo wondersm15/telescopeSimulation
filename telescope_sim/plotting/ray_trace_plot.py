@@ -872,10 +872,10 @@ def plot_ray_fan_telescope(telescope: Telescope,
     shape of the curve directly reveals which Seidel aberration is
     present.
 
-      • cubic (Δy ∝ h³)   → spherical aberration
-      • parabolic (Δy ∝ h²) → coma
-      • linear (Δy ∝ h)     → defocus
-      • flat (Δy ≈ 0)        → diffraction-limited
+      • cubic (Δx ∝ h³)   → spherical aberration
+      • parabolic (Δx ∝ h²) → coma
+      • linear (Δx ∝ h)     → defocus
+      • flat (Δx ≈ 0)        → diffraction-limited
 
     Each point is one traced ray, coloured by its pupil entry height
     using a viridis colormap that the companion ray-trace plot
@@ -946,7 +946,11 @@ def plot_ray_fan_telescope(telescope: Telescope,
                  f"f/{f_ratio:.1f}{primary_label}")
     ax.set_title(title, fontsize=11)
     ax.set_xlabel("Pupil entry height h (mm)")
-    ax.set_ylabel("Transverse focal-plane offset Δy (µm)")
+    # The vertical axis is the TRANSVERSE ray error — where a ray lands at the
+    # focal plane relative to the ideal focus, measured across the optical
+    # axis. That transverse direction is the x-axis of the companion ray-trace
+    # panel, so label it Δx (not Δy) for consistency with the left plot.
+    ax.set_ylabel("Transverse ray error at focal plane, Δx (µm)")
     ax.grid(True, alpha=0.3)
 
     # Floor the y-axis to a physical (diffraction) scale so a corrected
@@ -968,7 +972,7 @@ def plot_ray_fan_telescope(telescope: Telescope,
     cbar.ax.tick_params(labelsize=8)
 
     # Aberration cheat-sheet
-    cheat = ("Curve shape ↔ aberration\n"
+    cheat = ("Δx(h) shape ↔ aberration\n"
              "  S-shape (h³)   spherical\n"
              "  U-shape (h²)   coma\n"
              "  tilt (h¹)      defocus\n"
@@ -980,7 +984,7 @@ def plot_ray_fan_telescope(telescope: Telescope,
                       edgecolor="gray"))
     # Stats
     ax.text(0.98, 0.02,
-            f"RMS Δy = {rms_um:.2f} µm\nmax |Δy| = {max_um:.2f} µm",
+            f"RMS Δx = {rms_um:.2f} µm\nmax |Δx| = {max_um:.2f} µm",
             transform=ax.transAxes, va="bottom", ha="right",
             fontsize=7,
             bbox=dict(boxstyle="round,pad=0.3",
@@ -1115,6 +1119,62 @@ def plot_ray_trace_pupil_colored(telescope: Telescope,
                             alpha=0.5, linewidth=0.8)
                 ax.plot(plane_pos, 0.0, "r*", markersize=12, zorder=5,
                         label="Paraxial focal plane")
+
+            # Focal-region zoom INSET (R3.8a): on the full-height ray trace the
+            # focus is a single point and the marginal-vs-paraxial spread is
+            # invisible. Magnify the axis-crossing region so the bright
+            # (marginal) rays crossing the axis SHORT of the dim (paraxial)
+            # rays is actually visible — the whole point of the scenario.
+            # (scan_axis == 1: optical axis is y, transverse is x.)
+            if scan_axis == 1:
+                crossings = []
+                for r in rays:
+                    if len(r.history) < 2:
+                        continue
+                    q0 = np.array(r.history[-2]); q1 = np.array(r.history[-1])
+                    dd = q1 - q0
+                    if abs(dd[1]) < 1e-12:
+                        continue
+                    tt = -q1[0] / dd[0] if abs(dd[0]) > 1e-12 else None
+                    # crossing of the optical axis (x = 0)
+                    if abs(dd[0]) > 1e-12:
+                        t_ax = -q1[0] / dd[0]
+                        crossings.append(q1[1] + t_ax * dd[1])
+                if crossings and (max(crossings) - min(crossings)) > 1e-4:
+                    cmin, cmax = min(crossings), max(crossings)
+                    span = cmax - cmin
+                    lo = min(cmin, plane_pos) - 0.25 * span
+                    hi = max(cmax, plane_pos) + 0.25 * span
+                    tw = span * 0.7 + 1e-4
+                    axin = ax.inset_axes([0.55, 0.28, 0.33, 0.30])
+                    for ray_idx, r in enumerate(rays):
+                        if len(r.history) < 2:
+                            continue
+                        q0 = np.array(r.history[-2])
+                        q1 = np.array(r.history[-1])
+                        dd = q1 - q0
+                        if abs(dd[1]) < 1e-12:
+                            continue
+                        t2 = (lo - q1[1]) / dd[1]
+                        e2 = q1 + t2 * dd
+                        c = colors[ray_idx] if ray_idx < len(colors) else "gold"
+                        axin.plot([q1[0], e2[0]], [q1[1], e2[1]],
+                                  color=c, linewidth=1.0, alpha=0.85)
+                    axin.axhline(plane_pos, color="gray", linestyle="--",
+                                 linewidth=0.8, alpha=0.6)
+                    axin.plot(0.0, plane_pos, "r*", markersize=8, zorder=5)
+                    axin.set_xlim(-tw, tw)
+                    axin.set_ylim(lo, hi)
+                    axin.set_title(
+                        "Focal-region zoom (marginal ✗ short of ★)",
+                        fontsize=6.5)
+                    axin.set_xlabel("x (mm)", fontsize=6)
+                    axin.set_ylabel("y (mm)", fontsize=6)
+                    axin.tick_params(labelsize=6)
+                    # Move the main-axes legend out of the inset's way
+                    # (recreate at lower-left; robust across mpl versions).
+                    if ax.get_legend() is not None:
+                        ax.legend(loc="lower left", fontsize=7, framealpha=0.9)
 
     # Add pupil-zone colorbar — matches the ray-fan panel
     cbar = fig.colorbar(sm, ax=ax, shrink=0.7, pad=0.02,
@@ -2094,17 +2154,15 @@ def plot_polychromatic_ray_trace(
             if idealize_sa and focal_y is not None:
                 # Idealised convergence: keep the real path through the lens
                 # (history ends at the lens exit surface), then redirect this
-                # ray straight to the wavelength's focal point and beyond.
-                # All rays of a wavelength then meet at one point — spherical
-                # aberration removed, chromatic focal shift preserved.
-                exit_pt = path[-1]
+                # ray straight to the wavelength's focal point and STOP there.
+                # All rays of a wavelength meet cleanly at one point — spherical
+                # aberration removed, chromatic focal shift preserved. We do NOT
+                # extend past the focus here: three colours diverging past three
+                # nearby foci produced a confusing red/green/blue fan below the
+                # focal plane (R3.6b). The converge→diverge crossover is shown
+                # instead in the paired focal-region zoom on the after side.
                 focal_pt = np.array([0.0, focal_y])
-                d = focal_pt - exit_pt
-                norm = float(np.linalg.norm(d))
-                if norm > 0:
-                    unit = d / norm
-                    p_ext = focal_pt + unit * extension_length
-                    path = np.vstack([path, focal_pt, p_ext])
+                path = np.vstack([path, focal_pt])
             else:
                 # Real refracted path: extend the last segment forward past
                 # the focal plane (a singlet then shows its true SA spread).
@@ -2132,36 +2190,44 @@ def plot_polychromatic_ray_trace(
     if ax.get_legend() is not None:
         ax.get_legend().remove()
 
-    # Place legend directly on the main axes (upper-right, inside the plot)
-    ax.legend(fontsize="small", loc="upper right", frameon=True,
+    # Legend OUT of the ray trace, below the plot (R3.6a) — it previously sat
+    # upper-right on top of the lens/rays. The plot is tall and narrow, so a
+    # horizontal legend under the axes uses otherwise-empty canvas.
+    ax.legend(fontsize="small", loc="upper center",
+              bbox_to_anchor=(0.5, -0.06), ncol=4, frameon=True,
               fancybox=True, framealpha=0.9)
 
-    # Numerical focal-position readout (top-left). Δz is along the optical
-    # axis (y in this 2D plot — light propagates from +y down toward 0).
-    # Useful when the chromatic spread is too small to see visually
-    # (e.g. apochromats).
+    # Numerical focal-position readout in the RIGHT-side whitespace (the
+    # converging cone is narrow at mid-height, leaving the flanks empty), so
+    # it no longer overlaps the rays. Δz is along the optical axis (y here).
     if len(all_focal_points) >= 1:
         focals = np.array(list(all_focal_points.values()))
         ref = focals[:, 1].mean()
-        readout_lines = ["Focal offsets (Δz along axis, mm):"]
+        readout_lines = ["Focal offsets", "(Δz on axis, mm):"]
         for label, fp in all_focal_points.items():
             dz = fp[1] - ref
             readout_lines.append(f"  {label}: {dz:+.3f}")
-        ax.text(0.02, 0.98, "\n".join(readout_lines),
+        ax.text(0.985, 0.55, "\n".join(readout_lines),
                 transform=ax.transAxes, fontsize=7,
-                verticalalignment="top", fontfamily="monospace",
+                verticalalignment="center", horizontalalignment="right",
+                fontfamily="monospace",
                 bbox=dict(boxstyle="round,pad=0.3", facecolor="white",
                           alpha=0.85, edgecolor="gray"))
 
     # Flag the teaching idealisation so the user knows the within-colour
     # convergence is not real physics (spherical aberration suppressed).
+    # Placed in the LEFT-side whitespace (mid-height) so it doesn't pile up
+    # with the focal-plane label / zoom box in the crowded focal region.
     if idealize_sa:
-        ax.text(0.02, 0.02,
-                "Idealised: spherical aberration removed —\n"
-                "each colour converges to a point so only\n"
-                "the chromatic focal shift is shown.",
+        ax.text(0.015, 0.42,
+                "Idealised: spherical\n"
+                "aberration removed —\n"
+                "each colour converges\n"
+                "to a point so only the\n"
+                "chromatic focal shift\n"
+                "is shown.",
                 transform=ax.transAxes, fontsize=7,
-                verticalalignment="bottom", horizontalalignment="left",
+                verticalalignment="center", horizontalalignment="left",
                 style="italic", color="#444",
                 bbox=dict(boxstyle="round,pad=0.3", facecolor="#fffbe6",
                           alpha=0.9, edgecolor="#ccaa44"))
@@ -2183,6 +2249,25 @@ def plot_polychromatic_ray_trace(
                 color=focus_color, fontsize=8, fontweight="bold",
                 transform=ax.get_yaxis_transform(),
                 verticalalignment="bottom", alpha=0.9, zorder=5)
+
+    # Dashed box marking the focal region that the after-side "Zoomed view of
+    # the focal region" panel magnifies (R3.6c). Its extent matches
+    # _draw_focal_region_zoom's limits so the two plots line up.
+    if g_focal_y is not None and len(all_focal_points) >= 1:
+        from matplotlib.patches import Rectangle
+        focal_ys = [fp[1] for fp in all_focal_points.values()]
+        spread_y = max((max(focal_ys) - min(focal_ys)),
+                       telescope.primary_diameter * 0.02)
+        box_half_y = spread_y * 2.5
+        box_half_x = telescope.primary_diameter * 0.08
+        ax.add_patch(Rectangle(
+            (-box_half_x, g_focal_y - box_half_y),
+            2 * box_half_x, 2 * box_half_y,
+            fill=False, edgecolor="0.35", linestyle="--", linewidth=1.2,
+            alpha=0.8, zorder=6))
+        ax.text(box_half_x, g_focal_y + box_half_y,
+                " zoomed →\n (focal-plane\n  view)",
+                fontsize=6.5, color="0.35", ha="left", va="top", zorder=6)
 
     # Focal-region inset embedded inside the main axes (wider, shorter so
     # the colour separation is readable; horizontal layout matches the
@@ -2555,8 +2640,11 @@ def _draw_focal_region_zoom(ax, telescope, focus_wavelength_nm=None,
     ax.set_xlabel("x (mm)", fontsize=8)
     ax.set_ylabel("y (mm)", fontsize=8)
     ax.tick_params(labelsize=7)
-    ax.set_title("Focal region — R/G/B bundles converge then diverge",
-                 fontsize=9)
+    # Make explicit that this is a magnified view of the focal region marked
+    # by the dashed box on the ray-trace plot on the LEFT (R3.6c).
+    ax.set_title("Zoomed view of the focal region from the ray trace (left)\n"
+                 "— R/G/B bundles converge to their own focus, then diverge",
+                 fontsize=8.5)
     ax.legend(fontsize=7, loc="upper right", framealpha=0.8)
     ax.grid(True, alpha=0.2)
 

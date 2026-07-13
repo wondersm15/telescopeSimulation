@@ -384,6 +384,31 @@ user input · 💤 deferred by user.
     ~1″ integration (R3.10c) and flags it as a perceptual model.
   - **Batch B COMPLETE. 395 tests pass.** Next: Batch C (chromatic/spherical
     ray-trace modules: legends-out, artifacts, focal zooms, ray-fan axis).
+- 2026-07-13 (Batch C, mostly done):
+  - **R3.6a ✅** chromatic ray-trace legend moved below the plot; focal-offsets
+    readout moved to the right-side whitespace; idealise note to the left
+    whitespace — none overlap the rays now.
+  - **R3.6b ✅** artifact fixed — idealised rays now STOP at their focal point
+    (no extension past), removing the confusing red/green/blue diverging fan
+    below the focus.
+  - **R3.6c ✅** the focal-plane zoom panel is titled "Zoomed view of the focal
+    region from the ray trace (left)"; the ray trace now draws a dashed box +
+    "zoomed →" pointer around the magnified region.
+  - **R3.6d ✅** close-zoom ±12″ → ±10″.
+  - **R3.8c ✅** ray-fan vertical axis relabelled from Δy to **Δx** (transverse
+    ray error), consistent with the ray-trace's x-axis; scenario description now
+    defines "transverse ray error Δx" clearly; after_label uses Δx.
+  - **R3.8a ✅** spherical ray trace gets a focal-region zoom INSET showing the
+    marginal (bright) rays crossing the axis short of the paraxial (★); only
+    appears when there is SA (parabolic → no inset). Modest at f/4 (real SA is
+    small) but magnifies the crossing as asked.
+  - **R3.8b ✅** new P&P subsection "Reading the ray fan (aberration
+    signatures)" — spherical/coma/defocus/tilt/diffraction-limited by curve
+    shape; defocus (linear) and tilt (constant) now explained.
+  - **R3.5c (legends-out) — PARTIAL:** done for central-obstruction 1D (R3.5),
+    chromatic ray trace (R3.6a), spherical ray trace. Broader audit of remaining
+    modules (ray fan, coma, etc.) still to sweep in the propagation pass (G).
+  - 395 tests pass.
 
 ---
 

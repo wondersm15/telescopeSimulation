@@ -952,7 +952,7 @@ class TutorialTab(QWidget):
     # resolves the achromat / APO-doublet / APO-triplet differences.
     _FOCAL_ZOOM_OPTIONS = [
         (120.0, "Wide (±120″) — singlet halo"),
-        (12.0, "Close (±12″) — achromat/APO"),
+        (10.0, "Close (±10″) — achromat/APO"),
     ]
 
     def _add_focal_zoom_combo(self):
