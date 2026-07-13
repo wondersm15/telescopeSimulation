@@ -25,6 +25,7 @@ from telescope_sim.source.sources import (
     PointSource, DoubleStar, Jupiter, Saturn, Moon,
     StarField, TutorialStarField, MultiColorStarField,
     StarFieldResolutionField, ComaDemoField, ShowcaseStarField,
+    DynamicRangeField,
 )
 
 
@@ -50,6 +51,8 @@ def build_source(config: SourceConfig):
         return StarFieldResolutionField(**kw)
     elif st == "ShowcaseStarField":
         return ShowcaseStarField(**kw)
+    elif st == "DynamicRangeField":
+        return DynamicRangeField(**kw)
     elif st == "ComaDemoField":
         return ComaDemoField(**kw)
     elif st == "Moon":

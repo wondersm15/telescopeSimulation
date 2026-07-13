@@ -575,6 +575,68 @@ itself. First-use downloads the 16&nbsp;MB ephemeris into
 <code>~/.skyfield</code>; subsequent loads are local.</i></p>
 """
 
+DETECTOR_VS_EYE_HTML = """
+<p>The tutorial shows most images two ways &mdash; a <b>Detector</b> view and an
+<b>Eye</b> view &mdash; because a camera sensor and the human eye respond to
+light in fundamentally different ways.</p>
+
+<h3>Detector: linear</h3>
+<p>A CCD/CMOS pixel counts photons. Its output is <b>proportional</b> to the
+light collected: twice the photons &rarr; twice the signal, until the pixel
+fills up (<b>saturation</b> / full-well) and clips to white, or drops into the
+read/shot <b>noise</b> floor at the faint end. The span between those two is the
+detector's <b>dynamic range</b>. A single linear exposure can only capture a
+scene whose range fits inside it.</p>
+
+<h3>Eye: logarithmic</h3>
+<p>The eye's <i>perceived</i> brightness grows roughly as the <b>logarithm</b>
+of the light flux. This compresses an enormous physical range (full sunlight to
+the faintest visible star spans a factor of &sim;10<sup>14</sup>) into a
+comfortable perceptual range &mdash; a built-in "HDR". It is why you can see a
+bright and a faint star in the same field at once, where a linear detector
+cannot.</p>
+
+<h3>Evidence that the eye is logarithmic</h3>
+<ul>
+<li><b>Weber&ndash;Fechner law</b> (E. Weber 1834; G. Fechner 1860): the
+smallest detectable change in a stimulus is proportional to the stimulus itself
+(&Delta;I/I &asymp; constant). Integrating that relationship gives
+<i>perception &prop; log(intensity)</i> &mdash; the classic result for vision,
+hearing, and other senses.</li>
+<li><b>The astronomical magnitude scale.</b> Hipparchus (&sim;150&nbsp;BC)
+ranked naked-eye stars from 1 (brightest) to 6 (faintest) purely <i>by eye</i>,
+in what felt like equal steps. In 1856 Norman <b>Pogson</b> measured that a
+1st-magnitude star is about <b>100&times;</b> brighter in flux than a
+6th-magnitude one &mdash; so each equal-<i>perceived</i> step of one magnitude is
+a fixed <i>multiplicative</i> flux ratio of 100<sup>1/5</sup> &approx;
+<b>2.512&times;</b>. Equal perceptual steps mapping to equal flux <i>ratios</i>
+is exactly a logarithmic response:</li>
+</ul>
+<p style="font-family:monospace; margin-left:20px;">
+m = &minus;2.5 log<sub>10</sub>(F / F<sub>0</sub>)</p>
+<p>In the tutorial, the <b>Detector (linear)</b> view maps pixel value straight
+to screen brightness; the <b>Eye (log)</b> view applies an <code>asinh</code>
+stretch (a smooth curve that is logarithmic for bright values and linear near
+zero, avoiding a singularity at black) to mimic this response.</p>
+
+<h3>Eye resolution &amp; spatial integration</h3>
+<p>Brightness response is only half the story: the eye also has a finite
+<b>spatial resolution</b>. The naked eye resolves &sim;1 arcminute; at a moderate
+eyepiece magnification the eye's grain projects to roughly <b>1&Prime;</b> on the
+sky. The eye <i>integrates</i> light over that small patch, softening fine
+structure (and blending the colours of a chromatic blur disk into the perceived
+core). This is a separate effect from the logarithmic <i>intensity</i> response.
+The <b>Eye + integration</b> view (and the "Eye blur" toggle) adds this &sim;1&Prime;
+spatial blur, so together the two Eye modes model <i>both</i> how the eye maps
+brightness (log) <i>and</i> how it resolves detail (finite grain) &mdash; which
+is why a diffraction-limited detector image can look sharper than the same scene
+does to the eye at the eyepiece.</p>
+<p><i>Accuracy: perceptual model. The asinh stretch and 1&Prime; integration are
+qualitative stand-ins for human vision, not calibrated psychophysics; they
+convey the linear-vs-log and finite-resolution distinctions, not exact retinal
+response.</i></p>
+"""
+
 NOT_IMPLEMENTED_HTML = """
 <p>The following effects are <b>not yet modeled</b>. Simulation results will not
 reflect these phenomena:</p>
@@ -860,6 +922,8 @@ class ParametersPhysicsTab(QWidget):
         layout.addWidget(_make_section("Telescope Types", TELESCOPE_TYPES_HTML))
         layout.addWidget(_make_section("Telescope Parameters", PARAMETERS_HTML))
         layout.addWidget(_make_section("Understanding the Plots", PLOTS_HTML))
+        layout.addWidget(_make_section(
+            "Detector vs Eye (linear vs logarithmic)", DETECTOR_VS_EYE_HTML))
         layout.addWidget(_make_figure_section(
             "Vignetting (diagram)", _build_vignetting_diagram(),
             VIGNETTING_DIAGRAM_CAPTION_HTML))

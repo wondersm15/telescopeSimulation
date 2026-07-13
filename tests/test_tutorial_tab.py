@@ -691,10 +691,21 @@ class TestPerSideDisplayControls:
         return get_scenario_by_id(sid)
 
     def test_saturation_demo_detector_vs_eye(self):
+        # R3.15: fixed Detector-left / Eye-right layout with a wide-brightness
+        # star field (dynamic range).
         s = self._scn("saturation_demo")
-        assert s.before_display_stretch == "linear"  # Detector
-        assert s.default_display_stretch == "log"     # Eye (after)
+        assert s.before_display_stretch == "linear"     # Detector (left)
+        assert s.after_display_stretch == "log"          # Eye (right, pinned)
+        assert s.show_eye_blur_toggle is True
+        assert s.before_source.source_type == "DynamicRangeField"
         assert s.both_sides_dynamic and s.before_telescope_dynamic
+
+    def test_dynamic_range_field_spans_wide_magnitudes(self):
+        from telescope_sim.source.sources import DynamicRangeField
+        s = DynamicRangeField()
+        assert s.num_stars >= 6
+        span = s.star_magnitudes.max() - s.star_magnitudes.min()
+        assert span >= 6.0   # ≥ 6 mag ≈ ≥ 250× flux range
 
     def test_nd_filter_moon_before_unfiltered(self):
         s = self._scn("nd_filter_moon")

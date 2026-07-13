@@ -543,6 +543,39 @@ class ShowcaseStarField(StarField):
         self.num_stars = len(xs)
 
 
+class DynamicRangeField(StarField):
+    """A row of stars spanning a WIDE brightness range, for the dynamic-range
+    (Bright + Dim) scenario.
+
+    Seven stars from magnitude −1 (very bright) to +6.5 (faint) — a ~750×
+    flux ratio — laid out left→right brightest→faintest. On a linear detector
+    NO single exposure shows them all (expose for the faint ones and the
+    bright ones bloom/saturate; expose for the bright ones and the faint ones
+    vanish). The eye's logarithmic response compresses the whole range so all
+    seven are visible at once — the point of the scenario.
+    """
+
+    # magnitudes span −1 … +6.5 (≈ 7.5 mag ≈ 1000× flux).
+    _MAGS = [-1.0, 0.5, 2.0, 3.0, 4.0, 5.0, 6.5]
+
+    def __init__(self, field_radius_arcsec: float = 40.0):
+        self.field_radius_arcsec = field_radius_arcsec
+        self.seed = 0
+        self.magnitude_range = (min(self._MAGS), max(self._MAGS))
+        n = len(self._MAGS)
+        # Even horizontal spacing across ~80% of the field width, on-axis row.
+        xs = np.linspace(-0.8 * field_radius_arcsec,
+                         0.8 * field_radius_arcsec, n)
+        self.star_x_arcsec = np.array(xs)
+        self.star_y_arcsec = np.zeros(n)
+        self.star_magnitudes = np.array(self._MAGS, dtype=float)
+        self.num_stars = n
+
+    @property
+    def field_extent_arcsec(self) -> float:
+        return self.field_radius_arcsec * 2.0
+
+
 class Jupiter(AstronomicalSource):
     """Parametric model of Jupiter with limb darkening and equatorial bands.
 

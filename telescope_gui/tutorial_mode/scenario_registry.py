@@ -1032,38 +1032,36 @@ SCENARIOS: list[ScenarioDefinition] = [
         act=3, act_label="Brightness, Saturation & Filters",
         description=(
             "Applies to: any telescope. "
-            "Two stars separated by 4 magnitudes (a 40× flux ratio). "
-            "In Detector (linear) view the bright star saturates while "
-            "the dim companion is barely visible — exactly what a real "
-            "CCD records without HDR. In Eye view the asinh stretch "
-            "compresses the dynamic range so both stars read clearly, "
-            "matching how the eye's logarithmic response handles the "
-            "same scene through an eyepiece. No magic gain — just the "
-            "eye-vs-detector distinction made visible."
+            "Seven stars spanning magnitude −1 to +6.5 — a DYNAMIC RANGE of "
+            "~750× in flux (brightest ÷ faintest), laid out brightest (left) "
+            "to faintest (right).\n"
+            "\"DYNAMIC RANGE\" = the ratio of the brightest to the faintest "
+            "signal a scene (or a device) contains. \"HDR\" (High Dynamic "
+            "Range) means capturing scenes whose range exceeds what one "
+            "linear exposure can record.\n"
+            "DETECTOR (left, linear): try the Exposure control — there is NO "
+            "single exposure that shows all seven. Expose for the faint stars "
+            "and the bright ones saturate and bloom to white; expose for the "
+            "bright ones and the faint ones vanish into black. A linear "
+            "detector's dynamic range is limited by saturation at the top and "
+            "noise at the bottom.\n"
+            "EYE (right, logarithmic): the eye's log response compresses the "
+            "whole range, so all seven stars read at once — the same trick "
+            "photographers call HDR. No magic gain; just log vs linear."
         ),
         learn_more_section="Photometry & Filters",
         before_telescope=TelescopeConfig(
             telescope_type="Newtonian", diameter=150.0, focal_length=1200.0,
             enable_obstruction=False, spider_vanes=0,
         ),
-        before_source=SourceConfig(
-            source_type="DoubleStar",
-            kwargs={"separation_arcsec": 8.0,
-                    "magnitude_primary": 0.0,
-                    "magnitude_secondary": 4.0},
-        ),
+        before_source=SourceConfig(source_type="DynamicRangeField"),
         before_label="Detector view (linear)",
         after_telescope=TelescopeConfig(
             telescope_type="Newtonian", diameter=150.0, focal_length=1200.0,
             enable_obstruction=False, spider_vanes=0,
         ),
-        after_source=SourceConfig(
-            source_type="DoubleStar",
-            kwargs={"separation_arcsec": 8.0,
-                    "magnitude_primary": 0.0,
-                    "magnitude_secondary": 4.0},
-        ),
-        after_label="Eye view (asinh) →",
+        after_source=SourceConfig(source_type="DynamicRangeField"),
+        after_label="Eye view (logarithmic) →",
         plot_function="plot_source_image",
         theory_function=None,
         tweakable_params=("diameter",),
@@ -1071,12 +1069,13 @@ SCENARIOS: list[ScenarioDefinition] = [
         before_apply_coma=False,
         implemented=True,
         default_exposure=1.0,
-        # The lesson IS the Detector-vs-Eye comparison: pin the before side
-        # to the linear Detector view (bright star saturates, dim companion
-        # barely visible) and default the after side to the Eye/asinh view
-        # (both stars read). Both sides track aperture (live before-side).
+        # R3.15: FIXED layout — Detector on the LEFT (linear; exposure shows
+        # that no single exposure captures the whole range), Eye on the RIGHT
+        # (pinned log; compresses the range so all stars show). No free View
+        # combo; eye-blur toggle available. Both panes track aperture.
         before_display_stretch="linear",
-        default_display_stretch="log",
+        after_display_stretch="log",
+        show_eye_blur_toggle=True,
         both_sides_dynamic=True,
         before_telescope_dynamic=True,
         terminal_template=(

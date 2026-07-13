@@ -370,8 +370,20 @@ user input · 💤 deferred by user.
   (one of several brightness influences), not "the whole lesson". Verified via
   tab: no View combo, eye-blur present, exposure changes only the detector,
   aperture changes both. Test updated. 394 pass.
-- **Batch B remaining: R3.15 (Bright+Dim — reuse the fixed Eye/Detector layout,
-  define HDR, multi-star source), R3.4 (P&P linear-vs-log-eye + evidence).**
+- 2026-07-12 (Batch B DONE):
+  - **R3.15 ✅** Bright + Dim redesigned: new `DynamicRangeField` (7 stars,
+    mag −1…+6.5 ≈ 750× flux, bright→faint row). Fixed layout Detector LEFT
+    (linear — no single exposure shows all 7) / Eye RIGHT (pinned log — all 7
+    show). "Dynamic range" and "HDR" defined in the description. Verified:
+    detector shows only the bright stars, eye shows all 7. Test added.
+  - **R3.4 + R3.10c ✅** New Parameters & Physics section "Detector vs Eye
+    (linear vs logarithmic)": detector linear (photon count, saturation, dynamic
+    range); eye logarithmic WITH evidence (Weber–Fechner law; the magnitude
+    scale — Hipparchus by eye + Pogson's 2.512× per equal perceived step = a log
+    response; m = −2.5 log10 F/F0). Also describes eye spatial resolution /
+    ~1″ integration (R3.10c) and flags it as a perceptual model.
+  - **Batch B COMPLETE. 395 tests pass.** Next: Batch C (chromatic/spherical
+    ray-trace modules: legends-out, artifacts, focal zooms, ray-fan axis).
 
 ---
 
