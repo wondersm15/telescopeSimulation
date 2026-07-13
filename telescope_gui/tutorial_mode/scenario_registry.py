@@ -157,6 +157,18 @@ class ScenarioDefinition:
     # "linear" so the exposure slider and saturation clipping are live.
     default_display_stretch: str = "log"
 
+    # When set, the After side is PINNED to this view and the free View combo
+    # is hidden — used when the two panes are a fixed Eye-vs-Detector
+    # comparison (e.g. Exposure & Saturation: Eye left / Detector right) rather
+    # than a single toggleable view. None = show the View combo as usual.
+    after_display_stretch: str | None = None
+
+    # When True, show an "Eye blur" checkbox that toggles the EYE pane between
+    # log (no spatial integration) and log_integrated (1″ eye-resolution
+    # blur). Used for fixed Eye-vs-Detector scenarios so the eye pane can show
+    # the eye's spatial integration without a full View combo.
+    show_eye_blur_toggle: bool = False
+
     # ── Shared PSF normalisation (Phase 1.5) ─────────────────────────────
     # When True, the after-side 2D PSF is displayed relative to the
     # before-side (unobstructed) on-axis peak instead of being independently
@@ -817,17 +829,21 @@ SCENARIOS: list[ScenarioDefinition] = [
         act=3, act_label="Brightness, Saturation & Filters",
         description=(
             "Applies to: any telescope. "
-            "A single warm-orange star (mag 0) through a 100 mm scope, shown "
-            "two ways at once: Detector (left) and Eye (right).\n"
-            "Slide Exposure: on the DETECTOR (left, linear) signal builds with "
-            "exposure time — short exposure → faint and fully coloured; long "
-            "exposure → the core saturates and clips to pure white (the colour "
-            "burns out channel-by-channel). The EYE (right) does not integrate "
-            "over time, so exposure has no effect there — its brightness comes "
-            "from aperture instead; raising aperture brightens it until cone "
-            "desaturation washes the colour toward white. That exposure moves "
-            "the left but not the right IS the lesson: exposure is a detector "
-            "concept, not an eye one."
+            "A single warm-orange star (mag 0) shown two ways at once — the "
+            "EYE (left) and a DETECTOR (right) — to compare how each responds "
+            "to BRIGHTNESS and to SATURATION.\n"
+            "APERTURE affects BOTH panes: a bigger mirror collects more light, "
+            "so the star brightens on the eye AND the detector (∝ aperture²). "
+            "Change the Aperture control and watch both sides respond.\n"
+            "EXPOSURE is the DETECTOR's knob — a detector integrates over time, "
+            "so longer exposure builds signal until the core SATURATES and "
+            "clips to pure white (the colour burns out channel-by-channel). "
+            "The eye does not integrate over time, so exposure leaves the eye "
+            "pane unchanged — its brightness comes from aperture (and, for "
+            "extended objects, exit pupil). So exposure is one brightness knob "
+            "among several, specific to the detector; aperture is shared.\n"
+            "Toggle 'Eye blur' to add the eye's ~1″ spatial integration to the "
+            "eye pane."
         ),
         learn_more_section="Photometry & Filters",
         before_telescope=TelescopeConfig(
@@ -839,7 +855,7 @@ SCENARIOS: list[ScenarioDefinition] = [
             kwargs={"magnitude": 0.0, "field_angle_arcsec": 0.0,
                     "spectral_rgb": (1.0, 0.7, 0.35)},
         ),
-        before_label="Detector view (linear)",
+        before_label="Eye view (perceptual)",
         after_telescope=TelescopeConfig(
             telescope_type="Newtonian", diameter=100.0, focal_length=800.0,
             enable_obstruction=False, spider_vanes=0,
@@ -849,7 +865,7 @@ SCENARIOS: list[ScenarioDefinition] = [
             kwargs={"magnitude": 0.0, "field_angle_arcsec": 0.0,
                     "spectral_rgb": (1.0, 0.7, 0.35)},
         ),
-        after_label="Eye view (logarithmic) →",
+        after_label="Detector view (linear) →",
         plot_function="plot_source_image",
         theory_function=None,
         # Keep aperture (D² changes how fast the star saturates — relevant
@@ -861,13 +877,13 @@ SCENARIOS: list[ScenarioDefinition] = [
         before_apply_coma=False,
         implemented=True,
         default_exposure=1.0,
-        # Live Detector-vs-Eye comparison (B8): pin the LEFT to Detector
-        # (linear — exposure + saturation live) and default the RIGHT to Eye
-        # (logarithmic — exposure N/A, aperture-driven). Both update together
-        # as the user changes aperture; the exposure slider moves only the
-        # Detector side, which is exactly the lesson.
-        default_display_stretch="log",
-        before_display_stretch="linear",
+        # R3.12: FIXED Eye-vs-Detector layout — Eye on the LEFT (pinned,
+        # eye-blur toggle), Detector on the RIGHT (pinned linear, exposure +
+        # saturation live). No free View combo. Aperture drives both panes;
+        # exposure drives only the Detector.
+        before_display_stretch="log",
+        after_display_stretch="linear",
+        show_eye_blur_toggle=True,
         both_sides_dynamic=True,
         before_telescope_dynamic=True,
         terminal_template=(

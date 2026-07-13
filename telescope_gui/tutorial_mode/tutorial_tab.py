@@ -98,6 +98,10 @@ class TutorialTab(QWidget):
         # a wide view (singlet halo off-panel) and a close view (resolves
         # achromat/APO differences).
         self._focal_zoom_combo: QComboBox | None = None
+        # Eye-blur checkbox (R3.12). For fixed Eye-vs-Detector scenarios: when
+        # checked, the Eye pane uses log_integrated (1″ eye-resolution blur)
+        # instead of plain log.
+        self._eye_blur_check: QCheckBox | None = None
         # Shared-normalisation reference peak (Phase 1.5): the before-side
         # (unobstructed) FFT raw peak, captured during _render_before and
         # applied as the after-side peak_reference so the central-
@@ -336,6 +340,7 @@ class TutorialTab(QWidget):
         self._filter_combo = None
         self._exit_pupil_combo = None
         self._focal_zoom_combo = None
+        self._eye_blur_check = None
         self._realtime_check = None
 
         params = scenario.tweakable_params
@@ -423,7 +428,12 @@ class TutorialTab(QWidget):
         # plot_function but call plot_source_image via
         # secondary_plot_function). `wants_display_combo` computed above.
         if wants_display_combo:
-            self._add_display_stretch_combo(scenario.default_display_stretch)
+            # When the After view is PINNED (fixed Eye-vs-Detector comparison),
+            # hide the free View combo and instead offer an Eye-blur toggle.
+            if scenario.after_display_stretch is None:
+                self._add_display_stretch_combo(scenario.default_display_stretch)
+            elif scenario.show_eye_blur_toggle:
+                self._add_eye_blur_check()
             self._add_exposure_slider(scenario.default_exposure)
         if wants_display_combo and scenario.show_filter_combo:
             self._add_filter_combo(scenario.default_filter)
@@ -708,9 +718,17 @@ class TutorialTab(QWidget):
         live control (per the user's feedback)."""
         if self._exposure_slider is None:
             return
-        stretch = (self._display_stretch_combo.currentData()
-                   if self._display_stretch_combo is not None else "linear")
-        is_eye = stretch in ("log", "log_integrated")
+        scn = self._current_scenario
+        if (scn is not None and self._display_stretch_combo is None
+                and scn.after_display_stretch is not None):
+            # Fixed Eye-vs-Detector layout: exposure acts on the Detector pane,
+            # which is present as long as one side is "linear".
+            is_eye = "linear" not in (scn.after_display_stretch,
+                                      scn.before_display_stretch)
+        else:
+            stretch = (self._display_stretch_combo.currentData()
+                       if self._display_stretch_combo is not None else "linear")
+            is_eye = stretch in ("log", "log_integrated")
         self._exposure_slider.setEnabled(not is_eye)
         if self._exposure_value_label is not None:
             if is_eye:
@@ -900,6 +918,35 @@ class TutorialTab(QWidget):
         self.controls_layout.addLayout(col)
         self._exit_pupil_combo = combo
 
+    def _add_eye_blur_check(self):
+        """Eye-blur toggle for fixed Eye-vs-Detector scenarios (R3.12).
+
+        Switches the Eye pane between plain asinh (log) and asinh + 1″ spatial
+        integration (log_integrated) — the eye's finite spatial resolution at
+        a moderate eyepiece magnification."""
+        col = QVBoxLayout()
+        lbl = QLabel("Eye pane")
+        lbl.setStyleSheet("font-size: 8pt; font-weight: normal; color: #555;")
+        check = QCheckBox("Eye blur (1″)")
+        check.setChecked(False)
+        check.setToolTip(
+            "Add the eye's ~1″ spatial integration to the Eye pane\n"
+            "(log → log_integrated). Models finite eye resolution at a\n"
+            "moderate eyepiece; softens fine structure the same way the\n"
+            "eye would.")
+        check.stateChanged.connect(self._on_update_clicked)
+        col.addWidget(lbl)
+        col.addWidget(check)
+        self.controls_layout.addLayout(col)
+        self._eye_blur_check = check
+
+    def _eye_stretch(self) -> str:
+        """The Eye pane's stretch: log, or log_integrated when eye-blur is on."""
+        if (self._eye_blur_check is not None
+                and self._eye_blur_check.isChecked()):
+            return "log_integrated"
+        return "log"
+
     # Focal-zoom options (arcsec x-range) for the chromatic focal-plane
     # radial-profile panel. Wide shows the singlet halo off-panel; Close
     # resolves the achromat / APO-doublet / APO-triplet differences.
@@ -1088,6 +1135,10 @@ class TutorialTab(QWidget):
         if stretch is None:
             stretch = (self._display_stretch_combo.currentData()
                        if self._display_stretch_combo is not None else "linear")
+        # When the Before pane is the Eye ("log"), the eye-blur toggle may
+        # promote it to log_integrated (R3.12 fixed Eye-vs-Detector layout).
+        if stretch == "log":
+            stretch = self._eye_stretch()
         flt = scenario.before_filter
         if flt is None:
             flt = self._current_filter(scenario)
@@ -1277,8 +1328,17 @@ class TutorialTab(QWidget):
 
         focus_wl = (self._focus_wavelength_combo.currentData()
                     if self._focus_wavelength_combo is not None else 550.0)
-        stretch = (self._display_stretch_combo.currentData()
-                   if self._display_stretch_combo is not None else "linear")
+        # After-side stretch: a pinned view (fixed Eye-vs-Detector comparison)
+        # takes precedence over the free View combo. When the pinned after view
+        # is the Eye ("log"), the eye-blur toggle may promote it to
+        # log_integrated.
+        if scenario.after_display_stretch is not None:
+            stretch = scenario.after_display_stretch
+            if stretch == "log":
+                stretch = self._eye_stretch()
+        else:
+            stretch = (self._display_stretch_combo.currentData()
+                       if self._display_stretch_combo is not None else "linear")
 
         exposure = self._current_exposure(scenario)
         flt = self._current_filter(scenario)

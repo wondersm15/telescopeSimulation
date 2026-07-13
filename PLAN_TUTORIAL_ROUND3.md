@@ -357,6 +357,21 @@ user input · 💤 deferred by user.
   is on the left and detector on the right" — apparent contradiction. Need the
   intended final layout before building (it's a redesign: pin both panes, drop
   the View combo, add an eye-blur toggle).
+- 2026-07-12 (Batch B cont.): **Decision 1 = keep (a)** — grounded by data: the
+  green core is the REAL chromatic signature and fades to the star's true colour
+  as objective improves (singlet/achromat green → apo-triplet ≈ true blue-white;
+  R/B defocus 5000→30 µm). No change; the objective selector already teaches it.
+  User may still opt (c) later.
+  **Decision 2 = 2a.** **R3.12 ✅** implemented: new `after_display_stretch`
+  (pins the After pane + hides the View combo) and `show_eye_blur_toggle` +
+  `_add_eye_blur_check`. exposure_demo is now Eye LEFT (pinned, eye-blur toggle)
+  / Detector RIGHT (pinned linear, exposure acts). Reframed the description:
+  APERTURE affects BOTH panes; EXPOSURE is the detector's time-integration knob
+  (one of several brightness influences), not "the whole lesson". Verified via
+  tab: no View combo, eye-blur present, exposure changes only the detector,
+  aperture changes both. Test updated. 394 pass.
+- **Batch B remaining: R3.15 (Bright+Dim — reuse the fixed Eye/Detector layout,
+  define HDR, multi-star source), R3.4 (P&P linear-vs-log-eye + evidence).**
 
 ---
 

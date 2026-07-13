@@ -702,13 +702,14 @@ class TestPerSideDisplayControls:
         assert s.default_filter != "None"            # after applies a filter
         assert s.default_display_stretch == "linear"  # detector saturation lesson
 
-    def test_exposure_demo_detector_vs_eye_live(self):
-        # B8 redesign: live Detector (left) vs Eye (right), both tracking the
-        # same exposure/aperture — no fixed "before 0.1x" baseline.
+    def test_exposure_demo_fixed_eye_left_detector_right(self):
+        # R3.12: fixed Eye-vs-Detector layout — Eye left (pinned, eye-blur
+        # toggle), Detector right (pinned linear, exposure acts). No View combo.
         s = self._scn("exposure_demo")
-        assert s.before_display_stretch == "linear"   # Detector (left)
-        assert s.default_display_stretch == "log"      # Eye (right)
-        assert s.before_exposure is None               # both follow live slider
+        assert s.before_display_stretch == "log"       # Eye (left)
+        assert s.after_display_stretch == "linear"     # Detector (right, pinned)
+        assert s.show_eye_blur_toggle is True
+        assert s.before_exposure is None               # aperture drives both
         assert s.both_sides_dynamic
 
     def test_exposure_demo_star_is_coloured(self):
