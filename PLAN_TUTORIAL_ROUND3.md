@@ -409,6 +409,29 @@ user input · 💤 deferred by user.
     chromatic ray trace (R3.6a), spherical ray trace. Broader audit of remaining
     modules (ray fan, coma, etc.) still to sweep in the propagation pass (G).
   - 395 tests pass.
+- 2026-07-13 (Batch D, partial):
+  - **R3.2 ✅** Rayleigh fixed FOV — `DoubleStar` gained a
+    `field_extent_arcsec` override; the rayleigh scenario pins it to 15.0″ so the
+    plot's spatial extent stays ±7.5″ while only the two stars move as separation
+    sweeps 0.5–8.0″. Verified extent constant across separations.
+  - **R3.1 ✅** Airy pixelation — `plot_psf_2d` imshow now uses
+    `interpolation="bilinear"`, smoothing the blocky small-aperture PSF (verified
+    a 60 mm f/16.7 render: clean rings, no checkerboard). (b) Overlay-toggle audit:
+    `airy_disk` IS wired into `OVERLAY_FUNCTIONS`; toggling on/off changes the
+    render (cyan theory circle appears/disappears) — working, not dead.
+  - **R3.11b ✅** Coma spot grid recoloured — dropped the cyan/gold pair. Dots are
+    now coloured by **pupil zone** on the SAME viridis-on-|h| scale as the ray fan
+    (`compute_coma_spot` gained `return_pupil_radius`; shared colorbar added), so
+    the comet tail visibly grows from the bright marginal rays while dark central
+    rays stay at focus. Airy circle → neutral white on a dark panel. Also tightened
+    the fixed spot window ±50→±12 µm (the old range was sized for a 240″ sample
+    that no longer exists after angles were retuned to ≤120″, leaving tiny dots):
+    now f/4 shows a clear comet (~45% of panel) and f/8's comet fits *inside* the
+    Airy disk (diffraction-limited) — the f-ratio lesson reads straight off the
+    grid. 2 new aberration tests; 24 coma/aberration/spot tests pass.
+  - **R3.11a (ray-fan DEFAULT) — STILL OPEN:** left panel switchable to an
+    off-axis ray-fan view as default (needs an off-axis coma ray-fan generator).
+  - **R3.10 — STILL OPEN:** aperture-vs-seeing right-pane toggles.
 
 ---
 

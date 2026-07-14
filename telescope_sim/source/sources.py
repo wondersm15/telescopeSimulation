@@ -106,14 +106,21 @@ class DoubleStar(AstronomicalSource):
         separation_arcsec: Angular separation between the two stars.
         magnitude_primary: Apparent magnitude of the primary (brighter) star.
         magnitude_secondary: Apparent magnitude of the secondary star.
+        field_extent_arcsec: Optional FIXED field of view (arcsec). When None
+            (default) the FOV scales with the separation. When set, the FOV
+            stays constant as the separation changes — so the plot's spatial
+            extent doesn't jump around while a resolution slider is dragged
+            (the Rayleigh scenario uses this).
     """
 
     def __init__(self, separation_arcsec: float = 1.0,
                  magnitude_primary: float = 0.0,
-                 magnitude_secondary: float = 0.0):
+                 magnitude_secondary: float = 0.0,
+                 field_extent_arcsec: float | None = None):
         self.separation_arcsec = separation_arcsec
         self.magnitude_primary = magnitude_primary
         self.magnitude_secondary = magnitude_secondary
+        self._fixed_extent = field_extent_arcsec
 
     def render_ideal(self, half_fov_arcsec: float,
                      num_pixels: int) -> np.ndarray:
@@ -140,6 +147,8 @@ class DoubleStar(AstronomicalSource):
 
     @property
     def field_extent_arcsec(self) -> float:
+        if self._fixed_extent is not None:
+            return self._fixed_extent
         return max(self.separation_arcsec * 10.0, 10.0)
 
 

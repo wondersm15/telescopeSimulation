@@ -15,7 +15,8 @@ def compute_coma_spot(field_angle_arcsec: float, focal_length: float,
                       primary_diameter: float,
                       obstruction_ratio: float = 0.0,
                       num_pupil_zones: int = 50,
-                      num_azimuthal: int = 72):
+                      num_azimuthal: int = 72,
+                      return_pupil_radius: bool = False):
     """Compute 2D coma spot positions at the focal plane.
 
     For a parabolic primary at field angle theta, third-order Seidel coma
@@ -37,10 +38,16 @@ def compute_coma_spot(field_angle_arcsec: float, focal_length: float,
         obstruction_ratio: Central obstruction ratio (0.0 to <1.0).
         num_pupil_zones: Number of radial zones across the pupil.
         num_azimuthal: Number of azimuthal samples per zone.
+        return_pupil_radius: If True, also return the normalized pupil
+            radius (0 at center, 1 at the mirror edge) of each ray, so
+            callers can colour the spot by pupil zone the same way the
+            ray-fan plot does.
 
     Returns:
         Tuple of (x_offsets, y_offsets) arrays in mm, each of shape
-        (num_pupil_zones * num_azimuthal,).
+        (num_pupil_zones * num_azimuthal,). If ``return_pupil_radius``
+        is True, a third array of the same shape holding the normalized
+        pupil radius (|h| / r_max) of each ray is appended.
     """
     theta_rad = field_angle_arcsec / 206265.0
 
@@ -67,6 +74,10 @@ def compute_coma_spot(field_angle_arcsec: float, focal_length: float,
     # Focal plane positions
     x_offsets = C_s * (2.0 + np.cos(2.0 * pp))
     y_offsets = C_s * np.sin(2.0 * pp)
+
+    if return_pupil_radius:
+        pupil_radius_norm = hh / r_max if r_max > 0 else np.zeros_like(hh)
+        return x_offsets, y_offsets, pupil_radius_norm
 
     return x_offsets, y_offsets
 

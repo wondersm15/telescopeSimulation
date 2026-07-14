@@ -2,6 +2,48 @@
 
 ---
 
+## Tutorial Tab — Round 3 (verbatim-feedback rework): Batches A–C done, D in progress
+
+**Date:** 2026-07-12 → 2026-07-13
+**Branch:** `feature/tutorial-testing-tab`
+**Authoritative ledger:** `PLAN_TUTORIAL_ROUND3.md` — records the user's verbatim
+Round-3 feedback (R3.1–R3.21), per-item root-cause diagnosis, the §I batched
+implementation plan, and a per-session progress log with ✅/open status for every
+item. **Read that file to resume; this is a running summary only.**
+
+Work is organised into batches A–G; each batch = implement → verify through the
+real GUI navigation/toggles (not a `_load_scenario` bypass) → pytest → ledger →
+commit.
+
+- **Batch A ✅ (star field, R3.20):** spider spikes retuned to read as spikes not
+  blur (root cause: FFT spider ring aliasing on downsample → Gaussian anti-alias
+  pre-filter); magnitude-dependent colour desaturation (faint→white, bright→tint)
+  in `ShowcaseStarField`; coma kept realistic (option B) with a note. Sidebar
+  Act-4 bug fixed (was hardcoded `[1,2,3]`, hiding Act 4 → data-driven).
+- **Batch B ✅ (brightness/eye-vs-detector, R3.12/R3.15/R3.9/R3.4):** exposure
+  reframed as Brightness & Saturation (Eye left/Detector right); new
+  `DynamicRangeField` (7 stars mag −1…6.5) for HDR; chromatic+seeing dimness
+  fixed (peak-normalize chromatic kernels to the sharpest channel: peak 0.16→0.83);
+  new "Detector vs Eye" Parameters & Physics section (Weber–Fechner, Pogson).
+- **Batch C ✅ (chromatic + spherical ray traces, R3.6/R3.8):** legends moved out
+  of the plots into whitespace; idealised rays now stop at focus (no diverging
+  fan artifact); focal-zoom panel titled + boxed on the trace; ray-fan axis
+  relabelled Δy→Δx; spherical-SA focal-region zoom inset; new "Reading the ray
+  fan (aberration signatures)" P&P subsection.
+- **Batch D (resolution) — partial this session:**
+  - **R3.2 ✅** Rayleigh fixed FOV — `DoubleStar.field_extent_arcsec` override
+    pins the plot to ±7.5″ while only the stars move as separation sweeps.
+  - **R3.1 ✅** Airy pixelation — `plot_psf_2d` imshow `interpolation="bilinear"`
+    smooths small-aperture PSFs; overlay-toggle audit confirms `airy_disk` is
+    live (not a dead toggle).
+  - **R3.11b ✅** Coma spot grid recoloured by **pupil zone** (viridis-on-|h|,
+    matching the ray fan; `compute_coma_spot` gained `return_pupil_radius`; shared
+    colorbar; Airy circle → neutral white). Fixed spot window ±50→±12 µm so the
+    f/4 comet is clearly visible and the f/8 comet fits inside the Airy disk
+    (diffraction-limited) — the f-ratio lesson now reads straight off the grid.
+  - **Open:** R3.11a (left panel switchable to an off-axis ray-fan DEFAULT),
+    R3.10 (aperture-vs-seeing right-pane toggles), then Batches E–G.
+
 ## Tutorial Tab — Round 2 (user-feedback redesign): Batch 1 DONE
 
 **Date:** 2026-06-29

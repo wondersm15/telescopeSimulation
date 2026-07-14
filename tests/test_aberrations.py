@@ -45,6 +45,28 @@ class TestComputeComaSpot:
         assert x.shape == (n_zones * n_azimuth,)
         assert y.shape == (n_zones * n_azimuth,)
 
+    def test_return_pupil_radius_shape_and_range(self):
+        """With return_pupil_radius, a third normalized-radius array is
+        returned: same shape, spanning obstruction..1.0 (edge)."""
+        n_zones, n_azimuth = 20, 36
+        x, y, pr = compute_coma_spot(60.0, 1000.0, 200.0,
+                                     obstruction_ratio=0.2,
+                                     num_pupil_zones=n_zones,
+                                     num_azimuthal=n_azimuth,
+                                     return_pupil_radius=True)
+        assert pr.shape == (n_zones * n_azimuth,)
+        # Normalized pupil radius: inner edge = obstruction ratio, outer = 1.
+        assert np.isclose(pr.min(), 0.2, atol=1e-6)
+        assert np.isclose(pr.max(), 1.0, atol=1e-6)
+        # Marginal (edge) rays land farthest out along the comet tail.
+        edge = pr >= 0.99
+        assert np.max(x[edge]) >= np.max(x[~edge]) - 1e-12
+
+    def test_return_pupil_radius_backward_compatible(self):
+        """Default call still returns exactly two arrays (no radius)."""
+        result = compute_coma_spot(60.0, 1000.0, 200.0)
+        assert len(result) == 2
+
     def test_tangential_larger_than_sagittal(self):
         """Max x offset should be ~3x the max y offset (sagittal coma).
 
