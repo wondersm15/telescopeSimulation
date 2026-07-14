@@ -41,8 +41,14 @@ commit.
     colorbar; Airy circle → neutral white). Fixed spot window ±50→±12 µm so the
     f/4 comet is clearly visible and the f/8 comet fits inside the Airy disk
     (diffraction-limited) — the f-ratio lesson now reads straight off the grid.
-  - **Open:** R3.11a (left panel switchable to an off-axis ray-fan DEFAULT),
-    R3.10 (aperture-vs-seeing right-pane toggles), then Batches E–G.
+  - **R3.11a ✅** Coma left panel switchable via `plot_coma_field_analysis(
+    view_mode=…)`: "ray_fan" (new DEFAULT — a Seidel coma parabola Δx = 3·θ·h²/(4f)
+    vs signed pupil height, both pupil edges bending the same way, pupil-zone
+    coloured with an Airy band) or "spot_grid" (the 2D comets). Refactored into
+    `_draw_coma_rms_panel` / `_draw_coma_spot_grid` / `_draw_coma_ray_fan_panel`.
+    New "Coma view" GUI combo (`show_coma_view_combo`) wired through the runner;
+    tab-harness verified.
+  - **Open:** R3.10 (aperture-vs-seeing right-pane toggles), then Batches E–G.
 
 ## Tutorial Tab — Round 2 (user-feedback redesign): Batch 1 DONE
 

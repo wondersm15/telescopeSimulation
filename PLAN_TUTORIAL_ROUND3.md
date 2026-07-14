@@ -164,9 +164,11 @@ user input · 💤 deferred by user.
 > shows where the contribution of the coma effect comes from consistent with the
 > color scale of the ray fan (i.e., you can see where more marginal rays come
 > from etc.)."
-- ⬜ (a) Left plot: switchable between the ray-fan plot (DEFAULT) and the current
-  spot-grid implementation.
-- ⬜ (b) Replace the cyan/yellow colouring with pupil-zone colour coding
+- ✅ (a) Left plot: switchable between the ray-fan plot (DEFAULT) and the current
+  spot-grid implementation. `plot_coma_field_analysis(view_mode=…)` + a "Coma
+  view" GUI combo (ray-fan default); verified via the tab harness (default left
+  title = "Coma ray fan @ 120″", switch → "RMS Coma vs Field Angle").
+- ✅ (b) Replace the cyan/yellow colouring with pupil-zone colour coding
   consistent with the ray-fan colormap (show where marginal-ray contribution
   comes from).
 
@@ -429,8 +431,20 @@ user input · 💤 deferred by user.
     now f/4 shows a clear comet (~45% of panel) and f/8's comet fits *inside* the
     Airy disk (diffraction-limited) — the f-ratio lesson reads straight off the
     grid. 2 new aberration tests; 24 coma/aberration/spot tests pass.
-  - **R3.11a (ray-fan DEFAULT) — STILL OPEN:** left panel switchable to an
-    off-axis ray-fan view as default (needs an off-axis coma ray-fan generator).
+  - **R3.11a ✅** Coma left panel is now switchable. `plot_coma_field_analysis`
+    gained `view_mode` ("ray_fan" default / "spot_grid") + `ray_fan_field_arcsec`.
+    Refactored the RMS panel, spot grid, and a NEW Seidel coma ray-fan panel into
+    `_draw_coma_rms_panel` / `_draw_coma_spot_grid` / `_draw_coma_ray_fan_panel`
+    (no duplication). The ray fan plots the tangential coma transverse error
+    Δx = 3·θ·h²/(4f) vs signed pupil height — a PARABOLA (both pupil edges bend
+    the same way), pupil-zone coloured, with an Airy band so a slow scope reads as
+    diffraction-limited. Uses the SAME Seidel model as the spot grid so the two
+    views agree. Verified f/3 (parabola bursts out of the Airy band) vs f/8 (shallow
+    parabola contained in the band). Wired `coma_view_mode` through
+    `run_scenario_side`/`_call_plot_function`; new "Coma view" GUI combo (ray-fan
+    default) on `fratio_coma` (`show_coma_view_combo`); description updated.
+    Tab-harness verified: default left = "Coma ray fan @ 120″", switch → "RMS Coma
+    vs Field Angle". +2 runner tests; 399 pass.
   - **R3.10 — STILL OPEN:** aperture-vs-seeing right-pane toggles.
 
 ---

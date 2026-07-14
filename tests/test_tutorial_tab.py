@@ -274,6 +274,32 @@ class TestScenarioRunner:
         assert err is None
         plt.close(fig)
 
+    def test_run_coma_ray_fan_is_default(self):
+        """The coma scenario defaults to the ray-fan view (R3.11a): left
+        panel titled 'Coma ray fan …', not the RMS curve."""
+        from telescope_gui.tutorial_mode.scenario_registry import get_scenario_by_id
+        from telescope_gui.tutorial_mode.scenario_runner import run_scenario_side
+        s = get_scenario_by_id("fratio_coma")
+        assert s.show_coma_view_combo is True
+        fig, info, err = run_scenario_side(
+            s.before_telescope, s.before_source, s.plot_function)
+        assert err is None
+        assert "ray fan" in fig.axes[0].get_title().lower()
+        plt.close(fig)
+
+    def test_run_coma_spot_grid_switch(self):
+        """Passing coma_view_mode='spot_grid' switches the left panel to the
+        RMS-vs-field curve (the spot-grid view)."""
+        from telescope_gui.tutorial_mode.scenario_registry import get_scenario_by_id
+        from telescope_gui.tutorial_mode.scenario_runner import run_scenario_side
+        s = get_scenario_by_id("fratio_coma")
+        fig, info, err = run_scenario_side(
+            s.before_telescope, s.before_source, s.plot_function,
+            coma_view_mode="spot_grid")
+        assert err is None
+        assert "rms coma" in fig.axes[0].get_title().lower()
+        plt.close(fig)
+
     def test_run_fratio_coma(self):
         from telescope_gui.tutorial_mode.scenario_registry import get_scenario_by_id
         from telescope_gui.tutorial_mode.scenario_runner import run_scenario_side

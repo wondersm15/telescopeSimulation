@@ -3673,6 +3673,138 @@ def plot_coma_spot(
     return fig
 
 
+def _draw_coma_rms_panel(ax, angles, rms_values, airy_radius_mm, cff,
+                         max_field_arcsec):
+    """Context panel: RMS coma vs field angle with Airy + coma-free refs.
+
+    Shared by both coma views (ray-fan and spot-grid) so the f-ratio story
+    — coma grows linearly with field angle and the coma-free field shrinks
+    as f² — is always on screen.
+    """
+    ax.plot(angles, rms_values * 1000, "b-", linewidth=2, label="RMS coma")
+    ax.axhline(airy_radius_mm * 1000, color="red", linestyle="--", alpha=0.7,
+               label=f"Airy radius: {airy_radius_mm * 1000:.2f} µm")
+    if cff > 0 and cff <= max_field_arcsec:
+        ax.axvline(cff, color="green", linestyle="--", alpha=0.7,
+                   label=f"Coma-free field: {cff:.1f}\"")
+    ax.set_xlabel("Off-axis angle (arcsec)")
+    ax.set_ylabel("RMS coma (µm)")
+    ax.set_title("RMS Coma vs Field Angle")
+    ax.legend(fontsize=8)
+    ax.grid(True, alpha=0.3)
+    # Fixed range so changing f-ratio rescales the curve, not the axes.
+    ax.set_xlim(0, max_field_arcsec)
+    ax.set_ylim(0, 20)
+
+
+def _draw_coma_ray_fan_panel(ax, telescope, field_angle_arcsec, obs_ratio,
+                             airy_radius_mm):
+    """Meridional coma ray fan (Seidel model): transverse focal-plane error
+    Δx vs signed pupil entry height h.
+
+    Coma's optical-design signature is a PARABOLA (Δx ∝ h²): BOTH edges of
+    the pupil bend the same way, unlike spherical aberration's odd cubic
+    (S-shape) or defocus's straight line.  This panel uses the SAME Seidel
+    coma coefficient C_s = θ·h²/(4f) as the spot grid, so the two views tell
+    one consistent story, and the SAME viridis-on-|h| pupil colours as the
+    companion ray-fan / ray-trace plots.
+
+    NOTE: Seidel 3rd-order approximation, tangential section — valid for
+    small field angles.
+    """
+    r_max = telescope.primary_diameter / 2.0
+    r_min = r_max * obs_ratio
+    f = telescope.focal_length
+    theta = field_angle_arcsec / 206265.0
+
+    # Signed pupil height across one meridian, skipping the obstructed core.
+    n = 21
+    h_pos = np.linspace(r_min, r_max, n)
+    h_signed = np.concatenate([-h_pos[::-1], h_pos])
+    # Tangential coma transverse aberration Δx = 3·C_s = 3·θ·h²/(4f).
+    # Even in h → a one-sided parabola (the coma signature).
+    dx_um = (3.0 * theta * h_signed ** 2 / (4.0 * f)) * 1000.0
+
+    colors, sm = _pupil_colormap_colors(h_signed)
+    ax.plot(h_signed, dx_um, color="gray", alpha=0.4, linewidth=1.0, zorder=1)
+    ax.scatter(h_signed, dx_um, c=colors, s=55, edgecolors="black",
+               linewidths=0.4, zorder=3)
+    ax.axhline(0.0, color="black", linestyle=":", alpha=0.4, zorder=0)
+    ax.axvline(0.0, color="black", linestyle=":", alpha=0.4, zorder=0)
+
+    # Airy-radius band: coma that stays inside it is diffraction-limited.
+    airy_um = airy_radius_mm * 1000.0
+    ax.axhspan(-airy_um, airy_um, color="red", alpha=0.10, zorder=0,
+               label=f"± Airy radius ({airy_um:.1f} µm)")
+
+    # Floor the y-axis to a physical scale so a slow (corrected) scope reads
+    # as a nearly flat parabola rather than a magnified numerical-noise blob.
+    dx_max = float(np.max(np.abs(dx_um)))
+    y_top = max(dx_max * 1.25, airy_um * 2.5)
+    ax.set_ylim(-y_top * 0.18, y_top)
+
+    ax.set_xlabel("Pupil entry height h (mm)")
+    ax.set_ylabel("Transverse ray error at focal plane, Δx (µm)")
+    ax.set_title(f"Coma ray fan @ {field_angle_arcsec:.0f}″ off-axis")
+    ax.grid(True, alpha=0.3)
+    ax.legend(fontsize=7, loc="upper center")
+    # One-line reading guide anchored in the panel.
+    inside = dx_max <= airy_um
+    verdict = ("coma ≤ Airy radius → diffraction-limited here"
+               if inside else "parabola = coma; both pupil edges bend the "
+               "same way")
+    ax.text(0.5, -0.22, verdict, transform=ax.transAxes, fontsize=7,
+            ha="center", va="top", style="italic", color="gray")
+    return sm
+
+
+def _draw_coma_spot_grid(fig, subspec, spot_data, airy_radius_mm,
+                         shared_lim_um, pupil_cmap, pupil_norm, pupil_sm):
+    """Spot-diagram grid: one small 2D spot per sampled field angle, dots
+    coloured by pupil zone (dark = central, bright = marginal rays).  The
+    comet tail is visibly built from the bright marginal rays.
+    """
+    n_spots = len(spot_data)
+    cols = 2 if n_spots <= 4 else min(n_spots, 3)
+    rows = (n_spots + cols - 1) // cols
+    gs_right = subspec.subgridspec(rows, cols, wspace=0.3, hspace=0.4)
+
+    spot_axes = []
+    for idx, (angle, x_off, y_off, pupil_r) in enumerate(spot_data):
+        r = idx // cols
+        c = idx % cols
+        ax_spot = fig.add_subplot(gs_right[r, c])
+        spot_axes.append(ax_spot)
+
+        if not (np.max(np.abs(x_off)) < 1e-10
+                and np.max(np.abs(y_off)) < 1e-10):
+            ax_spot.scatter(x_off * 1000, y_off * 1000, s=2,
+                            c=pupil_r, cmap=pupil_cmap, norm=pupil_norm,
+                            alpha=0.6, linewidths=0)
+
+        ax_spot.set_xlim(-shared_lim_um, shared_lim_um)
+        ax_spot.set_ylim(-shared_lim_um, shared_lim_um)
+        airy_c = plt.Circle((0, 0), airy_radius_mm * 1000, fill=False,
+                            color="white", linestyle="--",
+                            linewidth=0.9, alpha=0.9)
+        ax_spot.add_patch(airy_c)
+        ax_spot.set_facecolor("#101010")
+        ax_spot.set_aspect("equal")
+        ax_spot.set_title(f"{angle:.0f}\"", fontsize=9)
+        ax_spot.tick_params(labelsize=6)
+        if r == rows - 1:
+            ax_spot.set_xlabel("µm", fontsize=7)
+        if c == 0:
+            ax_spot.set_ylabel("µm", fontsize=7)
+
+    if spot_axes:
+        cbar = fig.colorbar(pupil_sm, ax=spot_axes, fraction=0.046,
+                            pad=0.04, shrink=0.85)
+        cbar.set_label("Pupil zone  (0 = centre, 1 = mirror edge)",
+                       fontsize=7)
+        cbar.ax.tick_params(labelsize=6)
+
+
 def plot_coma_field_analysis(
     telescope: Telescope,
     wavelength_nm: float = 550.0,
@@ -3681,12 +3813,22 @@ def plot_coma_field_analysis(
     spot_angles: list[float] | None = None,
     figsize: tuple[float, float] = (14, 7),
     include_obstruction: bool = True,
+    view_mode: str = "ray_fan",
+    ray_fan_field_arcsec: float = 120.0,
     save_path: str | None = None,
 ) -> plt.Figure:
-    """Two-panel coma field analysis.
+    """Two-panel coma field analysis, switchable between two left views.
 
-    Left: RMS coma vs field angle with Airy radius reference line.
-    Right: Grid of small spot diagrams at several field angles.
+    ``view_mode="ray_fan"`` (default):
+        Left  — coma RAY FAN at ``ray_fan_field_arcsec`` off-axis: the
+                optical-design signature curve (a parabola Δx ∝ h²).
+        Right — RMS coma vs field angle (f-ratio context).
+    ``view_mode="spot_grid"``:
+        Left  — RMS coma vs field angle.
+        Right — grid of 2D spot diagrams at several field angles.
+
+    Both views share the Seidel coma model and the same viridis-on-|h|
+    pupil-zone colour scale as the companion ray-fan / ray-trace plots.
 
     NOTE: Seidel 3rd-order approximation — valid for small field angles.
 
@@ -3699,6 +3841,9 @@ def plot_coma_field_analysis(
             If None, auto-selects representative angles.
         figsize: Figure size in inches.
         include_obstruction: Include central obstruction.
+        view_mode: "ray_fan" (default) or "spot_grid" — selects the left
+            panel's presentation (the right panel follows).
+        ray_fan_field_arcsec: Off-axis field angle for the ray-fan view.
         save_path: If provided, save the figure to this path.
 
     Returns:
@@ -3739,126 +3884,69 @@ def plot_coma_field_analysis(
     fig = plt.figure(figsize=figsize)
     gs = fig.add_gridspec(1, 2, width_ratios=[1, 1.2], wspace=0.3)
 
-    # Left panel: RMS coma vs field angle
-    ax_rms = fig.add_subplot(gs[0])
-    ax_rms.plot(angles, rms_values * 1000, "b-", linewidth=2,
-                label="RMS coma")
-    ax_rms.axhline(airy_radius * 1000, color="red", linestyle="--",
-                    alpha=0.7,
-                    label=f"Airy radius: {airy_radius * 1000:.2f} \u00b5m")
-    if cff > 0 and cff <= max_field_arcsec:
-        ax_rms.axvline(cff, color="green", linestyle="--", alpha=0.7,
-                        label=f"Coma-free field: {cff:.1f}\"")
+    if view_mode == "ray_fan":
+        # LEFT: the ray fan (aberration signature) at a representative angle.
+        ax_fan = fig.add_subplot(gs[0])
+        _draw_coma_ray_fan_panel(ax_fan, telescope, ray_fan_field_arcsec,
+                                 obs_ratio, airy_radius)
+        # RIGHT: the RMS-vs-field context curve.
+        ax_rms = fig.add_subplot(gs[1])
+        _draw_coma_rms_panel(ax_rms, angles, rms_values, airy_radius, cff,
+                             max_field_arcsec)
+        fig.text(
+            0.5, 0.015,
+            "Left: coma's optical-design signature — a PARABOLA "
+            "(Δx ∝ h²), both pupil edges bending the same way "
+            "(vs spherical aberration's S-cubic). Dots coloured by pupil zone "
+            "(dark = centre, bright = marginal). Right: how RMS coma grows with "
+            "field angle for this f-ratio. Slow the scope (raise focal length) "
+            "and the parabola flattens into the Airy band.",
+            fontsize=7, ha="center", va="bottom", style="italic",
+            color="gray", wrap=True)
+    else:
+        # LEFT: RMS-vs-field context curve.
+        ax_rms = fig.add_subplot(gs[0])
+        _draw_coma_rms_panel(ax_rms, angles, rms_values, airy_radius, cff,
+                             max_field_arcsec)
 
-    ax_rms.set_xlabel("Off-axis angle (arcsec)")
-    ax_rms.set_ylabel("RMS coma (\u00b5m)")
-    ax_rms.set_title("RMS Coma vs Field Angle")
-    ax_rms.legend(fontsize=8)
-    ax_rms.grid(True, alpha=0.3)
-    # Fixed range so changing f-ratio rescales the curve, not the axes.
-    # 300\u2033 comfortably covers the 240\u2033 outermost spot panel; 20 \u00b5m covers
-    # the realistic worst case (~200 mm f/3 at 240\u2033) \u2014 extreme f-ratios
-    # may run the curve off the top of the panel, which is the intended
-    # visual cue that coma has blown past the displayable budget.
-    ax_rms.set_xlim(0, max_field_arcsec)
-    ax_rms.set_ylim(0, 20)
-
-    # Right panel: spot diagram grid.
-    # Use a FIXED axis range (independent of f-ratio) so changing f-ratio
-    # produces visible size changes — at f/4 the edge spot fills the panel,
-    # at f/8 the same field angle's spot is much smaller. Range chosen to
-    # accommodate a realistic worst case (200mm f/4 at ~240″).
-    n_spots = len(spot_angles)
-    cols = 2 if n_spots <= 4 else min(n_spots, 3)
-    rows = (n_spots + cols - 1) // cols
-    gs_right = gs[1].subgridspec(rows, cols, wspace=0.3, hspace=0.4)
-
-    # Pre-compute every spot pattern.  Colour each ray by its pupil zone
-    # (dark = central rays, bright = marginal/edge rays) using the SAME
-    # viridis-on-|h| scale as the ray-fan and pupil-coloured ray-trace
-    # plots, so the viewer can read directly where the comet tail's
-    # light comes from: the outer (marginal) pupil zones fling farthest.
-    spot_data = []
-    for angle in spot_angles:
-        x_off, y_off, pupil_r = compute_coma_spot(
-            angle, telescope.focal_length,
-            telescope.primary_diameter, obs_ratio,
-            num_pupil_zones=30, num_azimuthal=36,
-            return_pupil_radius=True,
-        )
-        spot_data.append((angle, x_off, y_off, pupil_r))
-    # Shared pupil-zone colour scale across the whole grid.  The
-    # normalized pupil radius (0..1) means 1.0 always maps to the mirror
-    # edge regardless of aperture, so colours mean the same zone in every
-    # panel and match the companion ray-fan's viridis-on-|h| colorbar.
-    _pupil_norm = plt.Normalize(vmin=0.0, vmax=1.0)
-    _pupil_cmap = plt.get_cmap("viridis")
-    _pupil_sm = plt.cm.ScalarMappable(cmap=_pupil_cmap, norm=_pupil_norm)
-    _pupil_sm.set_array([])
-    # Fixed axis range (independent of f-ratio) so the SAME field angle's
-    # coma visibly shrinks as f-ratio grows.  Sized to the worst sampled
-    # angle (120″): at f/4 the comet fills ~45% of the panel; at f/8 the
-    # comet (2.7 µm) actually fits *inside* the Airy disk (5.4 µm radius),
-    # i.e. it's diffraction-limited and coma is invisible — the key
-    # lesson.  A very fast scope (< f/3) may overrun the panel, which is
-    # the intended "coma blew past the budget" cue (matches the RMS
-    # panel's fixed y-limit).  Previously ±50 µm, sized for a 240″ sample
-    # that no longer exists after the angles were retuned to ≤120″, which
-    # left every spot a tiny dot.
-    shared_lim_um = 12.0
-
-    spot_axes = []
-    for idx, (angle, x_off, y_off, pupil_r) in enumerate(spot_data):
-        r = idx // cols
-        c = idx % cols
-        ax_spot = fig.add_subplot(gs_right[r, c])
-        spot_axes.append(ax_spot)
-
-        if not (np.max(np.abs(x_off)) < 1e-10
-                and np.max(np.abs(y_off)) < 1e-10):
-            # Colour each intersection by its pupil zone so the comet
-            # tail visibly grows out of the marginal (bright/yellow)
-            # rays while the central (dark/purple) rays stay near the
-            # ideal focus — the same story the ray-fan tells.
-            ax_spot.scatter(x_off * 1000, y_off * 1000, s=2,
-                            c=pupil_r, cmap=_pupil_cmap, norm=_pupil_norm,
-                            alpha=0.6, linewidths=0)
-
-        ax_spot.set_xlim(-shared_lim_um, shared_lim_um)
-        ax_spot.set_ylim(-shared_lim_um, shared_lim_um)
-
-        # Neutral (white) Airy-disk reference — no longer cyan, so the
-        # only colours in the panel encode pupil zone.
-        airy_c = plt.Circle((0, 0), airy_radius * 1000, fill=False,
-                              color="white", linestyle="--",
-                              linewidth=0.9, alpha=0.9)
-        ax_spot.add_patch(airy_c)
-        ax_spot.set_facecolor("#101010")
-        ax_spot.set_aspect("equal")
-        ax_spot.set_title(f"{angle:.0f}\"", fontsize=9)
-        ax_spot.tick_params(labelsize=6)
-        if r == rows - 1:
-            ax_spot.set_xlabel("µm", fontsize=7)
-        if c == 0:
-            ax_spot.set_ylabel("µm", fontsize=7)
-
-    # Shared pupil-zone colorbar for the whole spot grid (matches the
-    # ray-fan colorbar: dark = pupil centre, bright = mirror edge).
-    if spot_axes:
-        cbar = fig.colorbar(_pupil_sm, ax=spot_axes, fraction=0.046,
-                            pad=0.04, shrink=0.85)
-        cbar.set_label("Pupil zone  (0 = centre, 1 = mirror edge)",
-                       fontsize=7)
-        cbar.ax.tick_params(labelsize=6)
-
-    fig.text(0.72, 0.02,
-             "Dots: ray intersections from a grid of pupil zones and azimuths, "
-             "coloured by pupil zone\n"
-             "(dark = central rays, bright = marginal/edge rays — same scale as "
-             "the ray fan).\n"
-             "The comet tail is built almost entirely from the bright marginal "
-             "rays. White circle = Airy disk.",
-             fontsize=7, ha="center", va="bottom", style="italic", color="gray")
+        # RIGHT: spot-diagram grid.  Pre-compute every spot pattern, colouring
+        # each ray by its pupil zone on the shared viridis-on-|h| scale so the
+        # comet tail visibly grows out of the marginal rays.
+        spot_data = []
+        for angle in spot_angles:
+            x_off, y_off, pupil_r = compute_coma_spot(
+                angle, telescope.focal_length,
+                telescope.primary_diameter, obs_ratio,
+                num_pupil_zones=30, num_azimuthal=36,
+                return_pupil_radius=True,
+            )
+            spot_data.append((angle, x_off, y_off, pupil_r))
+        # Fixed 0..1 normalized pupil-radius scale so 1.0 always maps to the
+        # mirror edge regardless of aperture (colours mean the same zone in
+        # every panel and match the ray-fan colorbar).
+        pupil_norm = plt.Normalize(vmin=0.0, vmax=1.0)
+        pupil_cmap = plt.get_cmap("viridis")
+        pupil_sm = plt.cm.ScalarMappable(cmap=pupil_cmap, norm=pupil_norm)
+        pupil_sm.set_array([])
+        # Fixed spot window (independent of f-ratio) so the SAME field angle's
+        # coma visibly shrinks as f-ratio grows.  Sized to the worst sampled
+        # angle (120″): at f/4 the comet fills ~45% of the panel; at f/8 the
+        # comet (2.7 µm) fits *inside* the Airy disk (5.4 µm radius) —
+        # it's diffraction-limited and coma is invisible, the key lesson.  A
+        # very fast scope (< f/3) may overrun the panel, the intended "coma
+        # blew past the budget" cue.
+        shared_lim_um = 12.0
+        _draw_coma_spot_grid(fig, gs[1], spot_data, airy_radius,
+                             shared_lim_um, pupil_cmap, pupil_norm, pupil_sm)
+        fig.text(
+            0.72, 0.015,
+            "Dots: ray intersections over a grid of pupil zones and azimuths, "
+            "coloured by pupil zone\n"
+            "(dark = central rays, bright = marginal/edge rays — same scale "
+            "as the ray fan).\n"
+            "The comet tail is built almost entirely from the bright marginal "
+            "rays. White circle = Airy disk.",
+            fontsize=7, ha="center", va="bottom", style="italic", color="gray")
 
     fig.suptitle(f"Coma Field Analysis — {telescope.primary_diameter:.0f}mm "
                  f"f/{f_ratio:.1f}", fontsize=13)

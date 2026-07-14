@@ -98,6 +98,10 @@ class TutorialTab(QWidget):
         # a wide view (singlet halo off-panel) and a close view (resolves
         # achromat/APO differences).
         self._focal_zoom_combo: QComboBox | None = None
+        # Coma-view combo (R3.11a). Shown for the f-ratio/coma scenario;
+        # switches the coma-analysis left panel between the ray-fan signature
+        # (default) and the 2D spot-diagram grid.
+        self._coma_view_combo: QComboBox | None = None
         # Eye-blur checkbox (R3.12). For fixed Eye-vs-Detector scenarios: when
         # checked, the Eye pane uses log_integrated (1″ eye-resolution blur)
         # instead of plain log.
@@ -340,6 +344,7 @@ class TutorialTab(QWidget):
         self._filter_combo = None
         self._exit_pupil_combo = None
         self._focal_zoom_combo = None
+        self._coma_view_combo = None
         self._eye_blur_check = None
         self._realtime_check = None
 
@@ -421,6 +426,10 @@ class TutorialTab(QWidget):
         # Focal-zoom toggle (B4) for the chromatic focal-plane image.
         if scenario.show_focal_zoom_combo:
             self._add_focal_zoom_combo()
+
+        # Coma-view toggle (R3.11a): ray-fan signature (default) vs spot grid.
+        if scenario.show_coma_view_combo:
+            self._add_coma_view_combo()
 
         # Display-stretch toggle (linear / log) for any scenario whose
         # after-side renders a source image (so the toggle is available
@@ -988,6 +997,43 @@ class TutorialTab(QWidget):
             return None
         return self._focal_zoom_combo.currentData()
 
+    _COMA_VIEW_OPTIONS = [
+        ("ray_fan", "Ray fan (signature)"),
+        ("spot_grid", "Spot grid (2D comets)"),
+    ]
+
+    def _add_coma_view_combo(self):
+        """View dropdown for the coma-analysis left panel (R3.11a).
+
+        Switches between the ray-fan view (DEFAULT — coma's optical-design
+        signature, a parabola where both pupil edges bend the same way) and
+        the spot-diagram grid (the 2D comet shapes across the field)."""
+        col = QVBoxLayout()
+        lbl = QLabel("Coma view")
+        lbl.setStyleSheet(
+            "font-size: 8pt; font-weight: normal; color: #555;")
+        combo = QComboBox()
+        for mode, text in self._COMA_VIEW_OPTIONS:
+            combo.addItem(text, mode)
+        combo.setCurrentIndex(0)  # Ray-fan default
+        combo.setToolTip(
+            "Left panel of the coma analysis.\n"
+            "Ray fan: transverse ray error vs pupil height — coma is a\n"
+            "parabola (both pupil edges bend the same way).\n"
+            "Spot grid: the 2D comet shapes at several field angles."
+        )
+        combo.currentIndexChanged.connect(self._on_update_clicked)
+        col.addWidget(lbl)
+        col.addWidget(combo)
+        self.controls_layout.addLayout(col)
+        self._coma_view_combo = combo
+
+    def _current_coma_view(self) -> str:
+        """Return the selected coma view mode ('ray_fan' or 'spot_grid')."""
+        if self._coma_view_combo is None:
+            return "ray_fan"
+        return self._coma_view_combo.currentData()
+
     # Index of the "F=C plane" item in the focus-wavelength combo (kept
     # as a constant so the sync logic doesn't drift from the addItem
     # order in _add_focus_wavelength_combo).
@@ -1228,6 +1274,7 @@ class TutorialTab(QWidget):
             exit_pupil_mm=disp["exit_pupil_mm"],
             idealize_sa=scenario.idealize_singlet_sa,
             focal_zoom_arcsec=self._current_focal_zoom(scenario),
+            coma_view_mode=self._current_coma_view(),
         )
         if err:
             self.status_label.setText("Before render failed")
@@ -1364,6 +1411,7 @@ class TutorialTab(QWidget):
             peak_reference=peak_ref,
             idealize_sa=scenario.idealize_singlet_sa,
             focal_zoom_arcsec=self._current_focal_zoom(scenario),
+            coma_view_mode=self._current_coma_view(),
         )
 
         if err:

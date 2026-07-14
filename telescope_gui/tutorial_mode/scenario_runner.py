@@ -98,6 +98,7 @@ def run_scenario_side(
     peak_reference: float | None = None,
     idealize_sa: bool = False,
     focal_zoom_arcsec: float | None = None,
+    coma_view_mode: str = "ray_fan",
 ) -> tuple[Figure | None, dict, str | None]:
     """Run one side (before or after) of a scenario.
 
@@ -126,6 +127,7 @@ def run_scenario_side(
             peak_reference=peak_reference,
             idealize_sa=idealize_sa,
             focal_zoom_arcsec=focal_zoom_arcsec,
+            coma_view_mode=coma_view_mode,
         )
         info["telescope"] = telescope
         info["source"] = source
@@ -154,6 +156,7 @@ def _call_plot_function(
     peak_reference: float | None = None,
     idealize_sa: bool = False,
     focal_zoom_arcsec: float | None = None,
+    coma_view_mode: str = "ray_fan",
 ) -> tuple[Figure, dict]:
     """Dispatch to the appropriate telescope_sim plot function."""
     from telescope_sim.plotting import (
@@ -230,6 +233,7 @@ def _call_plot_function(
             telescope,
             wavelength_nm=wavelength_nm,
             figsize=figsize,
+            view_mode=coma_view_mode,
         )
         return fig, {"plot_function": name}
 

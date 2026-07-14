@@ -198,6 +198,11 @@ class ScenarioDefinition:
     # differences. Only meaningful for plot_chromatic_focal_planes.
     show_focal_zoom_combo: bool = False
 
+    # When True, expose a "Coma view" combo (Ray fan / Spot grid) on the
+    # coma analysis (plot_coma_field_analysis): the ray fan is the default
+    # optical-design signature view; the spot grid is the 2D-comet view.
+    show_coma_view_combo: bool = False
+
 
 # ---------------------------------------------------------------------------
 # Shared telescope configs used across multiple scenarios
@@ -774,8 +779,10 @@ SCENARIOS: list[ScenarioDefinition] = [
             "Coma is comet-shaped off-axis blur; angular coma scales as 1/f\u00b2, so a "
             "fast scope (small f-ratio) suffers \u2014 the coma-free field shrinks as f\u00b2. "
             "Default: 200 mm f/3 (a fast Newtonian where coma is dramatic at the edges), "
-            "1.5\u2033 \u2018good\u2019 atmospheric seeing. Left panel shows a spot-diagram grid "
-            "across the field at 0/30/60/120 arcsec off-axis; the right panel shows "
+            "1.5\u2033 \u2018good\u2019 atmospheric seeing. Left panel (Coma view = Ray fan, default) "
+            "shows coma's optical-design signature \u2014 a parabola (\u0394x \u221d h\u00b2) where both "
+            "pupil edges bend the same way; switch Coma view to \u2018Spot grid\u2019 for the 2D "
+            "comet shapes at 0/30/60/120 arcsec off-axis. The right panel shows "
             "the same field as colored points so you can see comatic stars near the edge. "
             "Field-angle context: 120\u2033 = 2 arcmin \u2248 the corner of a typical eyepiece "
             "view at high magnification (a 50\u00b0 AFOV eyepiece at 150\u00d7 shows 20 arcmin TFOV, "
@@ -803,6 +810,7 @@ SCENARIOS: list[ScenarioDefinition] = [
         after_label="Star field \u2014 same field angles as spot grid \u2192",
         plot_function="plot_coma_field_analysis",
         secondary_plot_function="plot_source_image",
+        show_coma_view_combo=True,
         theory_function="compute_coma_fratio_theory",
         tweakable_params=("focal_length", "diameter"),
         both_sides_dynamic=True,
