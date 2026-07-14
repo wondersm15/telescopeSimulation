@@ -203,6 +203,13 @@ class ScenarioDefinition:
     # optical-design signature view; the spot grid is the 2D-comet view.
     show_coma_view_combo: bool = False
 
+    # When True, expose "Aperture diffraction" and "Atmospheric seeing"
+    # checkboxes on the AFTER side (R3.10, aperture_vs_seeing): each toggles
+    # its effect in the render AND its reference circle in the overlay, so
+    # the viewer can isolate which limit dominates. The BEFORE side stays a
+    # fixed both-limits reference.
+    show_resolution_toggles: bool = False
+
 
 # ---------------------------------------------------------------------------
 # Shared telescope configs used across multiple scenarios
@@ -726,11 +733,20 @@ SCENARIOS: list[ScenarioDefinition] = [
         title="Aperture vs Seeing",
         act=2, act_label="Compounding Effects",
         description=(
-            "Both panels show the same telescope and seeing \u2014 the left panel overlays "
-            "the theoretical limits (Airy radius and seeing FWHM) so you can read "
-            "which one is dominating. Once aperture exceeds D\u2099\u1d63\u1d62\u209c = "
-            "1.22\u03bb/\u03b8\u209b\u1d49\u1d49\u1d4f\u1d5f\u1d57 the atmosphere limits "
-            "resolution and bigger apertures only gather more light."
+            "This module is about resolution effects: aperture vs seeing vs eye "
+            "integration. The LEFT panel is the fixed reference \u2014 the real "
+            "telescope with both theoretical-limit overlays (Airy radius and seeing "
+            "FWHM) so you can read which one dominates. The RIGHT panel is "
+            "interactive: toggle 'Aperture diffraction' and 'Atmospheric seeing' "
+            "on/off (each also toggles its reference circle) to isolate each limit "
+            "\u2014 aperture only (a crisp Airy disk), seeing only (the atmospheric "
+            "blur), both (reality), or neither (an ideal point). Note: 'aperture "
+            "off' is an idealisation \u2014 every real aperture diffracts. Once "
+            "aperture exceeds D\u2099\u1d63\u1d62\u209c = 1.22\u03bb/\u03b8\u209b\u1d49\u1d49\u1d4f\u1d5f\u1d57 "
+            "the atmosphere limits resolution and bigger apertures only gather more "
+            "light. The eye adds a third limit \u2014 its ~1\u2032 resolution and "
+            "temporal integration smooth fine detail and average out the seeing "
+            "(see Parameters & Physics \u2192 Detector vs Eye)."
         ),
         learn_more_section="Atmospheric Seeing",
         before_telescope=TelescopeConfig(
@@ -746,8 +762,9 @@ SCENARIOS: list[ScenarioDefinition] = [
         ),
         after_source=_POINT,
         after_seeing_arcsec=2.5,
-        after_label="Rendered image \u2192",
+        after_label="Interactive \u2014 toggle each limit \u2192",
         plot_function="plot_source_image",
+        show_resolution_toggles=True,
         theory_function="compute_aperture_vs_seeing_theory",
         tweakable_params=("diameter", "seeing"),
         both_sides_dynamic=True,

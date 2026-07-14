@@ -99,6 +99,7 @@ def run_scenario_side(
     idealize_sa: bool = False,
     focal_zoom_arcsec: float | None = None,
     coma_view_mode: str = "ray_fan",
+    apply_aperture_diffraction: bool = True,
 ) -> tuple[Figure | None, dict, str | None]:
     """Run one side (before or after) of a scenario.
 
@@ -128,6 +129,7 @@ def run_scenario_side(
             idealize_sa=idealize_sa,
             focal_zoom_arcsec=focal_zoom_arcsec,
             coma_view_mode=coma_view_mode,
+            apply_aperture_diffraction=apply_aperture_diffraction,
         )
         info["telescope"] = telescope
         info["source"] = source
@@ -157,6 +159,7 @@ def _call_plot_function(
     idealize_sa: bool = False,
     focal_zoom_arcsec: float | None = None,
     coma_view_mode: str = "ray_fan",
+    apply_aperture_diffraction: bool = True,
 ) -> tuple[Figure, dict]:
     """Dispatch to the appropriate telescope_sim plot function."""
     from telescope_sim.plotting import (
@@ -186,6 +189,7 @@ def _call_plot_function(
             exposure_level=exposure_level,
             filter_name=filter_name,
             exit_pupil_mm=exit_pupil_mm,
+            apply_aperture_diffraction=apply_aperture_diffraction,
         )
         if isinstance(fig, list):
             fig = fig[0]
@@ -319,7 +323,15 @@ def compute_theory_for_scenario(
             kw["wavelength_nm"] = wavelength_nm
         if "seeing_arcsec" in sig.parameters and seeing_arcsec is not None:
             kw["seeing_arcsec"] = seeing_arcsec
-        kw.update(extra_kwargs)
+        # Only forward extra kwargs the theory function actually accepts.
+        # (Callers pass a superset — e.g. obstruction_ratio — but most
+        # theory functions don't take them; passing an unexpected kwarg
+        # raised TypeError, which the except below swallowed as None, so
+        # e.g. the aperture-vs-seeing after side silently lost its whole
+        # theory dict — and with it the Airy overlay circle.)
+        for k, v in extra_kwargs.items():
+            if k in sig.parameters:
+                kw[k] = v
         return fn(telescope, **kw)
     except Exception:
         return None

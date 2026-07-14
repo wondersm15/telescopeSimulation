@@ -2,7 +2,7 @@
 
 ---
 
-## Tutorial Tab — Round 3 (verbatim-feedback rework): Batches A–C done, D in progress
+## Tutorial Tab — Round 3 (verbatim-feedback rework): Batches A–D done
 
 **Date:** 2026-07-12 → 2026-07-13
 **Branch:** `feature/tutorial-testing-tab`
@@ -48,7 +48,19 @@ commit.
     `_draw_coma_rms_panel` / `_draw_coma_spot_grid` / `_draw_coma_ray_fan_panel`.
     New "Coma view" GUI combo (`show_coma_view_combo`) wired through the runner;
     tab-harness verified.
-  - **Open:** R3.10 (aperture-vs-seeing right-pane toggles), then Batches E–G.
+  - **R3.10 ✅ — Batch D COMPLETE.** Aperture-vs-seeing right pane is interactive:
+    new `apply_aperture_diffraction` flag threaded
+    `_render_source_through_telescope` → `plot_source_image` → runner → GUI (delta
+    render when off, flux-preserving so brightness is unchanged). Two after-side
+    checkboxes ("Aperture diffraction", "Atmospheric seeing", `show_resolution_
+    toggles`); each toggles its effect AND its overlay circle. Left pane unchanged.
+    Description reframed (aperture vs seeing vs eye integration); P&P Detector-vs-Eye
+    gained a "third resolution limit + temporal averaging" paragraph. Fixed a
+    pre-existing bug where `compute_theory_for_scenario` forwarded `obstruction_
+    ratio` to theory fns that reject it → swallowed TypeError → None → the after-side
+    Airy circle was never drawn; now only signature-matching kwargs are forwarded.
+    Verified all 4 toggle combos via the tab harness. 402 tests pass.
+  - **Next:** Batches E–G (filters/planets, docs/diagrams, propagation pass).
 
 ## Tutorial Tab — Round 2 (user-feedback redesign): Batch 1 DONE
 

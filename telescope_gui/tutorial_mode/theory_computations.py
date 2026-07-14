@@ -124,6 +124,7 @@ def overlay_resolution_circles(fig: Figure,
     if not fig.axes:
         return
     ax = fig.axes[0]
+    drew_any = False
     if airy_radius_arcsec > 0:
         ax.add_patch(Circle(
             (0.0, 0.0), airy_radius_arcsec,
@@ -131,6 +132,7 @@ def overlay_resolution_circles(fig: Figure,
             linewidth=1.5, alpha=0.9,
             label=f"Airy radius: {airy_radius_arcsec:.2f}\"",
         ))
+        drew_any = True
     if seeing_arcsec is not None and seeing_arcsec > 0:
         ax.add_patch(Circle(
             (0.0, 0.0), seeing_arcsec,
@@ -138,7 +140,12 @@ def overlay_resolution_circles(fig: Figure,
             linewidth=1.5, alpha=0.9,
             label=f"Seeing FWHM: {seeing_arcsec:.2f}\"",
         ))
-    ax.legend(loc="upper right", fontsize=7, framealpha=0.7)
+        drew_any = True
+    # Only build a legend when at least one circle was drawn — otherwise
+    # (both limits toggled off, R3.10) matplotlib warns "no artists with
+    # labels". The ideal-point case is intentionally circle-free.
+    if drew_any:
+        ax.legend(loc="upper right", fontsize=7, framealpha=0.7)
 
 
 def compute_rayleigh_theory(telescope, wavelength_nm: float = 550.0) -> dict:

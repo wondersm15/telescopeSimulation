@@ -4436,6 +4436,7 @@ def _render_source_through_telescope(
         exposure_level: float = 1.0,
         filter_name: str = "None",
         exit_pupil_mm: float = EYE_PUPIL_MM,
+        apply_aperture_diffraction: bool = True,
 ) -> tuple[np.ndarray, float, dict]:
     """Render an astronomical source as seen through the telescope.
 
@@ -4521,8 +4522,11 @@ def _render_source_through_telescope(
         # Polychromatic per-star rendering: for refractors, compute per-channel
         # PSFs at R/G/B wavelengths so chromatic defocus produces visible color
         # fringing on stars. Falls back to single-channel for reflectors.
+        # Aperture-off (R3.10) forces the single-channel delta path — with no
+        # diffraction there is no chromatic PSF to speak of.
         _star_use_chromatic = (polychromatic
-                                and hasattr(telescope, 'objective'))
+                                and hasattr(telescope, 'objective')
+                                and apply_aperture_diffraction)
 
         if isinstance(source, PointSource):
             stars = [(source.field_angle_arcsec,
@@ -4660,11 +4664,32 @@ def _render_source_through_telescope(
 
             # Compute PSF at this field angle (single-channel path).
             # The polychromatic branch below recomputes per-wavelength PSFs.
-            psf = _compute_psf_at_field_angle(
-                telescope, field_r, wavelength_nm, psf_n,
-                psf_half_mm, include_obstruction, apply_coma,
-            )
-            psf = _resample_to_canvas(psf)
+            if apply_aperture_diffraction:
+                psf = _compute_psf_at_field_angle(
+                    telescope, field_r, wavelength_nm, psf_n,
+                    psf_half_mm, include_obstruction, apply_coma,
+                )
+                psf = _resample_to_canvas(psf)
+            else:
+                # Aperture diffraction suppressed (R3.10 idealization to
+                # isolate the seeing limit): render the star as an ideal
+                # point at the canvas scale — a delta — so only atmospheric
+                # seeing (if enabled) blurs it. NOT physical (every real
+                # aperture diffracts); flagged in the scenario description.
+                #
+                # Preserve TOTAL FLUX: give the delta the same integrated
+                # flux as the real (peak-normalised) aperture PSF would
+                # carry, so toggling aperture changes the star's SHARPNESS,
+                # not its brightness (the display uses a fixed brightness
+                # anchor, so an under-flux delta would render nearly black).
+                _ref = _compute_psf_at_field_angle(
+                    telescope, field_r, wavelength_nm, psf_n,
+                    psf_half_mm, include_obstruction, apply_coma,
+                )
+                _ref = _resample_to_canvas(_ref)
+                _flux = float(_ref.sum())
+                psf = np.zeros((3, 3))
+                psf[1, 1] = _flux if _flux > 0 else 1.0
 
             # Coma tails point radially outward from the optical axis.
             # compute_coma_spot produces a fixed-orientation comet (tail
@@ -5327,6 +5352,7 @@ def plot_source_image(telescope: Telescope,
                       exposure_level: float = 1.0,
                       filter_name: str = "None",
                       exit_pupil_mm: float = EYE_PUPIL_MM,
+                      apply_aperture_diffraction: bool = True,
                       ) -> plt.Figure | list[plt.Figure]:
     """Plot a simulated image of an astronomical source through the telescope.
 
@@ -5422,6 +5448,7 @@ def plot_source_image(telescope: Telescope,
         exposure_level=exposure_level,
         filter_name=filter_name,
         exit_pupil_mm=exit_pupil_mm,
+        apply_aperture_diffraction=apply_aperture_diffraction,
     )
     info["display_stretch"] = display_stretch
     info["focus_wavelength_nm"] = focus_wavelength_nm

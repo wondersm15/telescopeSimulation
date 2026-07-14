@@ -106,6 +106,10 @@ class TutorialTab(QWidget):
         # checked, the Eye pane uses log_integrated (1″ eye-resolution blur)
         # instead of plain log.
         self._eye_blur_check: QCheckBox | None = None
+        # Resolution toggles (R3.10, aperture_vs_seeing after side): each
+        # checkbox toggles its effect in the render AND its overlay circle.
+        self._aperture_diffraction_check: QCheckBox | None = None
+        self._seeing_effect_check: QCheckBox | None = None
         # Shared-normalisation reference peak (Phase 1.5): the before-side
         # (unobstructed) FFT raw peak, captured during _render_before and
         # applied as the after-side peak_reference so the central-
@@ -345,6 +349,8 @@ class TutorialTab(QWidget):
         self._exit_pupil_combo = None
         self._focal_zoom_combo = None
         self._coma_view_combo = None
+        self._aperture_diffraction_check = None
+        self._seeing_effect_check = None
         self._eye_blur_check = None
         self._realtime_check = None
 
@@ -430,6 +436,10 @@ class TutorialTab(QWidget):
         # Coma-view toggle (R3.11a): ray-fan signature (default) vs spot grid.
         if scenario.show_coma_view_combo:
             self._add_coma_view_combo()
+
+        # Resolution toggles (R3.10): aperture-diffraction + seeing on/off.
+        if scenario.show_resolution_toggles:
+            self._add_resolution_toggles()
 
         # Display-stretch toggle (linear / log) for any scenario whose
         # after-side renders a source image (so the toggle is available
@@ -1034,6 +1044,48 @@ class TutorialTab(QWidget):
             return "ray_fan"
         return self._coma_view_combo.currentData()
 
+    def _add_resolution_toggles(self):
+        """Aperture-diffraction + seeing on/off toggles (R3.10).
+
+        For the aperture-vs-seeing after side: each checkbox toggles its
+        effect in the render AND (via _render_after) its reference circle in
+        the overlay, so the viewer can isolate which limit dominates —
+        aperture only, seeing only, both, or neither."""
+        col = QVBoxLayout()
+        lbl = QLabel("Right panel — resolution limits")
+        lbl.setStyleSheet("font-size: 8pt; font-weight: normal; color: #555;")
+        ap = QCheckBox("Aperture diffraction")
+        ap.setChecked(True)
+        ap.setToolTip(
+            "Include the telescope's diffraction (Airy) limit and its cyan\n"
+            "reference circle. Unchecked = ideal point (no diffraction) so\n"
+            "only seeing blurs the star — an idealisation to isolate seeing.")
+        se = QCheckBox("Atmospheric seeing")
+        se.setChecked(True)
+        se.setToolTip(
+            "Include atmospheric seeing blur and its orange reference circle.\n"
+            "Unchecked = above-the-atmosphere (space-telescope) view.")
+        ap.stateChanged.connect(self._on_update_clicked)
+        se.stateChanged.connect(self._on_update_clicked)
+        col.addWidget(lbl)
+        col.addWidget(ap)
+        col.addWidget(se)
+        self.controls_layout.addLayout(col)
+        self._aperture_diffraction_check = ap
+        self._seeing_effect_check = se
+
+    def _aperture_diffraction_on(self) -> bool:
+        """Whether the after-side aperture-diffraction toggle is on (R3.10)."""
+        if self._aperture_diffraction_check is None:
+            return True
+        return self._aperture_diffraction_check.isChecked()
+
+    def _seeing_effect_on(self) -> bool:
+        """Whether the after-side seeing toggle is on (R3.10)."""
+        if self._seeing_effect_check is None:
+            return True
+        return self._seeing_effect_check.isChecked()
+
     # Index of the "F=C plane" item in the focus-wavelength combo (kept
     # as a constant so the sync logic doesn't drift from the addItem
     # order in _add_focus_wavelength_combo).
@@ -1373,6 +1425,16 @@ class TutorialTab(QWidget):
         if not active_effects.get("spider_vanes", True):
             after_config = replace(after_config, spider_vanes=0)
 
+        # Resolution toggles (R3.10, aperture_vs_seeing after side): isolate
+        # each limit. Aperture-off renders the star as an ideal point (no
+        # diffraction); seeing-off removes the atmospheric blur. Each toggle
+        # also drives whether its reference circle is drawn (overlay below).
+        apply_aperture_diffraction = True
+        if scenario.show_resolution_toggles:
+            apply_aperture_diffraction = self._aperture_diffraction_on()
+            if not self._seeing_effect_on():
+                seeing = None
+
         focus_wl = (self._focus_wavelength_combo.currentData()
                     if self._focus_wavelength_combo is not None else 550.0)
         # After-side stretch: a pinned view (fixed Eye-vs-Detector comparison)
@@ -1412,6 +1474,7 @@ class TutorialTab(QWidget):
             idealize_sa=scenario.idealize_singlet_sa,
             focal_zoom_arcsec=self._current_focal_zoom(scenario),
             coma_view_mode=self._current_coma_view(),
+            apply_aperture_diffraction=apply_aperture_diffraction,
         )
 
         if err:
@@ -1457,7 +1520,14 @@ class TutorialTab(QWidget):
         if (telescope
                 and (self._show_overlay_check is None
                      or self._show_overlay_check.isChecked())):
-            apply_theory_overlay(scenario, fig, theory or {},
+            # R3.10: the reference circles follow the toggles. Seeing is
+            # already None when its toggle is off (→ no seeing circle);
+            # zero the diffraction limit when aperture is off (→ no Airy
+            # circle) so the overlay matches what the render shows.
+            overlay_theory = dict(theory or {})
+            if scenario.show_resolution_toggles and not apply_aperture_diffraction:
+                overlay_theory["diffraction_limit_arcsec"] = 0.0
+            apply_theory_overlay(scenario, fig, overlay_theory,
                                  telescope=telescope,
                                  seeing_arcsec=seeing,
                                  side="after")

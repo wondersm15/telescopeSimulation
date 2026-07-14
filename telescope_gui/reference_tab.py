@@ -655,6 +655,15 @@ spatial blur, so together the two Eye modes model <i>both</i> how the eye maps
 brightness (log) <i>and</i> how it resolves detail (finite grain) &mdash; which
 is why a diffraction-limited detector image can look sharper than the same scene
 does to the eye at the eyepiece.</p>
+<p>This makes the eye a <b>third resolution limit</b>, alongside aperture
+diffraction and atmospheric seeing (see the <i>Aperture vs Seeing</i> module).
+Whichever is <i>largest</i> dominates: a big aperture beats its own diffraction
+limit but is still capped by the seeing disk, and at low magnification the eye's
+&sim;1&Prime; grain can be the coarsest limit of all. The eye also integrates in
+<i>time</i> (&sim;0.1&nbsp;s), so it averages the fast atmospheric fluctuations
+and &mdash; unlike a long exposure that smears them into one fat blur &mdash;
+lets an observer catch the fleeting moments of steady air when detail snaps into
+view.</p>
 <p><i>Accuracy: perceptual model. The asinh stretch and 1&Prime; integration are
 qualitative stand-ins for human vision, not calibrated psychophysics; they
 convey the linear-vs-log and finite-resolution distinctions, not exact retinal

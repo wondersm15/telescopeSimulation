@@ -150,11 +150,16 @@ user input · 💤 deferred by user.
 > seeing vs eye integration. In the physics and parameters when you describe
 > detector vs eye (linear vs logarithmic) differences, also describe the impact
 > of the eye resolution/blurring."
-- ⬜ (a) Right plot: toggle seeing and aperture-resolution on/off, with their
-  circular overlays toggling too. Left plot unchanged.
-- ⬜ (b) Reframe module focus = resolution effects: aperture vs seeing vs eye
-  integration.
-- ⬜ (c) P&P: in the detector-vs-eye section also describe eye resolution/blur.
+- ✅ (a) Right plot: toggle seeing and aperture-resolution on/off, with their
+  circular overlays toggling too. Left plot unchanged. New
+  `apply_aperture_diffraction` flag (delta render when off) + two after-side
+  checkboxes; overlay circles follow the toggles. Verified all 4 combos via the
+  tab harness (Airy rings+cyan / seeing Gaussian+orange / both / ideal point).
+- ✅ (b) Reframe module focus = resolution effects: aperture vs seeing vs eye
+  integration. Description rewritten (left = fixed reference, right = interactive).
+- ✅ (c) P&P: in the detector-vs-eye section also describe eye resolution/blur.
+  Added the "third resolution limit" + temporal-averaging paragraph tying eye
+  integration to the aperture-vs-seeing module.
 
 ## R3.11 — F-ratio and coma
 > "we have already implemented the ray fan plot and referenced it. Make the left
@@ -445,7 +450,22 @@ user input · 💤 deferred by user.
     default) on `fratio_coma` (`show_coma_view_combo`); description updated.
     Tab-harness verified: default left = "Coma ray fan @ 120″", switch → "RMS Coma
     vs Field Angle". +2 runner tests; 399 pass.
-  - **R3.10 — STILL OPEN:** aperture-vs-seeing right-pane toggles.
+  - **R3.10 ✅ (a,b,c) — Batch D COMPLETE.** Aperture-vs-seeing right pane is now
+    interactive. New `apply_aperture_diffraction` flag threaded
+    `_render_source_through_telescope` → `plot_source_image` → runner → GUI: when
+    off, the star renders as a flux-preserving delta (ideal point) so only seeing
+    blurs it. Two after-side checkboxes ("Aperture diffraction", "Atmospheric
+    seeing", both default on, `show_resolution_toggles`); each toggles its effect
+    AND its overlay circle (seeing→None drops the orange circle; aperture-off zeros
+    `diffraction_limit_arcsec` in the overlay theory → drops the cyan circle). Left
+    pane unchanged. Description reframed to "resolution effects: aperture vs seeing
+    vs eye integration"; P&P Detector-vs-Eye section gained the "third resolution
+    limit + temporal averaging" paragraph. **Fixed a pre-existing bug:**
+    `compute_theory_for_scenario` forwarded `obstruction_ratio` to every theory fn;
+    aperture-vs-seeing's fn rejects it → swallowed TypeError → None → the after-side
+    Airy circle was NEVER drawn. Now only signature-matching extra kwargs are
+    forwarded. Verified all 4 toggle combos via the tab harness (Airy rings+cyan /
+    seeing Gaussian+orange / both / ideal point). +3 tests; 402 pass.
 
 ---
 

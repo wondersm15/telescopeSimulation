@@ -300,6 +300,63 @@ class TestScenarioRunner:
         assert "rms coma" in fig.axes[0].get_title().lower()
         plt.close(fig)
 
+    def test_theory_forwarding_ignores_unknown_kwargs(self):
+        """compute_theory_for_scenario must not drop the whole theory dict
+        when the caller passes a kwarg the theory fn doesn't accept (R3.10
+        regression: obstruction_ratio nuked the aperture-vs-seeing Airy
+        overlay because the swallowed TypeError returned None)."""
+        from telescope_gui.tutorial_mode.scenario_registry import get_scenario_by_id
+        from telescope_gui.tutorial_mode.scenario_runner import (
+            compute_theory_for_scenario)
+        from telescope_sim.geometry.telescope import NewtonianTelescope
+        s = get_scenario_by_id("aperture_vs_seeing")
+        tel = NewtonianTelescope(primary_diameter=200.0, focal_length=1000.0,
+                                 enable_obstruction=False)
+        th = compute_theory_for_scenario(
+            s, tel, seeing_arcsec=2.5, wavelength_nm=550.0,
+            obstruction_ratio=0.0)  # unknown kwarg for this theory fn
+        assert th is not None
+        assert th.get("diffraction_limit_arcsec", 0.0) > 0.0
+
+
+class TestApertureDiffractionToggle:
+    """R3.10: apply_aperture_diffraction=False renders the star as an ideal
+    point (no diffraction), so only seeing blurs it."""
+
+    def _spot_px(self, img):
+        return int((img > 0.01 * img.max()).sum())
+
+    def test_aperture_off_is_ideal_point_without_seeing(self):
+        from telescope_sim.geometry.telescope import NewtonianTelescope
+        from telescope_sim.source.sources import PointSource
+        from telescope_sim.plotting.ray_trace_plot import (
+            _render_source_through_telescope as render)
+        tel = NewtonianTelescope(primary_diameter=200.0, focal_length=1000.0,
+                                 enable_obstruction=False)
+        on, _, _ = render(PointSource(), tel, num_pixels=256,
+                          apply_aperture_diffraction=True)
+        off, _, _ = render(PointSource(), tel, num_pixels=256,
+                           apply_aperture_diffraction=False)
+        # Ideal point collapses to essentially one pixel; the Airy disk fills
+        # many. So aperture-off is dramatically more compact.
+        assert self._spot_px(off) < self._spot_px(on) / 10
+
+    def test_aperture_off_with_seeing_matches_brightness(self):
+        """Toggling aperture changes sharpness, not total brightness: with
+        seeing on, aperture-off (pure seeing disk) preserves the flux of
+        aperture-on within a modest tolerance."""
+        from telescope_sim.geometry.telescope import NewtonianTelescope
+        from telescope_sim.source.sources import PointSource
+        from telescope_sim.plotting.ray_trace_plot import (
+            _render_source_through_telescope as render)
+        tel = NewtonianTelescope(primary_diameter=200.0, focal_length=1000.0,
+                                 enable_obstruction=False)
+        on, _, _ = render(PointSource(), tel, num_pixels=256,
+                          seeing_arcsec=2.5, apply_aperture_diffraction=True)
+        off, _, _ = render(PointSource(), tel, num_pixels=256,
+                           seeing_arcsec=2.5, apply_aperture_diffraction=False)
+        assert off.sum() == pytest.approx(on.sum(), rel=0.1)
+
     def test_run_fratio_coma(self):
         from telescope_gui.tutorial_mode.scenario_registry import get_scenario_by_id
         from telescope_gui.tutorial_mode.scenario_runner import run_scenario_side
