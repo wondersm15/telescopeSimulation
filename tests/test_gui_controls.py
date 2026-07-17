@@ -358,6 +358,46 @@ class TestReferenceTabVignettingDiagram:
         tab = ParametersPhysicsTab()
         assert tab is not None
 
+    def test_panel_a_traces_clipped_rays(self):
+        """R3.7b: Panel A now traces individual rays; the off-axis rays that
+        miss the secondary are marked with red 'x' at the secondary plane."""
+        import matplotlib
+        matplotlib.use("Agg")
+        from telescope_gui.reference_tab import _build_vignetting_diagram
+        import matplotlib.pyplot as plt
+        fig = _build_vignetting_diagram()
+        axA = fig.axes[0]
+        # At least one line uses an 'x' marker (a clipped ray endpoint).
+        assert any(ln.get_marker() == "x" for ln in axA.get_lines())
+        plt.close(fig)
+
+    def test_caption_defines_clear_aperture(self):
+        from telescope_gui.reference_tab import VIGNETTING_DIAGRAM_CAPTION_HTML
+        html = VIGNETTING_DIAGRAM_CAPTION_HTML.lower()
+        assert "clear aperture" in html
+        assert "reflective face" in html          # what it IS
+        assert "miss" in html                      # red rays miss the mirror
+
+
+class TestReferenceTabRealismAudit:
+    """R3.3: the Parameters & Physics tab carries a realism-audit section
+    (approximations + how to improve them), including the eye-mode ring note."""
+
+    def test_realism_section_present(self, qapp):
+        from PyQt6.QtWidgets import QGroupBox
+        from telescope_gui.reference_tab import ParametersPhysicsTab
+        tab = ParametersPhysicsTab()
+        titles = [gb.title() for gb in tab.findChildren(QGroupBox)]
+        assert any("Realism audit" in t for t in titles)
+
+    def test_covers_eye_ring_over_emphasis(self):
+        from telescope_gui.reference_tab import REALISM_AUDIT_HTML
+        h = REALISM_AUDIT_HTML.lower()
+        assert "asinh" in h and "ring" in h
+        # Names concrete idealisations with an improve/accept framing.
+        assert "to improve" in h and "accepted" in h
+        assert "seeing" in h and "procedural" in h
+
 
 # ------------------------------------------------------------------
 # Tutorial sidebar — every act must be reachable (regression: Act 4

@@ -44,9 +44,14 @@ user input · 💤 deferred by user.
 > realism is lacking, and propose options for what it would take to improve the
 > realism and simply labeling the shortcomings (in some cases accepting less
 > realism is ok to isolate an effect or avoid overly difficult upgrade)]"
-- ⬜ (a) Are the eye-mode diffraction rings physically believable? Assess.
-- ⬜ (b) General realism audit: list where realism is lacking + options to
-  improve vs. label the shortcoming (accepting less realism is sometimes ok).
+- ✅ (a) Assessed — the user is RIGHT, the rings are over-emphasised. The eye-mode
+  asinh stretch (a=0.001) lifts the Airy 1st ring from 1.7% raw to ~47% displayed
+  (2nd 0.4%→28%, 3rd 0.16%→16%). Real observers catch the 1st (maybe 2nd) ring on
+  a bright star only in excellent seeing. Documented as a labelled limitation.
+- ✅ (b) New "Realism audit — approximations & how to improve them" P&P section:
+  eye rings, Gaussian seeing, geometric/Seidel aberrations, procedural planet
+  textures, 3-channel colour, no atmospheric dispersion, perceptual eye model,
+  secondary-only vignetting — each with why-accepted + what-to-improve.
 
 ## R3.4 — Linear detector vs logarithmic eye (Parameters & Physics)
 > "Linear detector behavior vs logarithmic eye behavior. Describe this in the
@@ -109,12 +114,15 @@ user input · 💤 deferred by user.
 > left plot is also still not labeled in the module despite my clear instructions
 > to do so. Again this is highly concerning that you are simply ignoring
 > straightforward and clear requests."
-- ⬜ (a) Module description: note the diagram in Parameters & Physics.
-- ⬜ (b) Diagram Panel A confusing — add a couple of actual ray traces; clarify
-  what "secondary clear aperture" means and the red box's relationship to it
-  (inside/covering/outside). User reads it as the part covered by the secondary.
-- ⬜ (c) **Label the obstruction ratio on the module's left plot.** (confirmed
-  still missing 2026-07-12)
+- ✅ (a) Module description notes the P&P diagram (scenario_registry.py:511).
+- ✅ (b) Panel A reworked: traces INDIVIDUAL rays — caught rays (orange) land on
+  the secondary mirror face and continue to focus; missed rays (red, ending in ✗
+  at the secondary plane) fall outside it and are lost. Caption now defines
+  "secondary clear aperture" = the reflective mirror face (NOT the obstruction
+  shadow) and states the red rays are OUTSIDE it (lost light, not part of the
+  mirror). Panel B label aligned.
+- ✅ (c) Obstruction ratio ε labelled on the vignetting curve (title + info box,
+  ray_trace_plot.py:3239/3244 — done earlier; verified present).
 
 ## R3.8 — Spherical aberration
 > "You note that the bright marginal rays intersect the axis differently, but
@@ -517,6 +525,22 @@ user input · 💤 deferred by user.
     a clean interior high-pass metric: Jupiter/Saturn detail monotonically washes
     out with seeing; Moon (2048→512) seeing-insensitive at full-disk scale.
   - **Batch E COMPLETE.** 408 tests pass.
+- 2026-07-16 (Batch F):
+  - **R3.3 ✅ (a,b)** (a) eye-mode diffraction rings ARE over-emphasised —
+    quantified the asinh(a=0.001) boost (1st ring 1.7%→47% displayed) and
+    documented it. (b) new P&P "Realism audit — approximations & how to improve
+    them" section (eye rings, Gaussian seeing, geometric/Seidel aberrations,
+    procedural planet textures, 3-channel colour, no atmospheric dispersion,
+    perceptual eye model, secondary-only vignetting), each with why-accepted +
+    what-to-improve.
+  - **R3.7 ✅ (a,b,c)** (b) vignetting-diagram Panel A reworked with individual
+    traced rays (orange caught → focus; red ✗ missed → lost) and a caption that
+    defines "secondary clear aperture" = the reflective mirror face and clarifies
+    the red rays are OUTSIDE it. (a) description already links the P&P diagram;
+    (c) ε already labelled on the curve — both verified.
+  - R3.8b (defocus/tilt in P&P) and R3.10c (eye resolution in Detector-vs-Eye)
+    confirmed already done in Batches C/D.
+  - **Batch F COMPLETE.** +4 tests; 412 pass.
 
 ---
 

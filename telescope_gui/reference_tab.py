@@ -693,20 +693,101 @@ temperature.</i></p>
 """
 
 
+# Realism audit (R3.3): things that ARE modelled, but approximately — with an
+# honest note on why the shortcut is taken and what a higher-fidelity version
+# would require. Sometimes less realism is deliberate, to isolate one effect.
+REALISM_AUDIT_HTML = """
+<p>Everything below <b>is</b> modelled, but with a simplification. Each entry
+says what the shortcut is, why it's acceptable (often: to isolate one teaching
+effect, or because the exact version is disproportionately hard), and what a
+higher-fidelity upgrade would take.</p>
+
+<h3>Eye-mode diffraction rings look too obvious</h3>
+<p>Good catch if you noticed this. The Eye view uses an <b>asinh</b> (log-like)
+stretch with a very low linear floor (a&nbsp;=&nbsp;0.001) to lift faint
+structure. That floor is aggressive: the Airy pattern's 1st ring is only
+<b>1.7%</b> of the peak in raw flux, but the stretch renders it at <b>~47%</b>
+brightness (2nd ring 0.4%&rarr;28%, 3rd 0.16%&rarr;16%). So the rings show far
+more prominently than a real observer sees them &mdash; visually you catch the
+first ring (sometimes the second) on a <i>bright</i> star only in <i>excellent</i>
+seeing; the higher rings are washed out by the atmosphere and your eye's real
+contrast threshold. <i>Accepted</i> because it makes the diffraction structure
+legible for teaching. <i>To improve:</i> raise the asinh floor toward the eye's
+true ~1% contrast threshold and gate ring visibility on the seeing value.</p>
+
+<h3>Atmospheric seeing = a Gaussian blur</h3>
+<p>Real seeing is a rapidly boiling speckle pattern (Kolmogorov turbulence); we
+convolve with a fixed Gaussian of the stated FWHM. <i>Accepted</i> &mdash; it
+captures the time-averaged resolution loss, which is the lesson.
+<i>To improve:</i> simulate a time-varying phase screen and average many
+short exposures (a genuine speckle model).</p>
+
+<h3>Aberrations = geometric / 3rd-order Seidel</h3>
+<p>Coma, spherical and defocus come from the Seidel formulae or geometric ray
+offsets, shown as ray fans and spot diagrams &mdash; not from a diffraction
+(wavefront) PSF. <i>Accepted</i>: the ray-fan <i>signature</i> (cubic = SA,
+parabola = coma) is exactly what these views teach, and near the diffraction
+limit the geometric blur is correctly small. <i>To improve:</i> build the PSF
+from the aberrated wavefront (Zernike &rarr; FFT) so aberration and diffraction
+interfere realistically.</p>
+
+<h3>Planet &amp; Moon surfaces</h3>
+<p>The Moon uses a real NASA/LRO albedo map; Jupiter and Saturn are
+<b>procedural</b> (parametric belts, Great Red Spot, rings) rather than
+photographs. <i>Accepted</i> &mdash; a procedural disk stays honest under any
+zoom, phase and libration without baking in one photo's lighting/projection,
+and it renders at any resolution for the PSF convolution. <i>To improve:</i>
+map real spacecraft imagery (Cassini/Juno/Hubble) the way the Moon already does.</p>
+
+<h3>Colour = 3 channels, not a spectrum</h3>
+<p>Rendering carries R/G/B at the Fraunhofer C/d/F wavelengths; filters
+point-sample their transmission at those three points. <i>Accepted</i> for
+qualitative colour and filter contrast. <i>To improve:</i> render many
+wavelength bins and integrate against real detector/eye response curves.</p>
+
+<h3>No atmospheric dispersion</h3>
+<p>Low-altitude objects show a real vertical red&ndash;blue colour smear from
+the atmosphere acting as a weak prism; we don't model it (targets are treated as
+near the zenith). <i>To improve:</i> add a dispersion offset per channel as a
+function of target altitude.</p>
+
+<h3>Perceptual eye model</h3>
+<p>The Eye view (asinh brightness + ~1&prime; spatial integration + cone
+desaturation) is a <i>qualitative</i> stand-in for human vision, not calibrated
+psychophysics, and magnification is not modelled (the view is a fixed angular
+scale). <i>Accepted</i> &mdash; it conveys linear-vs-log and finite-resolution
+distinctions. <i>To improve:</i> a calibrated luminance/contrast model plus an
+explicit eyepiece magnification stage.</p>
+
+<h3>Vignetting = secondary-only</h3>
+<p>Only the beam sliding off the secondary mirror is modelled (a
+circle&ndash;circle overlap). Tube, focuser-drawtube and undersized-diagonal
+vignetting are ignored. <i>To improve:</i> add each aperture stop along the beam
+and intersect them all.</p>
+"""
+
+
 # ---------------------------------------------------------------------------
 # Widget
 # ---------------------------------------------------------------------------
 
 VIGNETTING_DIAGRAM_CAPTION_HTML = (
-    "<p>A star on the optical axis sends a light cone that lands squarely on "
-    "the secondary mirror &mdash; every ray is caught and the image is "
-    "<b>fully illuminated</b>. A star <i>off</i> the axis sends its cone in "
-    "at an angle, so by the time the cone reaches the secondary it has "
-    "shifted sideways (left panel). Once the shift is large enough, the far "
-    "edge of the cone <b>misses the secondary</b> and that light is lost "
-    "(red) &mdash; the star is dimmed. The right panel is the same effect "
-    "seen face-on: the circular beam footprint slides off the circular "
-    "secondary aperture, and the non-overlapping sliver is the vignetted "
+    "<p>The <b>secondary clear aperture</b> is simply the reflective face of "
+    "the secondary (diagonal) mirror &mdash; the patch of mirror the "
+    "converging beam has to land on to be relayed out to the eyepiece. It is "
+    "<i>not</i> the shadow the secondary casts on the incoming light (that's "
+    "the central obstruction, a separate thing); here it acts like a stop the "
+    "cone must pass through.</p>"
+    "<p>Left panel: individual rays from a star are traced toward the focus. "
+    "For a star on-axis the whole cone lands on the mirror face &mdash; every "
+    "ray is caught and the image is <b>fully illuminated</b>. For an "
+    "<i>off</i>-axis star the cone arrives tilted and shifted sideways, so the "
+    "outermost rays <b>miss the mirror face</b> (drawn red, ending in an "
+    "&#10007; at the secondary plane): that light never reaches the eyepiece, "
+    "so the star is dimmed. The red rays are <i>outside</i> the clear aperture "
+    "&mdash; they are the lost light, not part of the mirror. The right panel "
+    "is the same effect seen face-on: the circular beam footprint slides off "
+    "the circular mirror face, and the non-overlapping sliver is the vignetted "
     "light (the <i>circle&ndash;circle overlap</i> model the simulation "
     "uses).</p>"
     "<p style='font-family:monospace; margin-left:20px;'>"
@@ -778,40 +859,50 @@ def _build_vignetting_diagram():
     axA.text(-0.1, F + 0.05, "on-axis focus\n(fully illuminated)", ha="right",
              va="center", fontsize=7, color="#245a9e")
 
-    # Off-axis cone (orange): star at field angle θ → focus shifts to (+dx, F).
-    # dx chosen so the beam is PARTIALLY clipped at the secondary (clearest
-    # illustration): part of the cone lands on the secondary, part misses.
+    # Secondary clear aperture (grey bar) at y_sec — the reflective face of
+    # the secondary mirror, seen edge-on. Rays that LAND on this bar are
+    # relayed to the eyepiece; rays that MISS it (fall beyond its edges) are
+    # lost. Drawn before the off-axis rays so they overlay it.
+    axA.plot([-sec_half, sec_half], [y_sec, y_sec], color="0.25", lw=7,
+             solid_capstyle="butt", zorder=4)
+    axA.annotate(
+        "secondary mirror face\n= its “clear aperture”\n"
+        "(rays landing here reach\nthe eyepiece)",
+        xy=(-sec_half, y_sec), xytext=(-D / 2 - 1.5, y_sec - 1.15),
+        ha="left", va="center", fontsize=6.6, color="0.25",
+        arrowprops=dict(arrowstyle="->", color="0.4", lw=0.8))
+
+    # Off-axis star at field angle θ → focus shifts to (+dx, F). Instead of a
+    # filled cone, trace INDIVIDUAL rays from across the primary toward that
+    # focus (R3.7b — the cones alone were unclear). Each ray crosses the
+    # secondary plane at x(y_sec); if |x| ≤ sec_half it lands ON the mirror
+    # (caught → drawn through to focus), otherwise it MISSES the mirror
+    # (clipped → drawn red and stopped at the secondary plane with an ✗).
     dx = 0.5
-    axA.fill([-D / 2, D / 2, dx], [0, 0, F], color="#e08a2b", alpha=0.12,
-             zorder=0)
-    for x0 in (-D / 2, D / 2):
-        axA.plot([x0, dx], [0, F], color="#e08a2b", lw=1.0)
-    axA.plot(dx, F, marker="*", color="#e08a2b", ms=11)
+    axA.plot(dx, F, marker="*", color="#e08a2b", ms=11, zorder=6)
     axA.text(dx + 0.12, F + 0.05, "off-axis focus", ha="left", va="center",
              fontsize=7, color="#a9631a")
-
-    # Secondary clear aperture (grey bar) at y_sec.
-    axA.plot([-sec_half, sec_half], [y_sec, y_sec], color="0.3", lw=7,
-             solid_capstyle="butt", zorder=4)
-    axA.text(-sec_half - 0.08, y_sec, "secondary\nclear\naperture",
-             ha="right", va="center", fontsize=7, color="0.3")
-
-    # Off-axis beam footprint at the secondary height: centre is shifted; the
-    # part beyond the secondary's clear aperture is lost.
-    cx_off = dx * (y_sec / F)  # cone centre at the secondary height
-    right_edge = cx_off + r_beam_sec
-    # Shade the clipped (lost) portion: the beam beyond +sec_half.
-    if right_edge > sec_half:
-        axA.fill_between([sec_half, right_edge],
-                         [y_sec - 0.16, y_sec - 0.16],
-                         [y_sec + 0.16, y_sec + 0.16],
-                         color="#d0342b", alpha=0.55, zorder=5)
-        axA.annotate("clipped rays\n(lost light → dimmer)",
-                     xy=((sec_half + right_edge) / 2, y_sec + 0.16),
-                     xytext=(sec_half + 0.35, y_sec - 1.05),
-                     fontsize=7, color="#a11", ha="left",
+    n_rays = 7
+    caught_lbl = clipped_lbl = False
+    for x0 in np.linspace(-D / 2, D / 2, n_rays):
+        x_at_sec = x0 + (dx - x0) * (y_sec / F)
+        if abs(x_at_sec) <= sec_half:            # lands on the mirror → caught
+            axA.plot([x0, dx], [0, F], color="#e08a2b", lw=1.0, zorder=3,
+                     label=None if caught_lbl else "_")
+            caught_lbl = True
+        else:                                    # misses the mirror → lost
+            axA.plot([x0, x_at_sec], [0, y_sec], color="#d0342b", lw=1.2,
+                     zorder=5)
+            axA.plot(x_at_sec, y_sec, marker="x", color="#d0342b", ms=6,
+                     mew=1.6, zorder=6)
+            clipped_lbl = True
+    if clipped_lbl:
+        axA.annotate("these rays MISS the secondary\n(lost light → star dimmed)",
+                     xy=(sec_half + r_beam_sec * 0.4, y_sec),
+                     xytext=(sec_half + 0.2, y_sec - 1.15),
+                     fontsize=6.8, color="#a11", ha="left",
                      arrowprops=dict(arrowstyle="->", color="#a11", lw=0.9))
-    axA.set_xlim(-D / 2 - 0.75, D / 2 + 0.75)
+    axA.set_xlim(-D / 2 - 1.55, D / 2 + 0.9)
     axA.set_ylim(-0.6, F + 0.6)
     axA.set_aspect("equal")
     axA.axis("off")
@@ -830,8 +921,8 @@ def _build_vignetting_diagram():
     # Secondary aperture (grey disk)
     axB.add_patch(Circle((0, 0), r_sec, facecolor="0.85", edgecolor="0.4",
                          lw=1.3, zorder=1))
-    axB.text(0, -r_sec - 0.18, "secondary clear aperture", ha="center",
-             va="top", fontsize=7.5, color="0.3")
+    axB.text(0, -r_sec - 0.18, "secondary mirror face\n(“clear aperture”)",
+             ha="center", va="top", fontsize=7.5, color="0.3")
     th = np.linspace(0, 2 * np.pi, 100)
     for off, color, label in cases:
         axB.plot(off + r_bm * np.cos(th), r_bm * np.sin(th), color=color,
@@ -962,6 +1053,10 @@ class ParametersPhysicsTab(QWidget):
             VIGNETTING_DIAGRAM_CAPTION_HTML))
         layout.addWidget(_make_section(
             "Implemented Physics", PHYSICS_HTML
+        ))
+        layout.addWidget(_make_section(
+            "Realism audit — approximations & how to improve them",
+            REALISM_AUDIT_HTML
         ))
         layout.addWidget(_make_section(
             "Not Yet Implemented", NOT_IMPLEMENTED_HTML

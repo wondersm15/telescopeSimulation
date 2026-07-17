@@ -2,7 +2,27 @@
 
 ---
 
-## Tutorial Tab — Round 3 (verbatim-feedback rework): Batches A–E done
+## Tutorial Tab — Round 3 (verbatim-feedback rework): Batches A–F done
+
+**Batch F (docs & diagram clarity) — COMPLETE (2026-07-16). 412 tests pass.**
+- **R3.3 ✅** (a) The eye-mode diffraction rings really are over-emphasised: the
+  asinh stretch (a=0.001) lifts the Airy 1st ring from 1.7% raw to ~47% displayed
+  (2nd 0.4%→28%, 3rd 0.16%→16%), far more than a real observer sees (1st ring on a
+  bright star in excellent seeing). (b) Added a "Realism audit — approximations &
+  how to improve them" section to Parameters & Physics covering the eye rings,
+  Gaussian seeing, geometric/Seidel aberrations, procedural planet textures,
+  3-channel colour, no atmospheric dispersion, the perceptual eye model, and
+  secondary-only vignetting — each with a why-accepted + what-to-improve note.
+- **R3.7 ✅** (b) Reworked vignetting-diagram Panel A to trace INDIVIDUAL rays:
+  caught rays (orange) land on the secondary mirror face and reach focus; missed
+  rays (red, ending in ✗ at the secondary plane) fall outside it and are lost. The
+  caption now defines "secondary clear aperture" = the reflective mirror face (not
+  the obstruction shadow) and states the red rays are OUTSIDE it. (a) the scenario
+  description already links the diagram and (c) ε is already labelled on the curve
+  — both verified present.
+- R3.8b (defocus/tilt) and R3.10c (eye resolution) confirmed done earlier.
+
+## Tutorial Tab — Round 3 (verbatim-feedback rework): Batch E
 
 **Batch E (filters & planets) — COMPLETE (2026-07-16). 408 tests pass.**
 - **R3.14 ✅** Colour filters on Jupiter — the module premise was backwards. A RED
