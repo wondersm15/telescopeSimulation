@@ -1305,6 +1305,10 @@ class TutorialTab(QWidget):
             if scenario.before_telescope_dynamic and "seeing" in params:
                 before_seeing = params["seeing"]
 
+        # Live ephemeris (R3.13a): apply to the Before side too, so both
+        # panels show the same real Moon/planet when the toggle is on.
+        before_source = self._apply_realtime(before_source, scenario)
+
         # Per-side display settings (Phase 1.2): the Before side may pin its
         # own View / Filter / Exposure so before-vs-after is an honest
         # comparison (e.g. Detector vs Eye, no-filter vs ND).
@@ -1403,6 +1407,8 @@ class TutorialTab(QWidget):
         # Build telescope config from current control values
         after_config = self._params_to_telescope_config(scenario, params)
         after_source_config = self._params_to_source_config(scenario, params)
+        # Live ephemeris (R3.13a): applied to both sides via the same helper.
+        after_source_config = self._apply_realtime(after_source_config, scenario)
         plot_fn = self._effective_plot_function(scenario, side="after")
 
         # Effect toggles (Act 3) — read all five and apply them to either
@@ -1685,16 +1691,33 @@ class TutorialTab(QWidget):
         if base.source_type == "DoubleStar" and "separation_arcsec" in params:
             kwargs["separation_arcsec"] = params["separation_arcsec"]
 
-        # Live ephemeris toggle (only applies to after-side, not before)
-        if (scenario.supports_realtime
-                and self._realtime_check is not None
-                and self._realtime_check.isChecked()
-                and base is scenario.after_source):
-            kwargs["use_realtime"] = True
-
+        # NOTE: the live-ephemeris flag is applied separately via
+        # _apply_realtime() so it reaches BOTH sides (R3.13a) regardless of
+        # whether this side is rebuilt through the dynamic-params path.
         if kwargs == base.kwargs:
             return base
         return SourceConfig(source_type=base.source_type, kwargs=kwargs)
+
+    def _apply_realtime(self, source_config: SourceConfig,
+                        scenario: ScenarioDefinition) -> SourceConfig:
+        """Apply the live-ephemeris toggle to a source config (R3.13a).
+
+        When the scenario supports realtime and the checkbox is on, rebuild
+        the source with use_realtime=True. Applied to BOTH the Before and
+        After sides so they show the SAME real Moon/Jupiter/Saturn (differing
+        only by the effect under test — e.g. the filter), not a canned Before
+        against a live After.
+        """
+        if not (scenario.supports_realtime
+                and self._realtime_check is not None
+                and self._realtime_check.isChecked()):
+            return source_config
+        if source_config.kwargs.get("use_realtime"):
+            return source_config
+        kwargs = dict(source_config.kwargs)
+        kwargs["use_realtime"] = True
+        return SourceConfig(source_type=source_config.source_type,
+                            kwargs=kwargs)
 
     # ------------------------------------------------------------------
     # Source code viewer helpers

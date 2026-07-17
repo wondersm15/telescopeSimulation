@@ -398,3 +398,63 @@ class TestScenarioSidebarActs:
         for sid in ("saturn_rings", "starfield_resolution"):
             assert sid in sb._buttons, f"{sid} not reachable in sidebar"
             assert sb._buttons[sid].isEnabled()
+
+
+# ------------------------------------------------------------------
+# R3.13a — live ephemeris applies to BOTH sides
+# ------------------------------------------------------------------
+
+class TestRealtimeBothSides:
+    def test_realtime_applies_to_before_and_after(self, qapp):
+        """When the live-ephemeris box is checked, BOTH the Before and After
+        Moon sources are rebuilt with use_realtime=True (R3.13a — previously
+        only the After side got it)."""
+        import telescope_gui.tutorial_mode.tutorial_tab as tt
+        from telescope_gui.tutorial_mode.scenario_registry import get_scenario_by_id
+
+        calls = []
+        orig = tt.run_scenario_side
+
+        def spy(tel, src, plot_fn, **kw):
+            calls.append(dict(src.kwargs))
+            return orig(tel, src, plot_fn, **kw)
+
+        tt.run_scenario_side = spy
+        try:
+            tab = tt.TutorialTab()
+            s = get_scenario_by_id("nd_filter_moon")
+            tab._load_scenario(s)
+            assert tab._realtime_check is not None
+            tab._realtime_check.setChecked(True)
+            calls.clear()
+            tab._render_before(s)
+            tab._render_after()
+            assert len(calls) == 2
+            assert all(kw.get("use_realtime") is True for kw in calls)
+        finally:
+            tt.run_scenario_side = orig
+
+    def test_realtime_off_leaves_sources_canned(self, qapp):
+        """Unchecked → neither side sets use_realtime (default canned Moon)."""
+        import telescope_gui.tutorial_mode.tutorial_tab as tt
+        from telescope_gui.tutorial_mode.scenario_registry import get_scenario_by_id
+
+        calls = []
+        orig = tt.run_scenario_side
+
+        def spy(tel, src, plot_fn, **kw):
+            calls.append(dict(src.kwargs))
+            return orig(tel, src, plot_fn, **kw)
+
+        tt.run_scenario_side = spy
+        try:
+            tab = tt.TutorialTab()
+            s = get_scenario_by_id("nd_filter_moon")
+            tab._load_scenario(s)
+            tab._realtime_check.setChecked(False)
+            calls.clear()
+            tab._render_before(s)
+            tab._render_after()
+            assert all(not kw.get("use_realtime") for kw in calls)
+        finally:
+            tt.run_scenario_side = orig

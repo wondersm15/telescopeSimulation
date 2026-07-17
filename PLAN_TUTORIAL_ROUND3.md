@@ -199,11 +199,22 @@ user input · 💤 deferred by user.
 > module description. The moon never gets crystal clear on the right regardless
 > of settings- is this intended or do things need modification? Is magnification
 > included here as a factor? If so is a note required noting that?"
-- ⬜ (a) Live ephemeris must also apply to the LEFT plot when checked.
-- ⬜ (b) Describe exit pupil (what it is + how it affects things) in the module
-  description.
-- ⬜ (c) Moon never gets crystal clear on the right — intended or needs fixing?
-- ⬜ (d) Is magnification a factor here? If so, add a note.
+- ✅ (a) Live ephemeris must also apply to the LEFT plot when checked. New
+  `_apply_realtime()` helper applied to BOTH sides in `_render_before` /
+  `_render_after`; verified via run_scenario_side spy (both Moon sources get
+  `use_realtime=True`). +2 tests.
+- ✅ (b) Describe exit pupil (what it is + how it affects things) in the module
+  description. Added: exit pupil = aperture ÷ mag = eyepiece FL ÷ f-ratio; sets
+  extended-object surface brightness; >7 mm wastes light past the eye pupil.
+- ✅ (c) Moon never gets crystal clear — INTENDED (explained). Diagnosis: the
+  softness is the fixed full-disk display scale (~5″/px on a 512-px panel), not
+  the 100 mm optics (resolve ~1.4″); ND changes brightness/saturation, NOT
+  sharpness. Confirmed NOT a bug: Moon renders 2048→512 sum-binned with real
+  maria/albedo detail; ND-2.0 drops saturated-disk fraction 0.99→0.06 (detail
+  emerges). Description reframed as a brightness/saturation lesson.
+- ✅ (d) Magnification IS the real crispness lever (enlarges 1.4″ detail to the
+  eye's ~1′ limit) but is NOT modelled in this fixed full-disk view — noted in
+  the description (Eye-blur toggle ≈ eye resolution, not magnification).
 
 ## R3.14 — Colour filters on Jupiter
 > "the red filter just makes everything look red. Additionally you say this is
@@ -466,6 +477,17 @@ user input · 💤 deferred by user.
     Airy circle was NEVER drawn. Now only signature-matching extra kwargs are
     forwarded. Verified all 4 toggle combos via the tab harness (Airy rings+cyan /
     seeing Gaussian+orange / both / ideal point). +3 tests; 402 pass.
+- 2026-07-16 (Batch E start):
+  - **R3.13 ✅ (a,b,c,d)** ND-Moon. (a) live ephemeris now applies to BOTH sides
+    via a single `_apply_realtime()` helper (was after-only + ND-Moon's empty
+    tweakables meant the before side never routed through the realtime path);
+    harness-verified both Moon sources get `use_realtime=True`; +2 GUI tests.
+    (b) exit pupil described (aperture÷mag = eyepiece FL÷f-ratio; extended-object
+    surface brightness; >7 mm wastes light). (c) "never crisp" is INTENDED —
+    softness = fixed full-disk display scale (~5″/px), not the 100 mm optics
+    (~1.4″); NOT a bug (Moon renders 2048→512 sum-binned with real detail; ND-2.0
+    cuts saturated fraction 0.99→0.06). (d) magnification is the real lever, not
+    modelled — noted. Description reframed as brightness/saturation, not sharpness.
 
 ---
 

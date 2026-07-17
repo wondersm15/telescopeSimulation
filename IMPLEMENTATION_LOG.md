@@ -2,6 +2,22 @@
 
 ---
 
+## Tutorial Tab — Round 3 (verbatim-feedback rework): Batches A–D done, E in progress
+
+**Batch E (filters & planets) — R3.13 done (2026-07-16):**
+- **R3.13 ✅** ND-Moon. (a) Live ephemeris now applies to BOTH panels: new
+  `_apply_realtime()` helper called on the before AND after source configs
+  (previously after-only, and ND-Moon's empty `tweakable_params` meant the before
+  side never even routed through the realtime code). Harness-verified both Moon
+  sources get `use_realtime=True`; +2 GUI tests. (b) Exit pupil now described in
+  the module (= aperture ÷ magnification = eyepiece FL ÷ f-ratio; sets extended-
+  object surface brightness; >7 mm wastes light past the eye pupil). (c/d) The
+  "Moon never gets crisp" question: INTENDED, not a bug — the softness is the
+  fixed full-disk display scale (~5″/px in a 512-px panel), far coarser than the
+  100 mm optics (~1.4″); ND changes brightness/saturation, not sharpness (ND-2.0
+  drops the saturated-disk fraction 0.99→0.06). Magnification is the real crispness
+  lever and is not modelled (fixed full-disk view). Description reframed accordingly.
+
 ## Tutorial Tab — Round 3 (verbatim-feedback rework): Batches A–D done
 
 **Date:** 2026-07-12 → 2026-07-13
