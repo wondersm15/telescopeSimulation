@@ -225,12 +225,21 @@ user input · 💤 deferred by user.
 > appropriately designed to show the effect (the red filter does not appear to be
 > showing anything), and that planetary and lunar objects are being implanted
 > correctly/well with their original basis definition."
-- ⬜ (a) Red filter just makes everything red (not showing the intended effect).
-- ⬜ (b) Rescaling — consider NOT rescaling, to show what actually happens.
-- ⬜ (c) Left Jupiter looks artificially coloured now (GRS almost highlighter
-  orange). Re-review the planet texture basis.
-- ⬜ (d) Re-review: filters do what they should; module design shows the effect;
-  planet/lunar objects constructed well vs their original basis definition.
+- ✅ (a) Red filter "just red" is PHYSICALLY CORRECT (zones+belts+GRS all reflect
+  red → uniform low-contrast disk). Root cause: the module premise was backwards.
+  Reframed around BLUE as the contrast filter: added W80A (light blue), which
+  darkens the blue-absorbing belts/GRS against the bright zones — features pop.
+  Verified render (blue = crisp banding, red = uniform red disk).
+- ✅ (b) Confirmed the render does NOT rescale per-image (`saturation_divisor` is
+  a fixed exposure/brightness reference, not image content) — the true dimming IS
+  shown. The description's "rescales" claim was wrong; corrected to say both
+  panels use the same exposure so the honest dimming + colour shift is visible.
+- ✅ (c) GRS muted [210,105,75] → [188,122,100] (realistic brick/salmon, no longer
+  "highlighter orange"); kept blue-poor so it still darkens under a blue filter.
+- ✅ (d) Filters re-reviewed + corrected: W25 red description now says uniform/low-
+  contrast + haze-cutting (not "deepens GRS"); W47 flagged as dark; new W80A is
+  THE Jupiter filter; W58 green intermediate. Filter-combo tooltip corrected.
+  Default filter W25→W80A; default exposure 0.25→0.4 (unfiltered stays readable).
 
 ## R3.15 — Bright + dim: dynamic range
 > "specify what 'HDR' is. Again if the intent is for left to be detector and
@@ -267,8 +276,12 @@ user input · 💤 deferred by user.
 > constructed- with the high resolution version and the more standard version?
 > (Or perhaps we should always start with the highest possible version and let
 > the telescope simulation effects blur/make more realistic the image."
-- ⬜ Re-confirm planets start at highest intrinsic resolution then degrade
-  (validated in R2 §B14, but re-verify given R3.14 texture concern).
+- ✅ Re-confirmed: extended sources render at the highest useful resolution then
+  degrade. Jupiter/Saturn (procedural) render ≥512 px (oversampling the ~0.7″
+  optics); Moon renders at its 2048 texture cap then sum-bins to 512. Interior
+  high-pass detail washes out MONOTONICALLY with seeing for Jupiter (0.016→0.002)
+  and Saturn (0.041→0.004); the Moon is seeing-insensitive at full-disk scale
+  (seeing ≪ 1 display px there — correct physics).
 
 ## R3.18 — Propagation
 > "Make sure repeated error findings are propagated across all cases."
@@ -488,6 +501,22 @@ user input · 💤 deferred by user.
     (~1.4″); NOT a bug (Moon renders 2048→512 sum-binned with real detail; ND-2.0
     cuts saturated fraction 0.99→0.06). (d) magnification is the real lever, not
     modelled — noted. Description reframed as brightness/saturation, not sharpness.
+  - **R3.14 ✅ (a,b,c,d)** Colour filters on Jupiter — the module premise was
+    backwards. Root cause: a RED filter on Jupiter gives a near-uniform low-
+    contrast disk (zones+belts+GRS all reflect red), so "everything red" was
+    correct physics, not a bug; the real contrast filter is BLUE (belts/GRS absorb
+    blue → darken vs the white zones). Fixes: added **W80A (light blue)** — bright
+    enough to see (unlike the dark W47), verified belt/zone contrast 0.49 vs red's
+    0.65; made it the default; corrected W25/W47/W58 descriptions + the filter-combo
+    tooltip (red is haze-cutting, not GRS-deepening); muted the GRS colour
+    [210,105,75]→[188,122,100] (no longer "highlighter orange"); confirmed the
+    render does NOT rescale per-image and fixed the description's false "rescales"
+    claim; default exposure 0.25→0.4. 3-panel render confirms blue=crisp banding,
+    red=uniform disk. +4 tests.
+  - **R3.17 ✅** planets render highest-useful-res then degrade — re-confirmed with
+    a clean interior high-pass metric: Jupiter/Saturn detail monotonically washes
+    out with seeing; Moon (2048→512) seeing-insensitive at full-disk scale.
+  - **Batch E COMPLETE.** 408 tests pass.
 
 ---
 

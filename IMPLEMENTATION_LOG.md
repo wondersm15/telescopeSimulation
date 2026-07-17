@@ -2,9 +2,27 @@
 
 ---
 
-## Tutorial Tab — Round 3 (verbatim-feedback rework): Batches A–D done, E in progress
+## Tutorial Tab — Round 3 (verbatim-feedback rework): Batches A–E done
 
-**Batch E (filters & planets) — R3.13 done (2026-07-16):**
+**Batch E (filters & planets) — COMPLETE (2026-07-16). 408 tests pass.**
+- **R3.14 ✅** Colour filters on Jupiter — the module premise was backwards. A RED
+  filter on Jupiter yields a near-uniform low-contrast disk (zones, belts and the
+  GRS all reflect red), so "everything red" was correct physics, not a bug; the
+  real contrast filter is BLUE (belts + GRS absorb blue → darken against the white
+  zones). Added **W80A (light blue)** — bright enough to stay visible (unlike the
+  dark W47), belt/zone contrast 0.49 vs red's 0.65 — and made it the default.
+  Corrected the W25/W47/W58 descriptions and the filter-combo tooltip (red cuts
+  haze, it doesn't "deepen the GRS"). Muted the GRS colour [210,105,75]→
+  [188,122,100] (no longer "highlighter orange"). Confirmed the render does NOT
+  rescale per-image (`saturation_divisor` is a fixed reference) and fixed the
+  description's false "rescales" claim; default exposure 0.25→0.4 so the unfiltered
+  disk stays readable. 3-panel render confirms blue = crisp banding, red = uniform
+  red disk. +4 tests.
+- **R3.17 ✅** Re-confirmed planets render at the highest useful resolution then
+  degrade: Jupiter/Saturn (procedural) render ≥512 px oversampling the ~0.7″ optics;
+  Moon renders at its 2048 texture cap then sum-bins to 512. Interior high-pass
+  detail washes out monotonically with seeing for Jupiter/Saturn; the Moon is
+  seeing-insensitive at full-disk scale (seeing ≪ 1 display px — correct).
 - **R3.13 ✅** ND-Moon. (a) Live ephemeris now applies to BOTH panels: new
   `_apply_realtime()` helper called on the before AND after source configs
   (previously after-only, and ND-Moon's empty `tweakable_params` meant the before

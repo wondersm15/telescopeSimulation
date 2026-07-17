@@ -817,6 +817,12 @@ class TestPerSideDisplayControls:
         assert s.before_filter == "None"
         assert s.default_filter != "None"
 
+    def test_color_filter_jupiter_defaults_to_blue(self):
+        """R3.14: blue (W80A) is the correct Jupiter contrast filter and is
+        now the default — NOT red (which gives a near-uniform red disk)."""
+        s = self._scn("color_filter_jupiter")
+        assert "blue" in s.default_filter.lower()
+
     def test_default_display_stretch_defaults_to_log(self):
         """Scenarios that don't opt in keep the Eye (log) default."""
         assert self._scn("rayleigh_criterion").default_display_stretch == "log"

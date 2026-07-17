@@ -58,6 +58,38 @@ class TestColourFiltersRejectOppositeChannels:
         assert tR < 0.05
 
 
+class TestW80ALightBlue:
+    """W80A (R3.14): the light-blue Jupiter contrast filter — blue-dominant,
+    rejects red, and much BRIGHTER than the dark W47 so the disk stays
+    visible."""
+
+    def test_blue_dominant_rejects_red(self):
+        tR, tG, tB = get_filter_by_name("W80A (light blue)").channel_transmissions()
+        assert tB > tG > tR
+        assert tR < 0.05
+
+    def test_brighter_than_dark_w47(self):
+        _, _, tB80 = get_filter_by_name("W80A (light blue)").channel_transmissions()
+        _, _, tB47 = get_filter_by_name("W47 (blue)").channel_transmissions()
+        assert tB80 > 2 * tB47, "W80A must pass much more blue than dark W47"
+
+    def test_reveals_jupiter_belt_contrast(self):
+        """Under W80A the blue-absorbing belts darken MORE than the white
+        zones — the physically-correct Jupiter contrast effect (and better
+        than the red W25, which gives a near-uniform disk)."""
+        import numpy as np
+        lum_w = np.array([0.2126, 0.7152, 0.0722])
+        zone = np.array([235, 220, 185]) / 255.0
+        belt = np.array([155, 110, 75]) / 255.0
+
+        def belt_over_zone(fname):
+            T = np.array(get_filter_by_name(fname).channel_transmissions())
+            return (belt * T * lum_w).sum() / (zone * T * lum_w).sum()
+
+        # Lower ratio = belt darker vs zone = more contrast.
+        assert belt_over_zone("W80A (light blue)") < belt_over_zone("W25 (red)")
+
+
 class TestFilterLibrary:
     def test_library_names_unique_and_lookup(self):
         names = [f.name for f in FILTER_LIBRARY]

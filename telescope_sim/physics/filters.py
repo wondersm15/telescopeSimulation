@@ -141,8 +141,11 @@ ND_20 = Filter(
 WRATTEN_25 = Filter(
     name="W25 (red)",
     description="Wratten 25 red — sharp cut-on ~590 nm, passes the whole "
-                "red tail (long-pass). Enhances the Great Red Spot and Mars "
-                "surface features. Blocks blue/green almost completely.",
+                "red tail (long-pass). On Jupiter it gives a fairly UNIFORM "
+                "red disk (zones, belts and the Red Spot all reflect red, so "
+                "feature contrast is LOW); its real value is cutting blue haze "
+                "/ atmospheric dispersion and darkening blue festoons. Great "
+                "on Mars. Blocks blue/green almost completely.",
     # Long-pass, NOT a Gaussian: a real W25 has a steep cut-on near 590 nm
     # and transmits all longer wavelengths. The previous 140 nm Gaussian
     # leaked ~15% green (T_G≈0.15), so white targets read orange/yellow.
@@ -152,16 +155,32 @@ WRATTEN_25 = Filter(
 
 WRATTEN_47 = Filter(
     name="W47 (blue)",
-    description="Wratten 47 dark blue — passes 380–490 nm. "
-                "Brings out Jupiter's white zones and Venus cloud detail.",
+    description="Wratten 47 DARK blue — passes 380–490 nm at low "
+                "transmission, so the image is quite dim. Classic for Venus "
+                "cloud detail; for Jupiter the lighter W80A is usually "
+                "preferred (brighter, same blue-contrast effect).",
     transmission=_gaussian_transmission(
         center_nm=450.0, fwhm_nm=80.0, peak_t=0.30),
+)
+
+WRATTEN_80A = Filter(
+    name="W80A (light blue)",
+    description="Wratten 80A light blue — passes blue–green at high "
+                "transmission. THE Jupiter contrast filter: the belts and "
+                "Great Red Spot absorb blue, so they darken against the "
+                "blue-reflecting white zones — features 'pop'. Bright enough "
+                "to keep the disk clearly visible.",
+    # Broad, bright blue-green: T_R≈0.01, T_G≈0.34, T_B≈0.74. Real W80A is a
+    # light blue used far more than the dark W47 for planetary contrast.
+    transmission=_gaussian_transmission(
+        center_nm=475.0, fwhm_nm=140.0, peak_t=0.75),
 )
 
 WRATTEN_58 = Filter(
     name="W58 (green)",
     description="Wratten 58 green — passes ~500–570 nm. "
-                "Increases Jovian belt contrast.",
+                "Increases Jovian belt contrast (intermediate between the "
+                "blue and red extremes).",
     # Narrowed from 80→55 nm FWHM so the blue tail is rejected more
     # cleanly (was T_B≈0.17); a real W58 cuts blue and red hard.
     transmission=_gaussian_transmission(
@@ -173,7 +192,7 @@ WRATTEN_58 = Filter(
 FILTER_LIBRARY: tuple[Filter, ...] = (
     NO_FILTER,
     ND_05, ND_10, ND_20,
-    WRATTEN_25, WRATTEN_47, WRATTEN_58,
+    WRATTEN_25, WRATTEN_58, WRATTEN_80A, WRATTEN_47,
 )
 
 

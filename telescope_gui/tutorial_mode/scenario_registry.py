@@ -1023,14 +1023,23 @@ SCENARIOS: list[ScenarioDefinition] = [
         act=3, act_label="Brightness, Saturation & Filters",
         description=(
             "Applies to: any telescope. "
-            "Planetary observers use Wratten colour filters to lift "
-            "specific surface features: W25 (red) deepens the Great "
-            "Red Spot, W47 (blue) brings out the white zones, W58 "
-            "(green) increases belt contrast. The Before side shows "
-            "Jupiter unfiltered; the After side applies the selected "
-            "filter and rescales — note that the colour balance shifts "
-            "and overall brightness drops because most of the spectrum "
-            "is blocked."
+            "Jupiter's belts and Great Red Spot absorb blue light (that's "
+            "why they look orange/brown); its zones are white and reflect "
+            "everything. Colour filters exploit this. The Before side is "
+            "unfiltered; pick a filter on the After side:\n"
+            "• W80A (light blue) — THE contrast filter: the blue-absorbing "
+            "belts and Red Spot go dark against the bright zones, so features "
+            "pop. (Default.)\n"
+            "• W58 (green) — intermediate; boosts belt contrast.\n"
+            "• W25 (red) — passes red, which zones, belts AND the Red Spot "
+            "all reflect, so you get a fairly UNIFORM red disk with LITTLE "
+            "feature contrast. Its real job is cutting blue haze / atmospheric "
+            "dispersion, not boosting contrast (a common misconception).\n\n"
+            "The image is NOT rescaled: both panels use the same exposure, so "
+            "you see the TRUE effect — a colour filter blocks most of the "
+            "spectrum, so the disk also gets dimmer (raise Exposure if it's "
+            "too dark). That honest dimming is part of the trade-off a real "
+            "observer weighs."
         ),
         learn_more_section="Photometry & Filters",
         before_telescope=_JUPITER_200MM,
@@ -1047,10 +1056,12 @@ SCENARIOS: list[ScenarioDefinition] = [
         before_apply_coma=False,
         before_seeing_arcsec=1.5,
         implemented=True,
-        # Jupiter at 200 mm + filter dimming together — use the same
-        # 0.25× as jupiter_full so the disk surface stays readable.
-        default_exposure=0.25,
-        default_filter="W25 (red)",
+        # Jupiter at 200 mm. 0.4× keeps the UNFILTERED disk well-exposed
+        # (belts + muted GRS visible, not washed to white) while the W80A
+        # blue after-view stays clearly readable; the honest filter dimming
+        # is still visible vs the Before panel. Users can raise Exposure.
+        default_exposure=0.4,
+        default_filter="W80A (light blue)",
         show_filter_combo=True,
         supports_realtime=True,
         # Before side pinned unfiltered so the comparison isolates the

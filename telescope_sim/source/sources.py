@@ -770,7 +770,10 @@ class Jupiter(AstronomicalSource):
             -((xx - grs_x) ** 2 / (2 * grs_sigma_x ** 2)
               + (yy - grs_y) ** 2 / (2 * grs_sigma_y ** 2))
         )
-        grs_color = np.array([210, 105, 75]) / 255.0
+        # Muted brick/salmon — the real GRS is a pale desaturated orange-
+        # brown, not a vivid "highlighter orange" (R3.14c). Kept blue-poor
+        # so it still darkens under a blue filter (blue-absorbing feature).
+        grs_color = np.array([188, 122, 100]) / 255.0
         for c in range(3):
             rgb[..., c] = (rgb[..., c] * (1.0 - grs_mask)
                            + grs_color[c] * grs_mask)

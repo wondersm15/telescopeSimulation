@@ -882,8 +882,9 @@ class TutorialTab(QWidget):
             "Optical filter applied before the detector. ND = neutral\n"
             "density (uniform dimming). W = Wratten colour filters that\n"
             "shift the RGB balance — useful for revealing low-contrast\n"
-            "features on planets (red filter highlights Jupiter's GRS,\n"
-            "blue brings out Venus cloud detail, etc.)."
+            "planetary features (a light-blue W80A darkens Jupiter's\n"
+            "blue-absorbing belts and Red Spot against the bright zones;\n"
+            "a red W25 mostly cuts haze and gives a uniform red disk)."
         )
         combo.currentIndexChanged.connect(self._on_update_clicked)
         col.addWidget(lbl)
