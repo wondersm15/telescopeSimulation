@@ -2,7 +2,24 @@
 
 ---
 
-## Tutorial Tab — Round 3 (verbatim-feedback rework): Batches A–F done
+## Tutorial Tab — Round 3 (verbatim-feedback rework): COMPLETE (Batches A–G)
+
+**Batch G (propagation + legends-out sweep) — COMPLETE (2026-07-17). 414 tests pass.**
+- **R3.18 + R3.5c (broad) ✅** Built an automated legends-out detector (render every
+  scenario's before+after, measure each legend's bbox against the data-line
+  vertices) and fixed the two remaining offenders: `plot_ray_trace_pupil_colored`
+  (the shared `_draw_ray_trace` legend sat on the rays → pulled to a figure-level
+  legend in the bottom whitespace) and `plot_vignetting_curve` (legend over the
+  zero-tail → moved to the empty centre-left). Re-ran: 0 legends overlap >3 data
+  points across all 17 scenarios. Verified the live-ephemeris-both-sides fix
+  reaches all three realtime scenarios, and walked all 17 scenarios (both sides
+  render, no errors). +2 regression tests.
+
+**Round 3 is complete: every verbatim item R3.1–R3.21 addressed across Batches
+A–G (R3.16 was a status discrepancy — the star field was already present; the
+Act-4 sidebar bug that hid it was fixed in Batch A).**
+
+## Tutorial Tab — Round 3 (verbatim-feedback rework): Batch F
 
 **Batch F (docs & diagram clarity) — COMPLETE (2026-07-16). 412 tests pass.**
 - **R3.3 ✅** (a) The eye-mode diffraction rings really are over-emphasised: the

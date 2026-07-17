@@ -293,8 +293,15 @@ user input · 💤 deferred by user.
 
 ## R3.18 — Propagation
 > "Make sure repeated error findings are propagated across all cases."
-- ⬜ Propagate every fix across all affected modules (legends-outside-plot,
-  brightness, view-order, etc.).
+- ✅ Propagated. (1) Live-ephemeris-both-sides (R3.13a) now reaches ALL 3 realtime
+  scenarios (nd_filter_moon, color_filter_jupiter, saturn_rings) — verified both
+  sources get use_realtime=True. (2) Legends-out sweep (R3.5c broader): an
+  automated detector rendered every scenario's axes and measured legend-vs-data
+  overlap; found + fixed the 2 remaining offenders — plot_ray_trace_pupil_colored
+  (legend → figure-bottom whitespace) and plot_vignetting_curve (legend → empty
+  centre-left). Now 0 legends overlap >3 data points across all 17 scenarios.
+  (3) Full scenario walk: all 17 implemented scenarios render BOTH sides with no
+  error. +2 regression tests.
 
 ---
 
@@ -541,6 +548,17 @@ user input · 💤 deferred by user.
   - R3.8b (defocus/tilt in P&P) and R3.10c (eye resolution in Detector-vs-Eye)
     confirmed already done in Batches C/D.
   - **Batch F COMPLETE.** +4 tests; 412 pass.
+- 2026-07-17 (Batch G — FINAL):
+  - **R3.18 ✅ + R3.5c (broad) ✅** Propagation + legends-out sweep. Built an
+    automated overlap detector (render every scenario, measure legend bbox vs
+    data-line vertices); found 2 remaining blocking legends and fixed them:
+    plot_ray_trace_pupil_colored (shared _draw_ray_trace's in-axes "upper right"
+    legend → pulled to a figure-level legend in the bottom whitespace) and
+    plot_vignetting_curve ("lower left" over the zero-tail → "center left" empty
+    region). Re-ran: 0 legends overlap >3 data pts across all 17 scenarios.
+    Live-ephemeris-both-sides verified across all 3 realtime scenarios. Full
+    scenario walk: 17/17 render both sides, no errors. +2 tests; 414 pass.
+  - **BATCH G COMPLETE — ALL of Round 3 (Batches A–G) DONE.**
 
 ---
 

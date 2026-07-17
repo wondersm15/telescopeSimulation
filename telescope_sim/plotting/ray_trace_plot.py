@@ -1176,12 +1176,30 @@ def plot_ray_trace_pupil_colored(telescope: Telescope,
                     if ax.get_legend() is not None:
                         ax.legend(loc="lower left", fontsize=7, framealpha=0.9)
 
+    # Move the auto-generated ray-trace legend OUT of the plot (R3.18 /
+    # R3.5c legends-out sweep): the rays fill the upper band, so the shared
+    # helper's in-axes "upper right" legend sits right on top of them. Pull
+    # it down to a FIGURE-level legend in the clear whitespace below the
+    # wide, short ray band (robust regardless of the axes' equal-aspect
+    # shape; supersedes the inset-only relocation above).
+    _leg = ax.get_legend()
+    if _leg is not None:
+        _handles, _labels = ax.get_legend_handles_labels()
+        _leg.remove()
+    else:
+        _handles = _labels = None
+
     # Add pupil-zone colorbar — matches the ray-fan panel
     cbar = fig.colorbar(sm, ax=ax, shrink=0.7, pad=0.02,
                         label="|Pupil zone| (mm)")
     cbar.ax.tick_params(labelsize=8)
 
     plt.tight_layout()
+    # Figure-level legend added AFTER tight_layout so it isn't squeezed into
+    # the axes.
+    if _handles:
+        fig.legend(_handles, _labels, loc="lower center", ncol=3,
+                   fontsize=7, frameon=True)
     if save_path:
         fig.savefig(save_path, dpi=150, bbox_inches="tight")
     return fig
@@ -3238,7 +3256,10 @@ def plot_vignetting_curve(
                  f"f/{telescope.focal_ratio:.1f}, "
                  f"obstruction ε = {obs_ratio:.2f} ({obs_ratio:.0%})")
     ax.set_ylim(-0.05, 1.1)
-    ax.legend(loc="lower left")
+    # Legend at center-left: the curve is flat at 1.0 across the top and 0.0
+    # along the bottom tail, so the mid-height left region is empty — keeps
+    # the legend off both the curve and the zero tail (R3.18 legends-out).
+    ax.legend(loc="center left")
     ax.grid(True, alpha=0.3)
 
     ax.text(0.98, 0.20,

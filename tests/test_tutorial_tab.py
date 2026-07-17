@@ -1212,3 +1212,50 @@ class TestBrightnessModelPropagation:
                            exposure_level=2.0, **extra)
             assert not np.allclose(d1, d2), (
                 f"{type(src).__name__}: detector view ignored exposure")
+
+
+class TestLegendsOutOfPlots:
+    """R3.18 / R3.5c: legends must not sit on top of the plotted data. These
+    two plots were the remaining offenders found by the legends-out sweep."""
+
+    @staticmethod
+    def _legend_data_overlap(ax, fig):
+        """Count data-line vertices falling inside the axes legend box."""
+        import numpy as np
+        leg = ax.get_legend()
+        if leg is None:
+            return 0
+        fig.canvas.draw()
+        lb = leg.get_window_extent()
+        hits = 0
+        for ln in ax.get_lines():
+            xd, yd = ln.get_data()
+            if len(xd) == 0:
+                continue
+            pts = ax.transData.transform(np.column_stack([xd, yd]))
+            hits += int(((pts[:, 0] >= lb.x0) & (pts[:, 0] <= lb.x1)
+                         & (pts[:, 1] >= lb.y0) & (pts[:, 1] <= lb.y1)).sum())
+        return hits
+
+    def test_pupil_ray_trace_legend_not_over_rays(self):
+        from telescope_sim.geometry.telescope import NewtonianTelescope
+        from telescope_sim.plotting.ray_trace_plot import (
+            plot_ray_trace_pupil_colored)
+        tel = NewtonianTelescope(primary_diameter=200.0, focal_length=800.0,
+                                 primary_type="spherical")
+        fig = plot_ray_trace_pupil_colored(tel, figsize=(5, 5))
+        # Legend was pulled to a FIGURE-level legend (bottom whitespace), so
+        # the axes itself carries no legend on top of the rays.
+        assert fig.axes[0].get_legend() is None
+        assert len(fig.legends) >= 1
+        plt.close(fig)
+
+    def test_vignetting_curve_legend_clears_curve(self):
+        from telescope_sim.geometry.telescope import NewtonianTelescope
+        from telescope_sim.plotting.ray_trace_plot import plot_vignetting_curve
+        tel = NewtonianTelescope(primary_diameter=200.0, focal_length=800.0)
+        fig = plot_vignetting_curve(tel, figsize=(5, 5))
+        # A few points from the θ_fif reference line may graze the frame, but
+        # the legend must not sit on the illumination curve (was 64 pts).
+        assert self._legend_data_overlap(fig.axes[0], fig) < 5
+        plt.close(fig)
