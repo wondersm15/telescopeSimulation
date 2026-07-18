@@ -1056,11 +1056,11 @@ SCENARIOS: list[ScenarioDefinition] = [
         before_apply_coma=False,
         before_seeing_arcsec=1.5,
         implemented=True,
-        # Jupiter at 200 mm. 0.4× keeps the UNFILTERED disk well-exposed
-        # (belts + muted GRS visible, not washed to white) while the W80A
-        # blue after-view stays clearly readable; the honest filter dimming
-        # is still visible vs the Before panel. Users can raise Exposure.
-        default_exposure=0.4,
+        # Jupiter at 200 mm with the REAL photo-texture (R4.12). 0.3× keeps
+        # the unfiltered disk naturally exposed (muted belts + a realistic
+        # Great Red Spot, not washed to white) while the W80A blue after-view
+        # stays readable. Users can raise Exposure.
+        default_exposure=0.3,
         default_filter="W80A (light blue)",
         show_filter_combo=True,
         supports_realtime=True,

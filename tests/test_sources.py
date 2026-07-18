@@ -575,3 +575,41 @@ class TestExitPupilWashout:
         assert isinstance(result, list)  # eyepiece produces list of figures
         import matplotlib.pyplot as plt
         plt.close("all")
+
+
+class TestRealPlanetTextures:
+    """R4.12: Jupiter and Saturn now render from bundled REAL cylindrical
+    photo-maps (projected like the Moon), not procedural palettes — so the
+    Great Red Spot is no longer an oversaturated 'highlighter orange'."""
+
+    def test_jupiter_texture_loads_and_colors_disk(self):
+        j = Jupiter(angular_diameter_arcsec=40.0)
+        rgb = j.render_ideal_rgb(half_fov_arcsec=25.0, num_pixels=128)
+        assert rgb.shape == (128, 128, 3)
+        disk = rgb.sum(axis=2) > 0.05
+        assert disk.sum() > 500          # a real disk is present
+        # Mean disk colour is warm (R > B) but not garish.
+        mean = rgb[disk].mean(axis=0)
+        assert mean[0] > mean[2]          # tan/brown: red beats blue
+
+    def test_jupiter_grs_not_highlighter(self):
+        """No large cluster of highly-saturated orange pixels (the old
+        procedural GRS peaked at saturation ~0.5+ across a broad oval)."""
+        j = Jupiter(angular_diameter_arcsec=40.0)
+        rgb = j.render_ideal_rgb(half_fov_arcsec=25.0, num_pixels=200)
+        r, g, b = rgb[..., 0], rgb[..., 1], rgb[..., 2]
+        mx = rgb.max(axis=2)
+        sat = np.where(mx > 1e-6, (mx - rgb.min(axis=2)) / (mx + 1e-9), 0.0)
+        orange = (r > 0.4) & (r > g) & (g > b)
+        very_sat_orange = orange & (sat > 0.55)
+        # Real texture keeps this tiny; the procedural GRS made it large.
+        assert very_sat_orange.mean() < 0.02
+
+    def test_saturn_uses_texture_globe_keeps_rings(self):
+        s = Saturn(angular_diameter_arcsec=18.0, ring_tilt_deg=25.0)
+        rgb = s.render_ideal_rgb(half_fov_arcsec=25.0, num_pixels=200)
+        # Rings extend well beyond the globe radius (~9″) out to ~2.3 r_eq.
+        lit = rgb.sum(axis=2) > 0.05
+        ys, xs = np.where(lit)
+        span_arcsec = (xs.max() - xs.min()) / 200.0 * 50.0
+        assert span_arcsec > 22.0         # globe (~18″) + rings present

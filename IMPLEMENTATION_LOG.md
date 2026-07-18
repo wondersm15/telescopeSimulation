@@ -2,6 +2,25 @@
 
 ---
 
+## Tutorial Tab — Round 4 (second verbatim-feedback round): in progress
+
+**Ledger:** `PLAN_TUTORIAL_ROUND4.md` (verbatim R4.1–R4.15 + diagnosis + 2 user
+decisions: D1 = new Viewing-Modes module after Airy disc absorbing exposure/
+saturation; D2 = real photo-textures for Jupiter/Saturn).
+
+- **R4.12 ✅ (2026-07-18) — real planet textures.** Root-caused the "highlighter
+  orange" Great Red Spot: the procedural palette was re-saturated/whitewashed by
+  the render's brightness normalisation, so colour-muting alone couldn't win.
+  Replaced the procedural Jupiter and Saturn GLOBES with REAL bundled cylindrical
+  photo-maps (jupiter_2k.jpg, saturn_2k.jpg — Solar System Scope, CC BY 4.0; see
+  data/CREDITS.md) projected onto an oblate globe exactly like the Moon's LRO map.
+  Refactored the Moon's texture load / equirect-sample / sphere-projection into
+  shared module helpers (`_load_planet_texture`, `_sample_equirect`,
+  `_project_globe`) so all three bodies share ONE honest implementation. Saturn
+  keeps its detailed procedural rings (Cassini/Encke/shadow). Retuned exposures
+  (Jupiter 0.4→0.3) so the disk no longer washes to white: GRS rendered saturation
+  0.49→0.39, blown-white fraction 0.40→0.02. +3 tests; 417 pass.
+
 ## Tutorial Tab — Round 3 (verbatim-feedback rework): COMPLETE (Batches A–G)
 
 **Batch G (propagation + legends-out sweep) — COMPLETE (2026-07-17). 414 tests pass.**

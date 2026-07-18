@@ -7,9 +7,114 @@ the final simulated image.
 
 from __future__ import annotations
 
+import os
 from abc import ABC, abstractmethod
 
 import numpy as np
+
+
+# ---------------------------------------------------------------------------
+# Shared real-texture globe projection (used by Moon, Jupiter, Saturn)
+# ---------------------------------------------------------------------------
+# All three bodies are rendered by projecting a real equirectangular
+# (cylindrical) map onto a sphere with an orthographic projection, plus limb
+# darkening and (Moon only) a phase terminator. This keeps a single, honest
+# implementation instead of per-planet procedural palettes (which read as
+# "artificial"). Textures live in data/ (see data/CREDITS.md).
+
+_TEXTURE_CACHE: dict[str, np.ndarray] = {}
+
+
+def _load_planet_texture(filename: str) -> np.ndarray:
+    """Load & cache an equirectangular RGB texture from data/ as float [0,1]."""
+    if filename in _TEXTURE_CACHE:
+        return _TEXTURE_CACHE[filename]
+    from PIL import Image
+    path = os.path.join(os.path.dirname(__file__), "data", filename)
+    if not os.path.exists(path):
+        raise FileNotFoundError(
+            f"Texture not found at {path}. See telescope_sim/source/data/"
+            "CREDITS.md for sources.")
+    img = Image.open(path).convert("RGB")
+    arr = np.asarray(img, dtype=np.float64) / 255.0
+    _TEXTURE_CACHE[filename] = arr
+    return arr
+
+
+def _sample_equirect(texture: np.ndarray, lat: np.ndarray, lon: np.ndarray,
+                     mask: np.ndarray) -> np.ndarray:
+    """Bilinearly sample an equirectangular texture at lat/lon (radians).
+
+    Texture layout: x = 0..W → lon = -180..+180; y = 0..H → lat = +90..-90.
+    Only samples where ``mask`` is True; elsewhere returns 0.
+    """
+    tex_h, tex_w = texture.shape[:2]
+    rgb = np.zeros((*lat.shape, 3))
+    u = (lon[mask] / np.pi + 1.0) * 0.5   # [0, 1]
+    v = (0.5 - lat[mask] / np.pi)          # [0, 1]
+    px = np.clip(u * (tex_w - 1), 0, tex_w - 1)
+    py = np.clip(v * (tex_h - 1), 0, tex_h - 1)
+    x0 = np.floor(px).astype(int)
+    y0 = np.floor(py).astype(int)
+    x1 = np.minimum(x0 + 1, tex_w - 1)
+    y1 = np.minimum(y0 + 1, tex_h - 1)
+    fx = px - x0
+    fy = py - y0
+    for c in range(3):
+        val = (texture[y0, x0, c] * (1 - fx) * (1 - fy)
+               + texture[y0, x1, c] * fx * (1 - fy)
+               + texture[y1, x0, c] * (1 - fx) * fy
+               + texture[y1, x1, c] * fx * fy)
+        rgb[..., c][mask] = val
+    return rgb
+
+
+def _project_globe(half_fov_arcsec: float, num_pixels: int,
+                   angular_diameter_arcsec: float,
+                   sub_observer_lon_deg: float = 0.0,
+                   limb_u: float = 0.15, phase: float = 1.0,
+                   oblateness: float = 0.0) -> dict:
+    """Orthographic projection of a (possibly oblate) globe onto the image.
+
+    Args:
+        oblateness: polar flattening f = (r_eq - r_pol)/r_eq. The disk is an
+            ellipse compressed in y by (1 - f); the giant planets are visibly
+            oblate (Jupiter f≈0.065, Saturn f≈0.098).
+        limb_u: linear limb-darkening coefficient.
+        phase: illuminated fraction (1.0 = full; <1 draws a terminator).
+
+    Returns a geometry dict: xx, yy, disk, limb, lat, lon, illuminated, mu.
+    """
+    coords = np.linspace(-half_fov_arcsec, half_fov_arcsec, num_pixels)
+    xx, yy = np.meshgrid(coords, coords)
+
+    r_eq = angular_diameter_arcsec / 2.0
+    r_pol = r_eq * (1.0 - oblateness)
+    # Normalised elliptical radius: circle in x, compressed in y.
+    rr = np.sqrt((xx / r_eq) ** 2 + (yy / r_pol) ** 2)
+    disk = rr <= 1.0
+
+    mu = np.zeros_like(rr)
+    mu[disk] = np.sqrt(1.0 - np.clip(rr[disk], 0, 1) ** 2)
+    limb = np.zeros_like(rr)
+    limb[disk] = 1.0 - limb_u * (1.0 - mu[disk])
+
+    lat = np.zeros_like(rr)
+    lon = np.zeros_like(rr)
+    xn = xx[disk] / r_eq
+    yn = yy[disk] / r_pol   # de-squash latitude for the spheroid
+    zn = np.sqrt(np.clip(1.0 - xn ** 2 - yn ** 2, 0, 1))
+    lat[disk] = np.arcsin(np.clip(yn, -1, 1))
+    lon[disk] = np.arctan2(xn, zn) + np.radians(sub_observer_lon_deg)
+    lon[disk] = (lon[disk] + np.pi) % (2 * np.pi) - np.pi
+
+    illuminated = np.ones_like(rr, dtype=bool)
+    if phase < 1.0:
+        term_x = (2.0 * phase - 1.0) * r_eq
+        illuminated = xx >= term_x * mu
+
+    return {"xx": xx, "yy": yy, "disk": disk, "limb": limb,
+            "lat": lat, "lon": lon, "illuminated": illuminated, "mu": mu}
 
 
 class AstronomicalSource(ABC):
@@ -626,184 +731,42 @@ class Jupiter(AstronomicalSource):
         self.angular_diameter_arcsec = angular_diameter_arcsec
         self.use_realtime = use_realtime
 
-    def render_ideal(self, half_fov_arcsec: float,
-                     num_pixels: int) -> np.ndarray:
-        coords = np.linspace(-half_fov_arcsec, half_fov_arcsec, num_pixels)
-        xx, yy = np.meshgrid(coords, coords)
-
-        radius_arcsec = self.angular_diameter_arcsec / 2.0
-        # Normalized radial distance from center (0 at center, 1 at limb)
-        rr = np.sqrt(xx ** 2 + yy ** 2) / radius_arcsec
-
-        # Disk mask
-        disk = rr <= 1.0
-
-        # Limb darkening: I(r) = I_0 * (1 - u*(1 - sqrt(1 - r^2)))
-        # u ~ 0.5 is typical for Jupiter in visible light
-        u = 0.5
-        mu = np.zeros_like(rr)
-        mu[disk] = np.sqrt(1.0 - rr[disk] ** 2)
-        limb_darkening = np.zeros_like(rr)
-        limb_darkening[disk] = 1.0 - u * (1.0 - mu[disk])
-
-        # Equatorial band structure
-        # Jupiter's latitude in the image (yy/radius gives sin(lat) approx)
-        lat = np.zeros_like(yy)
-        lat[disk] = np.arcsin(np.clip(yy[disk] / radius_arcsec, -1, 1))
-
-        # Band pattern: superposition of sinusoids at different frequencies
-        # to create alternating light/dark bands
-        bands = np.zeros_like(lat)
-        # Main bands (North/South Equatorial Belts, Tropical Zones, etc.)
-        bands += 0.08 * np.sin(6.0 * lat)    # broad bands
-        bands += 0.05 * np.sin(12.0 * lat)   # finer structure
-        bands += 0.03 * np.sin(20.0 * lat)   # fine detail
-
-        # Great Red Spot: elliptical brightening at ~22°S latitude
-        grs_lat = np.radians(-22.0)
-        grs_lon = np.radians(30.0)  # arbitrary longitude position
-        grs_x_center = radius_arcsec * np.cos(grs_lat) * np.sin(grs_lon)
-        grs_y_center = radius_arcsec * np.sin(grs_lat)
-        # Elliptical Gaussian (wider in longitude than latitude)
-        grs_sigma_x = radius_arcsec * 0.12
-        grs_sigma_y = radius_arcsec * 0.07
-        grs = 0.10 * np.exp(
-            -((xx - grs_x_center) ** 2 / (2 * grs_sigma_x ** 2)
-              + (yy - grs_y_center) ** 2 / (2 * grs_sigma_y ** 2))
-        )
-
-        # Combine: base brightness with bands and GRS
-        image = np.zeros_like(rr)
-        image[disk] = limb_darkening[disk] * (1.0 + bands[disk]) + grs[disk]
-
-        # Ensure non-negative and normalize
-        image = np.clip(image, 0.0, None)
-        if image.max() > 0:
-            image /= image.max()
-        return image
+    # Jupiter's visible polar flattening (equatorial vs polar radius) and the
+    # sub-observer longitude placed at disk centre — chosen so the Great Red
+    # Spot sits in the front hemisphere of the bundled jupiter_2k map.
+    _OBLATENESS = 0.065
+    _DEFAULT_SUB_OBS_LON = -60.0
 
     def render_ideal_rgb(self, half_fov_arcsec: float,
                          num_pixels: int) -> np.ndarray:
-        """Return a 3-channel RGB ideal image with realistic Jupiter colors.
+        """RGB Jupiter from the bundled REAL cylindrical map.
 
-        Zones (bright bands) are cream/tan, belts (dark bands) are brown,
-        and the Great Red Spot is reddish-orange. Background is black.
-
-        Returns:
-            Array of shape (num_pixels, num_pixels, 3) with values in [0, 1].
+        The disk is a real photo texture (Solar System Scope, CC BY 4.0 —
+        see data/CREDITS.md) projected onto an oblate globe with limb
+        darkening. Colours therefore come from real imagery — natural muted
+        belts/zones and a realistic Great Red Spot — instead of a procedural
+        palette that read as "highlighter orange".
         """
-        coords = np.linspace(-half_fov_arcsec, half_fov_arcsec, num_pixels)
-        xx, yy = np.meshgrid(coords, coords)
-
-        radius_arcsec = self.angular_diameter_arcsec / 2.0
-        rr = np.sqrt(xx ** 2 + yy ** 2) / radius_arcsec
-        disk = rr <= 1.0
-
-        # Limb darkening
-        u = 0.5
-        mu = np.zeros_like(rr)
-        mu[disk] = np.sqrt(1.0 - rr[disk] ** 2)
-        limb = np.zeros_like(rr)
-        limb[disk] = 1.0 - u * (1.0 - mu[disk])
-
-        # Latitude (radians, ±π/2) and approximate longitude for
-        # in-plane texture. Longitude is the x-coordinate on the
-        # apparent disk projected through the equator — a flat
-        # projection that ignores foreshortening but is fine for
-        # the level of detail we render.
-        lat = np.zeros_like(yy)
-        lat[disk] = np.arcsin(np.clip(yy[disk] / radius_arcsec, -1, 1))
-        lon = np.zeros_like(xx)  # rough longitude on the visible face
-        lon[disk] = np.arcsin(np.clip(
-            xx[disk] / (radius_arcsec * np.cos(lat[disk]) + 1e-9),
-            -1, 1
-        ))
-
-        # Multi-scale band pattern: more frequency components than the
-        # original (which had only 6/12/20 sin terms producing ~3-6
-        # broad bands). Real Jupiter shows ~15 named belts/zones plus
-        # finer turbulent boundaries, so we layer additional 30 and
-        # 60-cycle components. Equator-weighted amplitude concentrates
-        # detail at low latitudes where Jovian banding is genuinely
-        # most active.
-        equator_weight = np.exp(-((lat / np.radians(45.0)) ** 2))
-        band_signal = (
-            0.10 * np.sin(6.0 * lat)
-            + 0.07 * np.sin(12.0 * lat)
-            + 0.05 * np.sin(24.0 * lat)
-            + 0.03 * np.sin(36.0 * lat) * equator_weight
-            + 0.02 * np.sin(60.0 * lat) * equator_weight
-        )
-
-        # Longitude-dependent festoon turbulence — small zonal waves
-        # along the belts where they meet zones. Deterministic
-        # (seeded by lat·lon) so a given scope always sees the same
-        # disk; not animated.
-        festoon = (
-            0.025 * np.sin(8.0 * lon) * np.sin(20.0 * lat)
-            + 0.015 * np.sin(13.0 * lon) * np.sin(28.0 * lat)
-        )
-        band_signal = band_signal + festoon * equator_weight
-
-        # Map signed band signal to a [0, 1] blend factor.
-        blend = np.clip(0.5 + band_signal / 0.36, 0.0, 1.0)
-
-        # Realistic Jupiter colors (RGB, 0-1 scale)
-        zone_color = np.array([235, 220, 185]) / 255.0  # cream zones
-        belt_color = np.array([155, 110, 75]) / 255.0   # warm brown belts (deeper than before)
-
-        rgb = np.zeros((num_pixels, num_pixels, 3))
+        g = _project_globe(half_fov_arcsec, num_pixels,
+                            self.angular_diameter_arcsec,
+                            sub_observer_lon_deg=self._DEFAULT_SUB_OBS_LON,
+                            limb_u=0.4, phase=1.0,
+                            oblateness=self._OBLATENESS)
+        rgb = _sample_equirect(_load_planet_texture("jupiter_2k.jpg"),
+                               g["lat"], g["lon"], g["disk"])
         for c in range(3):
-            rgb[..., c] = (belt_color[c] * (1.0 - blend)
-                           + zone_color[c] * blend)
-
-        # Great Red Spot — slightly tighter and more saturated than
-        # the original (real GRS is about 0.3 × Jupiter's diameter
-        # across, tapering in latitude).
-        grs_lat = np.radians(-22.0)
-        grs_lon = np.radians(30.0)
-        grs_x = radius_arcsec * np.cos(grs_lat) * np.sin(grs_lon)
-        grs_y = radius_arcsec * np.sin(grs_lat)
-        grs_sigma_x = radius_arcsec * 0.13
-        grs_sigma_y = radius_arcsec * 0.06
-        grs_mask = np.exp(
-            -((xx - grs_x) ** 2 / (2 * grs_sigma_x ** 2)
-              + (yy - grs_y) ** 2 / (2 * grs_sigma_y ** 2))
-        )
-        # Muted brick/salmon — the real GRS is a pale desaturated orange-
-        # brown, not a vivid "highlighter orange" (R3.14c). Kept blue-poor
-        # so it still darkens under a blue filter (blue-absorbing feature).
-        grs_color = np.array([188, 122, 100]) / 255.0
-        for c in range(3):
-            rgb[..., c] = (rgb[..., c] * (1.0 - grs_mask)
-                           + grs_color[c] * grs_mask)
-
-        # Small white ovals at typical temperate latitudes — the
-        # long-lived anticyclonic features seen in Hubble Jupiter
-        # images. Each is a faint Gaussian brightening relative to
-        # the band.
-        ovals = [
-            (np.radians(38.0),  np.radians(-60.0)),  # northern temperate
-            (np.radians(-38.0), np.radians(80.0)),   # southern temperate
-            (np.radians(-22.0), np.radians(-110.0)), # near GRS band
-        ]
-        oval_color = np.array([245, 235, 215]) / 255.0
-        for o_lat, o_lon in ovals:
-            ox = radius_arcsec * np.cos(o_lat) * np.sin(o_lon)
-            oy = radius_arcsec * np.sin(o_lat)
-            sigma = radius_arcsec * 0.035
-            mask = np.exp(
-                -((xx - ox) ** 2 + (yy - oy) ** 2) / (2 * sigma ** 2)
-            ) * 0.65
-            for c in range(3):
-                rgb[..., c] = rgb[..., c] * (1.0 - mask) + oval_color[c] * mask
-
-        # Apply limb darkening and disk mask
-        for c in range(3):
-            rgb[..., c] *= limb
-            rgb[..., c] *= disk
-
+            rgb[..., c] *= g["limb"] * g["disk"]
         return np.clip(rgb, 0.0, 1.0)
+
+    def render_ideal(self, half_fov_arcsec: float,
+                     num_pixels: int) -> np.ndarray:
+        """Grayscale Jupiter = luminance of the RGB texture render."""
+        rgb = self.render_ideal_rgb(half_fov_arcsec, num_pixels)
+        img = (0.299 * rgb[..., 0] + 0.587 * rgb[..., 1]
+               + 0.114 * rgb[..., 2])
+        if img.max() > 0:
+            img = img / img.max()
+        return img
 
     @property
     def field_extent_arcsec(self) -> float:
@@ -892,6 +855,21 @@ class Saturn(AstronomicalSource):
             + 0.01 * np.sin(30.0 * lat)
         )
 
+        # Real-texture globe (R4.12): project the bundled Saturn map onto the
+        # oblate globe. Replaces the old procedural gold+bands colouring so
+        # the disk reads naturally (the detailed procedural RING system is
+        # kept). Needs longitude in addition to the latitude computed above.
+        lon = np.zeros_like(xx)
+        xn = xx[disk] / r_eq
+        yn = yy[disk] / r_pol
+        zn = np.sqrt(np.clip(1.0 - xn ** 2 - yn ** 2, 0, 1))
+        lon[disk] = np.arctan2(xn, zn)
+        lon[disk] = (lon[disk] + np.pi) % (2 * np.pi) - np.pi
+        disk_rgb = _sample_equirect(
+            _load_planet_texture("saturn_2k.jpg"), lat, lon, disk)
+        disk_lum = (0.299 * disk_rgb[..., 0] + 0.587 * disk_rgb[..., 1]
+                    + 0.114 * disk_rgb[..., 2])
+
         # Ring geometry: rings are circular but appear as an ellipse
         # due to tilt. Ring plane is tilted relative to line of sight.
         # In projection, rings are an ellipse with semi-major = r_ring
@@ -975,6 +953,7 @@ class Saturn(AstronomicalSource):
             "ring_front": ring_front, "ring_back": ring_back,
             "ring_brightness": ring_brightness, "r_eq": r_eq,
             "sin_tilt": sin_tilt, "shadow": shadow,
+            "disk_rgb": disk_rgb, "disk_lum": disk_lum,
         }
 
     def render_ideal(self, half_fov_arcsec: float,
@@ -987,9 +966,8 @@ class Saturn(AstronomicalSource):
         back_visible = g["ring_back"] & ~g["disk"]
         image[back_visible] = g["ring_brightness"][back_visible]
 
-        # Layer 2: planet disk (on top of back rings)
-        image[g["disk"]] = g["limb"][g["disk"]] * (
-            1.0 + g["bands"][g["disk"]])
+        # Layer 2: planet disk (real texture luminance + limb darkening)
+        image[g["disk"]] = g["limb"][g["disk"]] * g["disk_lum"][g["disk"]]
 
         # Layer 3: front rings (in front of the planet, drawn on top)
         # These are visible even where they cross the disk face
@@ -1024,18 +1002,12 @@ class Saturn(AstronomicalSource):
 
         rgb = np.zeros((num_pixels, num_pixels, 3))
 
-        # Planet disk color: pale gold/tan with subtle band variation
-        disk_color_bright = np.array([225, 210, 170]) / 255.0
-        disk_color_dark = np.array([190, 175, 140]) / 255.0
-        band_blend = np.clip(0.5 + g["bands"] / 0.12, 0.0, 1.0)
-
+        # Planet disk colour from the REAL Saturn texture (R4.12) + limb
+        # darkening. (Replaces the old procedural pale-gold + sinusoidal-band
+        # colouring; the ring system below is unchanged.)
         for c in range(3):
             rgb[..., c] = np.where(
-                g["disk"],
-                g["limb"] * (disk_color_dark[c] * (1.0 - band_blend)
-                             + disk_color_bright[c] * band_blend),
-                0.0,
-            )
+                g["disk"], g["disk_rgb"][..., c] * g["limb"], 0.0)
 
         # Ring colors vary by section
         c_ring_color = np.array([160, 150, 140]) / 255.0   # grayish
@@ -1117,9 +1089,6 @@ class Moon(AstronomicalSource):
             0° shows the standard near side. Adjust for libration.
     """
 
-    # Class-level texture cache (loaded once, shared by all instances)
-    _texture_cache = None
-
     def __init__(self, angular_diameter_arcsec: float = 1870.0,
                  phase: float = 1.0,
                  sub_observer_lon_deg: float = 0.0,
@@ -1151,118 +1120,23 @@ class Moon(AstronomicalSource):
 
     @classmethod
     def _load_texture(cls):
-        """Load the NASA lunar albedo texture (cached at class level)."""
-        if cls._texture_cache is not None:
-            return cls._texture_cache
-
-        import os
-        from PIL import Image
-
-        texture_path = os.path.join(
-            os.path.dirname(__file__), "data", "moon_albedo.jpg"
-        )
-        if not os.path.exists(texture_path):
-            raise FileNotFoundError(
-                f"Lunar texture not found at {texture_path}. "
-                "Download from: https://svs.gsfc.nasa.gov/4720"
-            )
-
-        img = Image.open(texture_path)
-        # Convert to float RGB array, shape (H, W, 3), values [0, 1]
-        cls._texture_cache = np.asarray(img, dtype=np.float64) / 255.0
-        return cls._texture_cache
+        """Load the NASA lunar albedo texture (delegates to the shared
+        module-level cache used by all texture-mapped globes)."""
+        return _load_planet_texture("moon_albedo.jpg")
 
     def _sample_texture(self, lat, lon, disk):
-        """Sample the equirectangular texture at given lat/lon coords.
-
-        Args:
-            lat: Latitude array in radians (-pi/2 to +pi/2).
-            lon: Longitude array in radians (-pi to +pi).
-            disk: Boolean mask of valid (on-disk) pixels.
-
-        Returns:
-            RGB array of shape (*lat.shape, 3) with values in [0, 1].
-        """
-        texture = self._load_texture()
-        tex_h, tex_w = texture.shape[:2]
-
-        rgb = np.zeros((*lat.shape, 3))
-
-        # Map lat/lon to texture pixel coordinates
-        # Texture: x = 0..W maps to lon = -180..+180
-        #          y = 0..H maps to lat = +90..-90
-        u = (lon[disk] / np.pi + 1.0) * 0.5  # [0, 1]
-        v = (0.5 - lat[disk] / np.pi)         # [0, 1]
-
-        # Convert to pixel indices with bilinear interpolation
-        px = np.clip(u * (tex_w - 1), 0, tex_w - 1)
-        py = np.clip(v * (tex_h - 1), 0, tex_h - 1)
-
-        # Bilinear interpolation for smooth sampling
-        x0 = np.floor(px).astype(int)
-        y0 = np.floor(py).astype(int)
-        x1 = np.minimum(x0 + 1, tex_w - 1)
-        y1 = np.minimum(y0 + 1, tex_h - 1)
-        fx = px - x0
-        fy = py - y0
-
-        for c in range(3):
-            val = (texture[y0, x0, c] * (1 - fx) * (1 - fy)
-                   + texture[y0, x1, c] * fx * (1 - fy)
-                   + texture[y1, x0, c] * (1 - fx) * fy
-                   + texture[y1, x1, c] * fx * fy)
-            rgb[..., c][disk] = val
-
-        return rgb
+        """Sample the lunar equirectangular texture (delegates to the shared
+        bilinear sampler)."""
+        return _sample_equirect(self._load_texture(), lat, lon, disk)
 
     def _build_geometry(self, half_fov_arcsec, num_pixels):
-        """Compute grids, disk mask, spherical coords, and phase."""
-        coords = np.linspace(-half_fov_arcsec, half_fov_arcsec, num_pixels)
-        xx, yy = np.meshgrid(coords, coords)
-
-        radius = self.angular_diameter_arcsec / 2.0
-        rr = np.sqrt(xx ** 2 + yy ** 2) / radius
-        disk = rr <= 1.0
-
-        # Limb darkening (mild for the Moon)
-        u = 0.15
-        mu = np.zeros_like(rr)
-        mu[disk] = np.sqrt(1.0 - np.clip(rr[disk], 0, 1) ** 2)
-        limb = np.zeros_like(rr)
-        limb[disk] = 1.0 - u * (1.0 - mu[disk])
-
-        # Orthographic projection: convert image (x, y) to
-        # selenographic (lat, lon) for texture lookup.
-        # x/radius = cos(lat) * sin(lon - lon0)
-        # y/radius = sin(lat)
-        # z/radius = cos(lat) * cos(lon - lon0)  [z > 0 = visible]
-        lat = np.zeros_like(rr)
-        lon = np.zeros_like(rr)
-
-        # Normalized coords on the unit sphere
-        xn = xx[disk] / radius
-        yn = yy[disk] / radius
-        zn = np.sqrt(np.clip(1.0 - xn ** 2 - yn ** 2, 0, 1))
-
-        lat[disk] = np.arcsin(np.clip(yn, -1, 1))
-        lon[disk] = np.arctan2(xn, zn) + np.radians(
-            self.sub_observer_lon_deg)
-
-        # Wrap longitude to [-pi, pi]
-        lon[disk] = (lon[disk] + np.pi) % (2 * np.pi) - np.pi
-
-        # Phase terminator
-        illuminated = np.ones_like(rr, dtype=bool)
-        if self.phase < 1.0:
-            term_x = (2.0 * self.phase - 1.0) * radius
-            term_curve = term_x * mu
-            illuminated = xx >= term_curve
-
-        return {
-            "xx": xx, "yy": yy, "disk": disk, "limb": limb,
-            "lat": lat, "lon": lon, "illuminated": illuminated,
-            "radius": radius, "mu": mu,
-        }
+        """Orthographic Moon geometry (delegates to the shared globe
+        projector): mild limb darkening (u=0.15), a spherical body (no
+        oblateness), and the phase terminator."""
+        return _project_globe(
+            half_fov_arcsec, num_pixels, self.angular_diameter_arcsec,
+            sub_observer_lon_deg=self.sub_observer_lon_deg,
+            limb_u=0.15, phase=self.phase, oblateness=0.0)
 
     def render_ideal(self, half_fov_arcsec: float,
                      num_pixels: int) -> np.ndarray:
