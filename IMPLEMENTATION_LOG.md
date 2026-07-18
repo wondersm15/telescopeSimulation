@@ -20,6 +20,23 @@ saturation; D2 = real photo-textures for Jupiter/Saturn).
   keeps its detailed procedural rings (Cassini/Encke/shadow). Retuned exposures
   (Jupiter 0.4→0.3) so the disk no longer washes to white: GRS rendered saturation
   0.49→0.39, blown-white fraction 0.40→0.02. +3 tests; 417 pass.
+- **Batch I ✅ (render/physics fixes, 2026-07-18). 420 tests pass.**
+  - **R4.14** Saturn brightness step: the extended-source downsample SUM-binned
+    only at bin_factor≥2, so crossing 890 mm (render 1024 = 2×512) jumped ×4
+    (+0.036). Switched to MEAN-binning (surface brightness is aperture-invariant) →
+    step +0.001, flat vs aperture. Defaults unchanged.
+  - **R4.13** Eye-view square-box artifact: the seeing blur used a full-image
+    SQUARE Gaussian kernel; the asinh stretch lifted its truncated corners into a
+    box around bright stars. Switched to `scipy.ndimage.gaussian_filter` (separable,
+    no square footprint) → stars stay round.
+  - **R4.9b** Ideal point (aperture off, no seeing) was a single invisible pixel;
+    now a small flux-preserving Gaussian dot (~45 px), still far sharper than the
+    Airy/seeing disk.
+  - **R4.2a/b** Eye-view annotation: adds "+ ~1″ eye spatial integration" when the
+    eye-blur mode is on, and qualifies "star brightness ∝ aperture² (until it
+    saturates)" (a mag-0 star clips at 100 mm, so the scaling isn't visible).
+  - **R4.15** Star-field tints desaturated (`_TINT_STRENGTH=0.45`): max per-star
+    saturation 0.60→0.27, so the field reads naturally. +3 tests.
 
 ## Tutorial Tab — Round 3 (verbatim-feedback rework): COMPLETE (Batches A–G)
 

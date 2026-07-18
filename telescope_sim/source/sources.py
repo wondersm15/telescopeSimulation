@@ -550,13 +550,23 @@ class MultiColorStarField(StarField):
 # brightest channel ≈ 1.0). Ordered hot → cool. Used by ShowcaseStarField to
 # give the population realistic colour so the star-field showcase reads as a
 # rich, varied field rather than uniform white dots.
-_SPECTRAL_PALETTE = [
+#
+# R4.15: real stars show only SUBTLE colour to the dark-adapted eye — even an
+# M giant is a pale orange, not a saturated red — so the raw blackbody-ish
+# tints below read as "very pronounced". Each tint is desaturated toward white
+# by keeping only _TINT_STRENGTH of its departure from white.
+_TINT_STRENGTH = 0.45
+_SPECTRAL_PALETTE_RAW = [
     ("O/B", (0.62, 0.72, 1.00), 25000),   # blue
     ("A",   (0.80, 0.86, 1.00), 9500),    # blue-white
     ("F",   (1.00, 0.97, 0.92), 7000),    # white
     ("G",   (1.00, 0.93, 0.72), 5600),    # yellow (Sun-like)
     ("K",   (1.00, 0.78, 0.48), 4300),    # orange
     ("M",   (1.00, 0.52, 0.32), 3400),    # red
+]
+_SPECTRAL_PALETTE = [
+    (name, tuple(1.0 + _TINT_STRENGTH * (c - 1.0) for c in rgb), temp)
+    for name, rgb, temp in _SPECTRAL_PALETTE_RAW
 ]
 
 

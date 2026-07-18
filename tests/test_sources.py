@@ -613,3 +613,48 @@ class TestRealPlanetTextures:
         ys, xs = np.where(lit)
         span_arcsec = (xs.max() - xs.min()) / 200.0 * 50.0
         assert span_arcsec > 22.0         # globe (~18″) + rings present
+
+
+class TestRound4RenderFixes:
+    """Round 4 render/physics fixes: Saturn brightness step (R4.14), visible
+    ideal point (R4.9b), subtle star tints (R4.15)."""
+
+    def test_saturn_no_brightness_step_across_bin_threshold(self):
+        """Mean-binning removes the ~4x brightness jump that sum-binning
+        produced when the internal render crossed 2x the display size
+        (R4.14 — Saturn stepped up near 890 mm)."""
+        def mean_lit(D):
+            t = NewtonianTelescope(primary_diameter=float(D),
+                                   focal_length=D * 10.0)
+            f = plot_source_image(t, Saturn(), seeing_arcsec=None,
+                                  exposure_level=0.2, display_stretch="linear")
+            if isinstance(f, list):
+                f = f[0]
+            a = np.asarray(f.axes[0].get_images()[0].get_array(), float)
+            lum = 0.2126 * a[..., 0] + 0.7152 * a[..., 1] + 0.0722 * a[..., 2]
+            import matplotlib.pyplot as plt
+            plt.close(f)
+            return float(lum[lum > 0.02 * lum.max()].mean())
+        below, above = mean_lit(889), mean_lit(890)
+        assert abs(above - below) < 0.01, (
+            f"brightness step across bin threshold: {below:.3f} -> {above:.3f}")
+
+    def test_ideal_point_is_a_visible_dot(self):
+        """With aperture diffraction off and no seeing, the ideal point must
+        render as a small visible dot, not a single (invisible) pixel
+        (R4.9b)."""
+        tel = NewtonianTelescope(primary_diameter=200.0, focal_length=1000.0)
+        im, _, _ = _render_source_through_telescope(
+            PointSource(), tel, seeing_arcsec=None, num_pixels=256,
+            apply_aperture_diffraction=False)
+        visible = int((im > 0.01 * im.max()).sum())
+        assert 8 < visible < 400, f"ideal dot spans {visible}px (want a few)"
+
+    def test_star_field_tints_are_subtle(self):
+        """R4.15: the spectral tints are desaturated so the field reads
+        naturally (no 'very pronounced' saturated stars)."""
+        from telescope_sim.source.sources import ShowcaseStarField
+        rgb = np.asarray(ShowcaseStarField().star_spectral_rgb)
+        mx, mn = rgb.max(axis=1), rgb.min(axis=1)
+        sat = np.where(mx > 1e-6, (mx - mn) / (mx + 1e-9), 0.0)
+        assert sat.max() < 0.35, f"max star saturation {sat.max():.2f} too high"

@@ -4698,19 +4698,31 @@ def _render_source_through_telescope(
                 # seeing (if enabled) blurs it. NOT physical (every real
                 # aperture diffracts); flagged in the scenario description.
                 #
-                # Preserve TOTAL FLUX: give the delta the same integrated
-                # flux as the real (peak-normalised) aperture PSF would
-                # carry, so toggling aperture changes the star's SHARPNESS,
-                # not its brightness (the display uses a fixed brightness
-                # anchor, so an under-flux delta would render nearly black).
+                # Render it as a small VISIBLE dot — a tight Gaussian a few
+                # pixels wide — not a single pixel, which vanishes at the
+                # display scale (R4.9b: with both aperture and seeing off the
+                # star must still show as a bright point). It stays far
+                # sharper than the Airy/seeing disk, so it reads as "an ideal
+                # point (no diffraction)".
+                #
+                # Preserve TOTAL FLUX: give the dot the same integrated flux
+                # as the real (peak-normalised) aperture PSF would carry, so
+                # toggling aperture changes the star's SHARPNESS, not its
+                # brightness (the display uses a fixed brightness anchor).
                 _ref = _compute_psf_at_field_angle(
                     telescope, field_r, wavelength_nm, psf_n,
                     psf_half_mm, include_obstruction, apply_coma,
                 )
                 _ref = _resample_to_canvas(_ref)
                 _flux = float(_ref.sum())
-                psf = np.zeros((3, 3))
-                psf[1, 1] = _flux if _flux > 0 else 1.0
+                _dn = 9
+                _dc = _dn // 2
+                _dyy, _dxx = np.mgrid[0:_dn, 0:_dn]
+                _dsig = 1.1
+                psf = np.exp(-(((_dxx - _dc) ** 2 + (_dyy - _dc) ** 2)
+                               / (2.0 * _dsig ** 2)))
+                _dsum = psf.sum()
+                psf = psf / _dsum * (_flux if _flux > 0 else 1.0)
 
             # Coma tails point radially outward from the optical axis.
             # compute_coma_spot produces a fixed-orientation comet (tail
@@ -4992,14 +5004,20 @@ def _render_source_through_telescope(
         psf_kernel = psf / psf_peak if psf_peak > 0 else psf
         image = fftconvolve(ideal, psf_kernel, mode="same")
 
-    # ── Detector binning (physically-correct flux integration) ────────
-    # When an extended source is rendered at a higher internal
-    # resolution (for accurate PSF convolution), the array is then
-    # sum-binned down to the requested display resolution. Each output
-    # pixel = sum of the high-res pixels falling within its angular
-    # area — exactly what a coarser detector would record. This is
-    # more physically honest than matplotlib's bilinear interpolation
-    # (which averages and dilutes sub-pixel features).
+    # ── Detector binning (surface-brightness preserving) ──────────────
+    # When an extended source is rendered at a higher internal resolution
+    # (for accurate PSF convolution), the array is binned down to the
+    # display resolution by AVERAGING (mean-bin). render_ideal_rgb returns
+    # per-pixel SURFACE BRIGHTNESS (not flux), which is aperture-invariant
+    # for a resolved object, so averaging keeps the displayed brightness
+    # independent of the internal render resolution.
+    #
+    # (Previously this SUM-binned. Because binning only triggered at
+    # bin_factor>=2, an extended source rendered at, say, 1018 px was shown
+    # un-binned while one at 1024 px was summed 2x2 = 4x brighter — a visible
+    # brightness STEP as aperture crossed the threshold, e.g. Saturn at
+    # ~890 mm (R4.14). Mean-binning removes the step; surface brightness is
+    # correctly flat vs aperture.)
     if (display_num_pixels is not None
             and 0 < display_num_pixels < num_pixels):
         bin_factor = num_pixels // display_num_pixels
@@ -5016,12 +5034,12 @@ def _render_source_through_telescope(
             image = image.reshape(
                 display_num_pixels, bin_factor,
                 display_num_pixels, bin_factor
-            ).sum(axis=(1, 3))
+            ).mean(axis=(1, 3))
             if image_rgb is not None:
                 image_rgb = image_rgb.reshape(
                     display_num_pixels, bin_factor,
                     display_num_pixels, bin_factor, 3
-                ).sum(axis=(1, 3))
+                ).mean(axis=(1, 3))
             num_pixels = display_num_pixels
 
     # ── Absolute brightness normalisation (view-dependent) ───────────────
@@ -5079,17 +5097,19 @@ def _render_source_through_telescope(
         # (where 2.355 ≈ 2*sqrt(2*ln(2)) for a Gaussian)
         pixel_scale_arcsec = 2.0 * half_fov_arcsec / num_pixels
         seeing_sigma_pix = (seeing_arcsec / 2.355) / pixel_scale_arcsec
-        coords = np.arange(num_pixels) - num_pixels / 2
-        sxx, syy = np.meshgrid(coords, coords)
-        # 2D Gaussian kernel: exp(-(x²+y²)/(2σ²))
-        seeing_kernel = np.exp(-(sxx ** 2 + syy ** 2)
-                               / (2 * seeing_sigma_pix ** 2))
-        seeing_kernel /= seeing_kernel.sum()
-        image = fftconvolve(image, seeing_kernel, mode="same")
+        # Use a separable Gaussian filter (scipy.ndimage) rather than an
+        # explicit full-image square kernel convolved by FFT. The old square
+        # kernel left a faint SQUARE halo around bright stars under the eye's
+        # asinh stretch (R4.13): its truncated corners are tiny but the log
+        # stretch lifts them into a visible box. gaussian_filter has no square
+        # footprint (it's separable with proper edge handling) and conserves
+        # flux, so stars stay round.
+        from scipy.ndimage import gaussian_filter as _gaussian_filter
+        image = _gaussian_filter(image, seeing_sigma_pix, mode="constant")
         if image_rgb is not None:
             for c in range(3):
-                image_rgb[..., c] = fftconvolve(image_rgb[..., c],
-                                                seeing_kernel, mode="same")
+                image_rgb[..., c] = _gaussian_filter(
+                    image_rgb[..., c], seeing_sigma_pix, mode="constant")
     # Three display modes (all are display-only; the simulated data
     # is unchanged — the modes differ only in how pixel values are
     # mapped to screen brightness):
@@ -5546,10 +5566,20 @@ def plot_source_image(telescope: Telescope,
                 f"mm; ∝ (p/{EYE_PUPIL_MM:.0f}mm)², capped)"
             )
         else:
-            # Point-like source: aperture-driven.
+            # Point-like source: aperture-driven — but a bright star clips at
+            # saturation, so the ∝aperture² scaling is only visible below it
+            # (R4.2b: a mag-0 star saturates even at 100 mm, so it looks the
+            # same brightness at every aperture — the extra light widens the
+            # visible disk, it doesn't brighten a clipped core).
             ann_lines.append(
                 "Eye view (perceptual): exposure N/A — "
-                "star brightness ∝ aperture²"
+                "star brightness ∝ aperture² (until it saturates)"
+            )
+        # Eye spatial integration (R4.2a): note it explicitly whenever the
+        # eye-blur mode is active, alongside "exposure N/A".
+        if info.get("display_stretch") == "log_integrated":
+            ann_lines.append(
+                "  + ~1″ eye spatial integration (finite eye resolution)"
             )
     else:
         ann_lines.append(

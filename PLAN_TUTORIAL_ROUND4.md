@@ -22,10 +22,13 @@ Status: ⬜ open · 🔧 in progress · ✅ done+verified · ❓ needs decision/
 > view. What do you think about this? Perhaps we should bring the exposure
 > saturation up and recast it from exposure/saturation to viewing modes or
 > something like that."
-- ⬜ (a) Describe the spatial integration in the image-processing legend (along
-  with exposure = N/A) when it is used.
-- ⬜ (b) Brightness doesn't seem to scale with aperture as the legend describes —
-  investigate/fix.
+- ✅ (a) Eye-view annotation now adds "+ ~1″ eye spatial integration (finite eye
+  resolution)" whenever the eye-blur (log_integrated) mode is active, alongside
+  "exposure N/A".
+- ✅ (b) Root cause: a mag-0 star saturates even at 100 mm, so the ∝aperture²
+  scaling is clipped away (it looks the same at every aperture). Annotation now
+  says "star brightness ∝ aperture² (until it saturates)". (Deeper reframe lands
+  with the viewing-modes module, D1.)
 - ❓ (c) DESIGN QUESTION: add a new module to introduce eye vs detector view?
   Possibly promote exposure/saturation and recast it from exposure/saturation to
   "viewing modes". → needs user decision.
@@ -119,8 +122,9 @@ Status: ⬜ open · 🔧 in progress · ✅ done+verified · ❓ needs decision/
 > effects. On the right, when you turn off both blurring effects the star
 > disappears, there should presumably still be a very bright dot right?"
 - ⬜ (a) Label the LEFT plot as the reference (with both effects).
-- ⬜ (b) On the right, turning off BOTH blurring effects makes the star disappear;
-  there should still be a bright dot (the ideal point collapses to a sub-pixel).
+- ✅ (b) The ideal point (aperture off, no seeing) now renders as a small VISIBLE
+  Gaussian dot (~45 px, flux-preserved) instead of a single invisible pixel —
+  still far sharper than the Airy/seeing disk. (R4.9a label pending in Batch H.)
 
 ### R4.10 — F/ratio and coma
 > "the two plots on the left have their x-axis labels overlapping the gray
@@ -163,20 +167,29 @@ Status: ⬜ open · 🔧 in progress · ✅ done+verified · ❓ needs decision/
 ### R4.13 — Bright + dim: dynamic range
 > "The eye view on the right appears to have a boxed outline artificially making
 > square images."
-- ⬜ (a) The eye-view (right) shows a boxed/square outline artifact around images.
+- ✅ (a) Root cause: the seeing blur used a full-image SQUARE Gaussian kernel via
+  FFT; its truncated corners are tiny but the eye's asinh stretch lifted them into
+  a faint box around bright stars. Switched to `scipy.ndimage.gaussian_filter`
+  (separable, no square footprint) — stars stay round. Verified before/after.
 
 ### R4.14 — Saturn brightness
 > "we see brightness issues again. There appears to be a step change in brightness
 > between 885 and 890 mm aperture (with no seeing); on either side of this the
 > brightness does not appear to change as a function of aperture. Note that some
 > factors are not expected to show a noticeable result here."
-- ⬜ (a) Step change in Saturn brightness between 885–890 mm aperture (no seeing);
-  flat on either side. Investigate the brightness-vs-aperture behaviour.
+- ✅ (a) Root cause: the extended-source downsample SUM-binned only when the
+  internal render was ≥2× the display (bin_factor≥2). Below the threshold no
+  binning ran; at 890 mm the render hit 1024 px = 2×512 → 2×2 sum = ×4 flux, a
+  +0.036 brightness STEP. Switched to MEAN-binning (surface brightness is
+  aperture-invariant for a resolved object) → step drops to +0.001; flat vs
+  aperture as expected. Defaults (bin_factor 1) unchanged.
 
 ### R4.15 — Star field brightness / colours
 > "are these colors realistic? They seem very pronounced."
-- ⬜ (a) Star-field colours seem very pronounced — are they realistic? Re-assess
-  the spectral-tint saturation.
+- ✅ (a) Desaturated the spectral palette toward white (`_TINT_STRENGTH=0.45`):
+  real stars show only subtle colour to the eye. ShowcaseStarField per-star
+  saturation dropped mean 0.16→0.07, max 0.60→0.27 — the field now reads as gently
+  tinted (mostly white with subtle blue/orange), not garish. Verified render.
 
 ---
 
