@@ -92,7 +92,30 @@ materials:</p>
 <p style="margin-top:8px;">The chromatic-aberration tutorial scenario uses these
 same residual focal-shift coefficients (see <i>Implemented Physics</i>
 &rarr; Chromatic aberration) so the rendered halo sizes match the textbook
-performance of each design class.</p>
+performance of each design class. In the module, switch the <b>Objective</b>
+between these four designs (and use <b>Focal zoom &rarr; Close</b> to resolve the
+tiny achromat/APO residuals that are invisible at the wide singlet scale).</p>
+
+<p><b>Cost vs. performance.</b> Each step up the ladder buys a roughly 3&ndash;5&times;
+reduction in the colour error for a similar jump in price (exotic glass and extra
+elements dominate the cost):</p>
+<ul>
+  <li><b>Singlet</b> &mdash; cheapest glass, but the colour error is so large it is
+      essentially never sold for astronomy today.</li>
+  <li><b>Achromat</b> &mdash; the value choice: ordinary crown+flint, inexpensive,
+      and colour is well controlled at slow focal ratios (an f/10&ndash;f/12
+      &ldquo;achro&rdquo; shows little false colour). Most beginner refractors.</li>
+  <li><b>APO doublet (ED)</b> &mdash; typically several times the price of an achromat
+      of the same aperture; ED glass removes almost all visible colour and allows
+      much faster focal ratios (f/6&ndash;f/7).</li>
+  <li><b>APO triplet (ED/fluorite)</b> &mdash; the most expensive (three exotic
+      air-spaced elements); essentially colour-free and the imager's choice, but you
+      pay steeply for that last factor of a few &mdash; diminishing returns for
+      visual use.</li>
+</ul>
+<p>Because glass gets heavy and dear with aperture, APOs are usually small
+(&le;150 mm) &mdash; for big apertures a mirror (no chromatic aberration at all) is
+far cheaper, which is why large scopes are reflectors.</p>
 
 <ul>
   <li><b>Pros:</b> No central obstruction or diffraction spikes from a spider, sharp
@@ -778,32 +801,45 @@ VIGNETTING_DIAGRAM_CAPTION_HTML = (
     "<i>not</i> the shadow the secondary casts on the incoming light (that's "
     "the central obstruction, a separate thing); here it acts like a stop the "
     "cone must pass through.</p>"
-    "<p>Left panel: individual rays from a star are traced toward the focus. "
-    "For a star on-axis the whole cone lands on the mirror face &mdash; every "
-    "ray is caught and the image is <b>fully illuminated</b>. For an "
-    "<i>off</i>-axis star the cone arrives tilted and shifted sideways, so the "
-    "outermost rays <b>miss the mirror face</b> (drawn red, ending in an "
-    "&#10007; at the secondary plane): that light never reaches the eyepiece, "
-    "so the star is dimmed. The red rays are <i>outside</i> the clear aperture "
-    "&mdash; they are the lost light, not part of the mirror. The right panel "
-    "is the same effect seen face-on: the circular beam footprint slides off "
-    "the circular mirror face, and the non-overlapping sliver is the vignetted "
-    "light (the <i>circle&ndash;circle overlap</i> model the simulation "
-    "uses).</p>"
+    "<p>Left panel: light from the <b>&#9733; off-axis star (the source, top "
+    "left)</b> arrives as parallel rays travelling down-right, reflects off the "
+    "primary, and converges toward the <b>&#9711; prime focus (the circle)</b>. "
+    "Because the star is off-axis, that converging cone arrives at the secondary "
+    "shifted sideways. The rays that <b>land on the mirror face are caught</b> "
+    "(green &mdash; they stop there because the mirror relays them out to the "
+    "eyepiece); the rays that <b>miss the mirror carry on to the prime focus</b> "
+    "(red) and are <b>lost</b>, so the star is dimmed. The right panel is the "
+    "same effect face-on: the circular beam footprint slides off the circular "
+    "mirror face, and the non-overlapping sliver is the vignetted light (the "
+    "<i>circle&ndash;circle overlap</i> model the simulation uses).</p>"
     "<p style='font-family:monospace; margin-left:20px;'>"
     "Fully-illuminated field &theta;<sub>fif</sub> = (r<sub>sec</sub> "
     "&minus; r<sub>beam</sub>) / d<sub>sec</sub> &times; 206265&Prime;</p>"
     "<p>Inside &theta;<sub>fif</sub> illumination is 100%; beyond it the "
     "overlap fraction &mdash; and the illumination &mdash; falls smoothly "
-    "toward the 50% edge. A larger secondary pushes &theta;<sub>fif</sub> "
-    "outward (less vignetting) at the cost of a larger central obstruction.</p>"
-    "<p><b>Why you don't see vignetting on the Star Field Showcase:</b> for a "
-    "normally-sized secondary, &theta;<sub>fif</sub> is huge &mdash; a 200&nbsp;mm "
-    "f/4 Newtonian is fully illuminated out to roughly 75&prime; (arcminutes), "
-    "far beyond the few-arcminute star field, so no star there is measurably "
-    "dimmed. Vignetting matters for wide-field astrophotography and undersized "
-    "secondaries, not a high-power visual field. (Tube/focuser vignetting is "
-    "not modelled.)</p>"
+    "toward the 50% edge.</p>"
+    "<p><b>Vignetting vs central obstruction &mdash; the secondary's two jobs.</b> "
+    "The <i>same</i> secondary mirror both (1) must be big enough to <b>catch</b> "
+    "the converging cone (small &rArr; off-axis vignetting) and (2) sits in the "
+    "incoming beam and <b>blocks</b> its centre (big &rArr; larger central "
+    "obstruction, which lowers on-axis contrast/Strehl). So they pull opposite "
+    "ways: enlarging the secondary reduces vignetting but worsens the "
+    "obstruction. Different rays are involved &mdash; obstruction removes the "
+    "<i>central</i> rays of every beam (the mirror's shadow); vignetting removes "
+    "the <i>edge</i> rays of an <i>off-axis</i> beam (the ones that slide past "
+    "the mirror). Designers pick the secondary size to balance the two for the "
+    "intended use.</p>"
+    "<p><b>When is vignetting actually observable?</b> For a normally-sized "
+    "secondary &theta;<sub>fif</sub> is huge &mdash; a 200&nbsp;mm f/4 Newtonian "
+    "is fully illuminated out to roughly 75&prime;, far beyond a high-power "
+    "visual field, so you never see it there (that's why the Star Field Showcase "
+    "shows none). You DO see it in: <b>fast wide-field astrographs</b> (f/4 and "
+    "faster) where a large camera sensor reaches past &theta;<sub>fif</sub> and "
+    "the corners darken; <b>visual-optimised Newtonians</b> given a deliberately "
+    "<i>undersized</i> secondary (to shrink the obstruction) then used for "
+    "imaging; and scopes with an undersized diagonal, focuser drawtube or "
+    "baffle. It shows up as corner-darkening on wide fields / large sensors, not "
+    "on a small high-power field. (Tube/focuser vignetting is not modelled.)</p>"
     "<p><i>Accuracy: schematic geometry (an unfolded Newtonian) for the "
     "picture; the illumination fraction itself uses the exact circle&ndash;"
     "circle overlap in the physics engine.</i></p>"
@@ -843,67 +879,65 @@ def _build_vignetting_diagram():
     # at focus): r_beam(y) = (D/2) * (1 - y/F)
     r_beam_sec = (D / 2.0) * (1.0 - y_sec / F)
 
-    axA.set_title("Side view (schematic): off-axis cone clipped\n"
-                  "by the secondary", fontsize=9)
-    # Primary mirror
+    axA.set_title("Side view (schematic): off-axis light\n"
+                  "clipped by the secondary", fontsize=9)
+    # Primary mirror at the bottom.
     axA.plot([-D / 2, D / 2], [0, 0], color="black", lw=3, solid_capstyle="butt")
-    axA.text(0, -0.22, "Primary mirror (aperture D)", ha="center",
+    axA.text(0, -0.28, "Primary mirror (aperture D)", ha="center",
              va="top", fontsize=7.5)
 
-    # On-axis cone (blue): edges from primary rim converge to focus at (0, F)
-    axA.fill([-D / 2, D / 2, 0], [0, 0, F], color="#3b7fd0", alpha=0.14,
-             zorder=0)
-    for x0 in (-D / 2, D / 2):
-        axA.plot([x0, 0], [0, F], color="#3b7fd0", lw=1.0)
-    axA.plot(0, F, marker="*", color="#3b7fd0", ms=11)
-    axA.text(-0.1, F + 0.05, "on-axis focus\n(fully illuminated)", ha="right",
-             va="center", fontsize=7, color="#245a9e")
-
-    # Secondary clear aperture (grey bar) at y_sec — the reflective face of
-    # the secondary mirror, seen edge-on. Rays that LAND on this bar are
-    # relayed to the eyepiece; rays that MISS it (fall beyond its edges) are
-    # lost. Drawn before the off-axis rays so they overlay it.
+    # Secondary mirror face (grey bar) at y_sec, seen edge-on.
     axA.plot([-sec_half, sec_half], [y_sec, y_sec], color="0.25", lw=7,
              solid_capstyle="butt", zorder=4)
     axA.annotate(
-        "secondary mirror face\n= its “clear aperture”\n"
-        "(rays landing here reach\nthe eyepiece)",
-        xy=(-sec_half, y_sec), xytext=(-D / 2 - 1.5, y_sec - 1.15),
+        "secondary mirror face\n(“clear aperture”)",
+        xy=(-sec_half, y_sec), xytext=(-D / 2 - 1.9, y_sec + 0.9),
         ha="left", va="center", fontsize=6.6, color="0.25",
         arrowprops=dict(arrowstyle="->", color="0.4", lw=0.8))
 
-    # Off-axis star at field angle θ → focus shifts to (+dx, F). Instead of a
-    # filled cone, trace INDIVIDUAL rays from across the primary toward that
-    # focus (R3.7b — the cones alone were unclear). Each ray crosses the
-    # secondary plane at x(y_sec); if |x| ≤ sec_half it lands ON the mirror
-    # (caught → drawn through to focus), otherwise it MISSES the mirror
-    # (clipped → drawn red and stopped at the secondary plane with an ✗).
-    dx = 0.5
-    axA.plot(dx, F, marker="*", color="#e08a2b", ms=11, zorder=6)
-    axA.text(dx + 0.12, F + 0.05, "off-axis focus", ha="left", va="center",
-             fontsize=7, color="#a9631a")
-    n_rays = 7
-    caught_lbl = clipped_lbl = False
-    for x0 in np.linspace(-D / 2, D / 2, n_rays):
+    # R4.6: SOURCE star (top-left) → light arrives from the upper-left as
+    # PARALLEL rays (an off-axis star). Draw a few incoming parallel rays down
+    # to the primary so the direction of travel is explicit.
+    dx = 0.5                          # focus shift for this off-axis angle
+    star_xy = (-D / 2 - 1.15, F + 0.15)
+    axA.plot(*star_xy, marker="*", color="#e08a2b", ms=15, zorder=6)
+    axA.text(star_xy[0], star_xy[1] + 0.32,
+             "off-axis star\n(light source)", ha="center", va="bottom",
+             fontsize=6.8, color="#a9631a")
+    in_slope = 0.42                   # incoming tilt (from upper-left)
+    for x_prim in np.linspace(-D / 2, D / 2, 3):
+        x_top = x_prim - in_slope * (F * 0.42)
+        axA.annotate("", xy=(x_prim, 0.02), xytext=(x_top, F * 0.42),
+                     arrowprops=dict(arrowstyle="-|>", color="#e0a060",
+                                     lw=0.8, alpha=0.7))
+
+    # Converging beam after the primary → toward the off-axis focus (dx, F).
+    # R4.6c INVERT: the SUCCESSFUL (caught) rays STOP at the secondary face
+    # (they are reflected out to the eyepiece); the MISSED rays continue on to
+    # the prime focus (a CIRCLE, R4.6a) — that light is lost.
+    caught_any = missed_any = False
+    for x0 in np.linspace(-D / 2, D / 2, 7):
         x_at_sec = x0 + (dx - x0) * (y_sec / F)
         if abs(x_at_sec) <= sec_half:            # lands on the mirror → caught
-            axA.plot([x0, dx], [0, F], color="#e08a2b", lw=1.0, zorder=3,
-                     label=None if caught_lbl else "_")
-            caught_lbl = True
-        else:                                    # misses the mirror → lost
-            axA.plot([x0, x_at_sec], [0, y_sec], color="#d0342b", lw=1.2,
-                     zorder=5)
-            axA.plot(x_at_sec, y_sec, marker="x", color="#d0342b", ms=6,
-                     mew=1.6, zorder=6)
-            clipped_lbl = True
-    if clipped_lbl:
-        axA.annotate("these rays MISS the secondary\n(lost light → star dimmed)",
-                     xy=(sec_half + r_beam_sec * 0.4, y_sec),
-                     xytext=(sec_half + 0.2, y_sec - 1.15),
-                     fontsize=6.8, color="#a11", ha="left",
-                     arrowprops=dict(arrowstyle="->", color="#a11", lw=0.9))
-    axA.set_xlim(-D / 2 - 1.55, D / 2 + 0.9)
-    axA.set_ylim(-0.6, F + 0.6)
+            axA.plot([x0, x_at_sec], [0, y_sec], color="#2f9e44", lw=1.1,
+                     zorder=3)
+            caught_any = True
+        else:                                    # misses → continues to focus
+            axA.plot([x0, dx], [0, F], color="#d0342b", lw=1.2, alpha=0.9,
+                     zorder=2)
+            missed_any = True
+    # Convergence point = an open CIRCLE (not a star).
+    axA.plot(dx, F, marker="o", markerfacecolor="none",
+             markeredgecolor="#a11", ms=11, mew=1.6, zorder=6)
+    axA.text(dx + 0.15, F + 0.05, "prime focus\n(missed rays\nconverge → lost)",
+             ha="left", va="center", fontsize=6.6, color="#a11")
+    if caught_any:
+        axA.annotate("caught → stop at the\nsecondary (→ eyepiece)",
+                     xy=(0.0, y_sec), xytext=(-D / 2 - 1.5, y_sec - 1.0),
+                     fontsize=6.6, color="#2f7a34", ha="left",
+                     arrowprops=dict(arrowstyle="->", color="#2f9e44", lw=0.9))
+    axA.set_xlim(-D / 2 - 1.9, D / 2 + 1.4)
+    axA.set_ylim(-0.6, F + 0.9)
     axA.set_aspect("equal")
     axA.axis("off")
 

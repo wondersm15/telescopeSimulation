@@ -967,7 +967,17 @@ SCENARIOS: list[ScenarioDefinition] = [
             "full Moon can be uncomfortably bright at a large exit pupil; an "
             "ND filter (or a smaller exit pupil, i.e. more magnification) "
             "tames it. Use the Exit pupil control to see the surface-"
-            "brightness effect."
+            "brightness effect.\n\n"
+            "Two things you may notice: (1) the Exit pupil only changes the "
+            "EYE view, not the Detector view — that's correct. Exit pupil is a "
+            "visual concept (the beam width at your eye); a camera at the focal "
+            "plane collects all the light regardless, so it has no exit-pupil "
+            "term. (2) ND-2.0 makes the Moon look very dark — also correct: "
+            "OD 2.0 is 1% transmission, a heavy cut (most visual observers use "
+            "ND-0.9/1.0 ≈ 12–10%). It reads as nearly black in the linear "
+            "Detector view, while the eye's logarithmic response keeps it "
+            "visible in the Eye view — a real demonstration of the detector-vs-"
+            "eye difference."
         ),
         learn_more_section="Photometry & Filters",
         before_telescope=TelescopeConfig(

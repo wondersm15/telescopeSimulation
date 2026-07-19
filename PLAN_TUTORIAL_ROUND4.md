@@ -65,8 +65,10 @@ Status: ⬜ open · 🔧 in progress · ✅ done+verified · ❓ needs decision/
 - ✅ (a) The offender was `plot_polychromatic_ray_trace` (NOT the R3.18 pupil
   trace): its "Focal offsets" readout + idealise note sat ON the narrow ray
   bundle. Moved both OUTSIDE the axes into the left/right canvas whitespace.
-- ⬜ (b) Chromatic P&P: add a note on glass types, achromat vs APO designs, how
-  they're applied in the module, and relative cost/performance.
+- ✅ (b) Chromatic P&P already had the glass-types table (singlet BK7 / achromat
+  crown+flint / APO doublet ED / APO triplet fluorite + residual focal-shift);
+  added how to switch them in the module and a Cost-vs-Performance section
+  (~3–5× less colour per price step; why big scopes are mirrors).
 
 ### R4.6 — Vignetting (P&P diagram)
 > "the physics and parameters plot and description is better, but I am still a
@@ -81,15 +83,18 @@ Status: ⬜ open · 🔧 in progress · ✅ done+verified · ❓ needs decision/
 > between which rays get blocked vs successfully reflected? You note that in our
 > case we don't really observe it, you should specify (more concretely) what
 > cases/telescopes would actually have it observed in."
-- ⬜ (a) Side-view schematic: stars currently mark where light CONVERGES; that's
-  confusing. Use STARS for the light SOURCE and a CIRCLE for the convergence point.
-- ⬜ (b) Show where light comes from conceptually (off-axis from the left → right).
-- ⬜ (c) INVERT the ray drawing: have the SUCCESSFUL (caught) rays stop at the
-  secondary mirror face, and draw the MISSED rays continuing to the focus.
-- ⬜ (d) Explain the relationship (if any) between central obstruction and
-  vignetting — which rays get blocked vs successfully reflected.
-- ⬜ (e) Specify CONCRETELY which cases/telescopes actually show observable
-  vignetting.
+- ✅ (a) Panel A reworked: a STAR now marks the off-axis light SOURCE (top-left)
+  and an open CIRCLE marks the prime-focus convergence.
+- ✅ (b) Incoming parallel rays drawn from the star (upper-left) down to the
+  primary — light travels left→right into the scope.
+- ✅ (c) INVERTED: caught rays (green) STOP at the secondary face (→ eyepiece);
+  missed rays (red) continue on to the prime-focus circle (lost).
+- ✅ (d) Caption adds "the secondary's two jobs": bigger secondary → less
+  vignetting but MORE central obstruction; obstruction removes central rays
+  (its shadow), vignetting removes the edge rays of an off-axis beam.
+- ✅ (e) Caption names concrete cases: fast wide-field astrographs with big
+  sensors, visual-optimised Newtonians with undersized secondaries used for
+  imaging, undersized diagonal/focuser/baffle — corner-darkening on wide fields.
 
 ### R4.7 — Spherical aberration
 > "the left plot zoomed in inset is blank; it should also be made into a new plot
@@ -145,9 +150,12 @@ Status: ⬜ open · 🔧 in progress · ✅ done+verified · ❓ needs decision/
 > "the ND-2.0 filter basically makes the moon completely dark – this seems like too
 > strong of an effect- is it correct? The exit pupil also seems to only affect the
 > eye view, not detector. Is that right?"
-- ⬜ (a) ND-2.0 makes the Moon completely dark — too strong? Is it correct?
-- ⬜ (b) The exit pupil seems to affect only the EYE view, not the detector. Is
-  that right? (explain or fix)
+- ✅ (a) Correct: OD 2.0 = 1% transmission, a heavy cut (visual observers use
+  ND-0.9/1.0 ≈ 10–12%). Reads nearly black in the linear Detector view; the eye's
+  log response keeps it visible in the Eye view. Noted in the description.
+- ✅ (b) Correct: exit pupil is a visual concept (beam width at the eye); a
+  detector at the focal plane collects all the light regardless, so it has no
+  exit-pupil term. Explained in the description.
 
 ### R4.12 — Colour filters on Jupiter  **(REPEAT — user frustrated, no improvement seen)**
 > "all my comments from before seem to still hold with no improvements: the red

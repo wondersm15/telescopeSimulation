@@ -358,17 +358,23 @@ class TestReferenceTabVignettingDiagram:
         tab = ParametersPhysicsTab()
         assert tab is not None
 
-    def test_panel_a_traces_clipped_rays(self):
-        """R3.7b: Panel A now traces individual rays; the off-axis rays that
-        miss the secondary are marked with red 'x' at the secondary plane."""
+    def test_panel_a_source_star_and_focus_circle(self):
+        """R4.6: Panel A marks the light SOURCE with a star and the
+        convergence (prime focus) with an OPEN CIRCLE; caught rays stop at the
+        secondary while missed rays continue to the focus."""
         import matplotlib
         matplotlib.use("Agg")
         from telescope_gui.reference_tab import _build_vignetting_diagram
         import matplotlib.pyplot as plt
         fig = _build_vignetting_diagram()
         axA = fig.axes[0]
-        # At least one line uses an 'x' marker (a clipped ray endpoint).
-        assert any(ln.get_marker() == "x" for ln in axA.get_lines())
+        markers = [ln.get_marker() for ln in axA.get_lines()]
+        assert "*" in markers          # source star
+        assert "o" in markers          # prime-focus convergence circle
+        # An open-circle marker (unfilled facecolor) for the focus.
+        assert any(ln.get_marker() == "o"
+                   and ln.get_markerfacecolor() in ("none", "None")
+                   for ln in axA.get_lines())
         plt.close(fig)
 
     def test_caption_defines_clear_aperture(self):
