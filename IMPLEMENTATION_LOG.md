@@ -37,6 +37,23 @@ saturation; D2 = real photo-textures for Jupiter/Saturn).
     saturates)" (a mag-0 star clips at 100 mm, so the scaling isn't visible).
   - **R4.15** Star-field tints desaturated (`_TINT_STRENGTH=0.45`): max per-star
     saturation 0.60→0.27, so the field reads naturally. +3 tests.
+- **Batch H ✅ (label/legend/formula fixes, 2026-07-18). 420 tests pass.**
+  - **R4.1/R4.9a** "Reference" labels on the Airy-disc and aperture-vs-seeing LEFT
+    panels.
+  - **R4.3** 1D central-obstruction: the plot TITLE is now the per-side
+    normalisation basis (SHAPE vs PEAK-intensity-loss) with the blue/red colour key
+    folded in; removed the separate legend that had been covering the side-panel
+    formulas; cleared the colliding "PSF" suptitle.
+  - **R4.4a** formula variable keys (Airy λ,D,N; obstruction ε,S). **R4.4b** could
+    NOT reproduce stray Strehl on Airy — all Strehl code is scoped to
+    central_obstruction and the readout updates correctly on navigation; likely a
+    stale build (flagged to user).
+  - **R4.5a** chromatic ray trace: the "Focal offsets" readout + idealise note were
+    sitting on the narrow ray bundle; moved both OUTSIDE the axes into the
+    left/right canvas whitespace.
+  - **R4.10** coma panels shortened (gridspec bottom/top margins) so the grey
+    caption clears the x-axis labels.
+  - **R4.8c** MultiColorStarField shifted down ~6″ so the top row clears the labels.
 
 ## Tutorial Tab — Round 3 (verbatim-feedback rework): COMPLETE (Batches A–G)
 

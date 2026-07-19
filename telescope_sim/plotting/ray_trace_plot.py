@@ -2225,9 +2225,13 @@ def plot_polychromatic_ray_trace(
         for label, fp in all_focal_points.items():
             dz = fp[1] - ref
             readout_lines.append(f"  {label}: {dz:+.3f}")
-        ax.text(0.985, 0.55, "\n".join(readout_lines),
+        # Place OUTSIDE the axes in the right-hand canvas whitespace (the ray
+        # trace is a tall, narrow equal-aspect bundle, so an in-axes box at the
+        # right edge still sat on the rays — R4.5a). x>1 is in the figure
+        # margin; text isn't axes-clipped.
+        ax.text(1.03, 0.62, "\n".join(readout_lines),
                 transform=ax.transAxes, fontsize=7,
-                verticalalignment="center", horizontalalignment="right",
+                verticalalignment="center", horizontalalignment="left",
                 fontfamily="monospace",
                 bbox=dict(boxstyle="round,pad=0.3", facecolor="white",
                           alpha=0.85, edgecolor="gray"))
@@ -2237,7 +2241,9 @@ def plot_polychromatic_ray_trace(
     # Placed in the LEFT-side whitespace (mid-height) so it doesn't pile up
     # with the focal-plane label / zoom box in the crowded focal region.
     if idealize_sa:
-        ax.text(0.015, 0.42,
+        # LEFT-side canvas whitespace, outside the axes (x<0), so it doesn't
+        # sit on the rays either (R4.5a).
+        ax.text(-0.03, 0.5,
                 "Idealised: spherical\n"
                 "aberration removed —\n"
                 "each colour converges\n"
@@ -2245,7 +2251,7 @@ def plot_polychromatic_ray_trace(
                 "chromatic focal shift\n"
                 "is shown.",
                 transform=ax.transAxes, fontsize=7,
-                verticalalignment="center", horizontalalignment="left",
+                verticalalignment="center", horizontalalignment="right",
                 style="italic", color="#444",
                 bbox=dict(boxstyle="round,pad=0.3", facecolor="#fffbe6",
                           alpha=0.9, edgecolor="#ccaa44"))
@@ -3903,7 +3909,11 @@ def plot_coma_field_analysis(
         spot_angles = [0.0, 30.0, 60.0, 120.0]
 
     fig = plt.figure(figsize=figsize)
-    gs = fig.add_gridspec(1, 2, width_ratios=[1, 1.2], wspace=0.3)
+    # Leave a bottom band free for the grey caption text (R4.10: the two
+    # panels' x-axis labels were overlapping it — shrink the panels' vertical
+    # extent to make room). top leaves space for the suptitle.
+    gs = fig.add_gridspec(1, 2, width_ratios=[1, 1.2], wspace=0.3,
+                          bottom=0.22, top=0.9)
 
     if view_mode == "ray_fan":
         # LEFT: the ray fan (aberration signature) at a representative angle.

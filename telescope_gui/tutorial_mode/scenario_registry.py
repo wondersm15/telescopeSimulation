@@ -285,7 +285,7 @@ SCENARIOS: list[ScenarioDefinition] = [
         learn_more_section="Diffraction",
         before_telescope=_CLEAN_200MM,
         before_source=_POINT,
-        before_label="200 mm aperture",
+        before_label="Reference \u2014 200 mm aperture",
         after_telescope=_CLEAN_200MM,
         after_source=_POINT,
         after_label="Adjust aperture \u2192",
@@ -755,7 +755,7 @@ SCENARIOS: list[ScenarioDefinition] = [
         ),
         before_source=_POINT,
         before_seeing_arcsec=2.5,
-        before_label="With theoretical-limit overlays",
+        before_label="Reference — both effects + limit overlays",
         after_telescope=TelescopeConfig(
             telescope_type="Newtonian", diameter=200.0, focal_length=1000.0,
             enable_obstruction=False, spider_vanes=0,

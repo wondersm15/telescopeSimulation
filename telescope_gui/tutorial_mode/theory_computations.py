@@ -45,7 +45,8 @@ def compute_airy_disk_theory(telescope, wavelength_nm: float = 550.0) -> dict:
 
     formula = (f"\u03b8 = 1.22\u03bb/D = {theta_arcsec:.3f}\" "
                f"|  r = 1.22\u03bbN = {r_focal_mm * 1000:.2f} \u00b5m "
-               f"at f/{f_ratio:.1f}")
+               f"at f/{f_ratio:.1f}\n"
+               f"\u03bb = wavelength, D = aperture, N = f-ratio (f/D)")
     return {
         "theory_value": theta_arcsec,
         "label": "Airy radius",
@@ -186,7 +187,8 @@ def compute_central_obstruction_theory(telescope,
     formula = (
         f"S ≈ (1−ε²)²  |  "
         f"θᴿ(ε)={modified_rayleigh:.3f}″ "
-        f"= 1.22λ/D/(1+ε²)"
+        f"= 1.22λ/D/(1+ε²)\n"
+        f"ε = secondary/primary Ø (obstruction ratio); S = Strehl ratio"
     )
 
     return {
@@ -594,46 +596,34 @@ def _obstruction_overlay(fig: Figure, theory_result: dict, telescope,
             ax.fill_between([0, r_max_um], strehl_obs, 1.0,
                             color="red", alpha=0.08, zorder=0)
 
-        # Legend + per-side NORMALISATION BASIS pulled OUT of the plot into
-        # the side column (with the metrics/formulas) so they don't block the
-        # curves (R3.5). The two sides use DIFFERENT normalisations, so each
-        # states its own basis:
+        # R4.3: the per-side NORMALISATION BASIS is the key thing to convey,
+        # so make it the PLOT TITLE (was "No/With obstruction"), and fold the
+        # blue/red colour key into it — that removes the separate legend
+        # entirely, so it blocks neither the curves (R3.5) nor the side-panel
+        # formulas (R4.3b). The two sides use DIFFERENT normalisations:
         #   before (unobstructed): each curve to its own peak = 1.0 → SHAPE
         #     comparison (energy pushed from core into rings).
         #   after  (obstructed): obstructed curve scaled to its Strehl
         #     (1−ε²)² vs the unobstructed reference at 1.0 → PEAK-INTENSITY
         #     (Strehl) loss (shaded).
-        # Remove the in-plot legend that plot_psf_profile added (e.g.
-        # "PSF = Airy") so nothing blocks the curves; we re-place a richer
-        # one in the side column below.
         if ax.get_legend() is not None:
             ax.get_legend().remove()
-        handles, labels = ax.get_legend_handles_labels()
-        side_panel = _find_reference_side_panel(fig, plot_ax=ax)
+        # Clear the generic "Point Spread Function" suptitle so it doesn't
+        # collide with the per-side normalisation title we set below.
+        if getattr(fig, "_suptitle", None) is not None:
+            fig.suptitle("")
         if is_before_side:
-            norm_title = ("Normalisation — LEFT (this side):\n"
-                          "each curve to its OWN peak = 1.0.\n"
-                          "Shows PSF SHAPE: energy pushed from\n"
-                          "the core out into the rings.\n"
-                          "(Peak-intensity loss shown on the right.)")
+            ax.set_title(
+                "Normalised to each own peak → PSF SHAPE\n"
+                "blue = unobstructed · red = obstructed (shape)",
+                fontsize=8.5)
         else:
-            norm_title = ("Normalisation — RIGHT (this side):\n"
-                          "obstructed curve scaled to its Strehl\n"
-                          f"(1−ε²)² ≈ {strehl_obs:.3f}; unobstructed\n"
-                          "reference at 1.0. Shows PEAK-INTENSITY\n"
-                          "(Strehl) loss — the shaded gap.")
-        if side_panel is not None and handles:
-            leg = side_panel.legend(
-                handles, labels, title=norm_title, fontsize=7,
-                title_fontsize=7.5, loc="lower center",
-                bbox_to_anchor=(0.5, -0.02), framealpha=0.95,
-                borderpad=0.6)
-            leg._legend_box.align = "left"
-        elif handles:
-            # Fallback: at least keep the legend OUT of the data area.
-            ax.legend(handles, labels, title=norm_title, fontsize=7,
-                      title_fontsize=7.5, loc="upper center",
-                      bbox_to_anchor=(0.5, -0.16), ncol=2)
+            ax.set_title(
+                f"Obstructed scaled to Strehl (1−ε²)² ≈ {strehl_obs:.3f} "
+                "→ PEAK-INTENSITY loss\n"
+                "red = obstructed · blue = unobstructed reference "
+                "(shaded = Strehl gap)",
+                fontsize=8.5)
 
 
 def _chromatic_star_labels_overlay(fig: Figure, theory_result: dict,

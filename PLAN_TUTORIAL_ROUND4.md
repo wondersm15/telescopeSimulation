@@ -12,7 +12,7 @@ Status: ⬜ open · 🔧 in progress · ✅ done+verified · ❓ needs decision/
 ### R4.1 — Airy disc (2D mode)
 > "Make sure the left plot in 2d mode is clearly labeled 'Reference' to make it
 > clear why there are two figures."
-- ⬜ (a) 2D mode: label the left plot clearly as "Reference".
+- ✅ (a) Airy before_label → "Reference — 200 mm aperture".
 
 ### R4.2 — Rayleigh criterion
 > "also describe the spatial integration when it is used in the legend describing
@@ -38,18 +38,22 @@ Status: ⬜ open · 🔧 in progress · ✅ done+verified · ❓ needs decision/
 > obstruction and With obstruction, they should be labeled with the normalization
 > basis for each plot. The legend labels are good there but now cover up the
 > formulas."
-- ⬜ (a) 1D mode: change the figure titles from "No obstruction"/"With obstruction"
-  to the NORMALIZATION BASIS for each plot.
-- ⬜ (b) The legend labels now cover up the formulas — fix the overlap.
+- ✅ (a) 1D obstruction plot title is now the per-side normalisation basis
+  ("Normalised to each own peak → SHAPE" / "Obstructed scaled to Strehl → PEAK
+  loss") + the blue/red colour key; cleared the colliding "PSF" suptitle.
+- ✅ (b) Folded the colour key into the title and REMOVED the separate legend, so
+  nothing covers the side-panel formulas.
 
 ### R4.4 — Formulas (general, cross-cutting)
 > "More generally with formulas we should make sure that the variables are clear,
 > and that we have the appropriate formulas (only) for the module in question. For
 > example Airy disc seems to have Strehl/obstruction formulas that don't belong
 > there."
-- ⬜ (a) Ensure formula variables are clearly defined.
-- ⬜ (b) Each module shows ONLY the formulas appropriate to it (e.g. Airy disc
-  wrongly shows Strehl/obstruction formulas).
+- ✅ (a) Added variable keys to formulas (Airy: λ,D,N; obstruction: ε,S).
+- ❓ (b) COULD NOT REPRODUCE: the Airy module's plot/overlay/theory show only
+  θ=1.22λ/D and r=1.22λN; all Strehl code is scoped to central_obstruction and the
+  theory readout updates correctly on navigation (verified central_obstruction →
+  airy_disk). Likely a stale build on the user's side — flag for confirmation.
 
 ### R4.5 — Chromatic aberration
 > "We still don't have the legends in the left ray trace pulled outside of the plot
@@ -58,9 +62,9 @@ Status: ⬜ open · 🔧 in progress · ✅ done+verified · ❓ needs decision/
 > physics, add a note on the different types of glasses that are used, how they
 > relate to the achromat vs APO designs, including how they are applied in the
 > tutorial module and relative costs/performance improvement for them."
-- ⬜ (a) Move the left ray-trace legend OUT of the plot into canvas white space
-  (STILL not done per user — reverify; may be a different ray-trace fn than the
-  ones fixed in R3.18).
+- ✅ (a) The offender was `plot_polychromatic_ray_trace` (NOT the R3.18 pupil
+  trace): its "Focal offsets" readout + idealise note sat ON the narrow ray
+  bundle. Moved both OUTSIDE the axes into the left/right canvas whitespace.
 - ⬜ (b) Chromatic P&P: add a note on glass types, achromat vs APO designs, how
   they're applied in the module, and relative cost/performance.
 
@@ -114,14 +118,14 @@ Status: ⬜ open · 🔧 in progress · ✅ done+verified · ❓ needs decision/
   chromatic model.
 - ⬜ (b) APO TRIPLET: stars have non-uniform colouring, and in eye view they all
   appear larger than in detector view. Is that correct? Investigate.
-- ⬜ (c) The upper-left legend partially covers the upper-left star — move all
-  stars slightly lower (or move the legend).
+- ✅ (c) MultiColorStarField y-positions shifted down ~6″ so the top row clears
+  the upper-left labels/info box.
 
 ### R4.9 — Aperture vs seeing
 > "this is better. Make sure you label the left plot as the reference with both
 > effects. On the right, when you turn off both blurring effects the star
 > disappears, there should presumably still be a very bright dot right?"
-- ⬜ (a) Label the LEFT plot as the reference (with both effects).
+- ✅ (a) aperture_vs_seeing before_label → "Reference — both effects + limit overlays".
 - ✅ (b) The ideal point (aperture off, no seeing) now renders as a small VISIBLE
   Gaussian dot (~45 px, flux-preserved) instead of a single invisible pixel —
   still far sharper than the Airy/seeing disk. (R4.9a label pending in Batch H.)
@@ -130,8 +134,8 @@ Status: ⬜ open · 🔧 in progress · ✅ done+verified · ❓ needs decision/
 > "the two plots on the left have their x-axis labels overlapping the gray
 > description below them. You can make these two plots shorter (less vertical
 > extent) to make more room for the grey descriptions under them."
-- ⬜ (a) The two left panels' x-axis labels overlap the grey caption below. Make
-  the panels shorter (less vertical extent) to make room.
+- ✅ (a) Coma gridspec given bottom=0.22/top=0.9 → panels are shorter, the grey
+  caption sits clear below the x-axis labels.
 
 ### R4.11 — ND filter on the Moon
 > "the ND-2.0 filter basically makes the moon completely dark – this seems like too

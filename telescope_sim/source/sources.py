@@ -518,12 +518,14 @@ class MultiColorStarField(StarField):
     # T_eff_K is the characteristic effective surface temperature in
     # Kelvin (textbook values for each spectral class); kT in eV =
     # T_eff_K / 11604.5.
+    # y-positions shifted down ~6″ from a symmetric ±18 layout so the top row
+    # clears the spectral-class labels / legend in the upper-left (R4.8c).
     STARS = [
-        ("Antares-like (M1)",   -25.0, +18.0,  0.5, (1.00, 0.45, 0.10),  3500),
-        ("Arcturus-like (K1)",  +25.0, +18.0,  0.0, (1.00, 0.70, 0.30),  4300),
-        ("Sun-like (G2)",       -25.0, -18.0,  0.5, (1.00, 0.92, 0.65),  5800),
-        ("Sirius-like (A1)",      0.0,   0.0, -0.5, (0.85, 0.92, 1.00),  9900),
-        ("Spica-like (B1)",     +25.0, -18.0,  0.0, (0.55, 0.75, 1.00), 22400),
+        ("Antares-like (M1)",   -25.0, +12.0,  0.5, (1.00, 0.45, 0.10),  3500),
+        ("Arcturus-like (K1)",  +25.0, +12.0,  0.0, (1.00, 0.70, 0.30),  4300),
+        ("Sun-like (G2)",       -25.0, -24.0,  0.5, (1.00, 0.92, 0.65),  5800),
+        ("Sirius-like (A1)",      0.0,  -6.0, -0.5, (0.85, 0.92, 1.00),  9900),
+        ("Spica-like (B1)",     +25.0, -24.0,  0.0, (0.55, 0.75, 1.00), 22400),
     ]
 
     def __init__(self, field_radius_arcsec: float = 40.0):
