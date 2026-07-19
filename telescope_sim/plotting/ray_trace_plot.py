@@ -859,6 +859,162 @@ def _pupil_colormap_colors(entry_heights: np.ndarray):
     return colors, sm
 
 
+def _trace_ray_fan(telescope, wavelength_nm: float = 550.0,
+                   num_rays: int = 21):
+    """Trace a fan of parallel axial rays and return (h_sorted, y_sorted_mm):
+    the pupil entry heights and the transverse ray error at the paraxial
+    focal plane. Shared by the ray-fan plot and the spherical focal analysis.
+    """
+    from telescope_sim.source.light_source import create_parallel_rays
+    rays = create_parallel_rays(
+        num_rays=num_rays, aperture_diameter=telescope.primary_diameter,
+        entry_height=telescope.tube_length * 1.15, wavelength_nm=wavelength_nm,
+    )
+    entry_heights = np.array([r.origin[0] for r in rays])
+    telescope.trace_rays(rays)
+    y_offsets = _paraxial_focal_plane_offsets(rays)
+    if y_offsets is None or len(y_offsets) == 0:
+        return None, None
+    valid = ~np.isnan(y_offsets)
+    entry_heights = entry_heights[valid]
+    y_offsets = y_offsets[valid]
+    if len(entry_heights) == 0:
+        return None, None
+    sort_idx = np.argsort(entry_heights)
+    return entry_heights[sort_idx], y_offsets[sort_idx]
+
+
+def _draw_ray_fan_panel(ax, telescope, wavelength_nm, h_sorted, y_sorted,
+                        title=None, show_cheatsheet=True):
+    """Draw the transverse-ray-error fan (Δx vs pupil height h) on `ax`.
+    Returns the ScalarMappable for a pupil-zone colorbar."""
+    colors, sm = _pupil_colormap_colors(h_sorted)
+    ax.plot(h_sorted, y_sorted * 1000.0, color="gray", alpha=0.4,
+            linewidth=1.0, zorder=1)
+    ax.scatter(h_sorted, y_sorted * 1000.0, c=colors, s=55,
+               edgecolors="black", linewidths=0.5, zorder=3)
+    ax.axhline(0.0, color="black", linestyle=":", alpha=0.4, zorder=0)
+    ax.axvline(0.0, color="black", linestyle=":", alpha=0.4, zorder=0)
+    f_ratio = telescope.focal_ratio
+    rms_um = float(np.std(y_sorted) * 1000.0)
+    max_um = float(np.max(np.abs(y_sorted)) * 1000.0)
+    if title is None:
+        primary = getattr(telescope, "primary_type", "")
+        primary_label = f" ({primary})" if primary else ""
+        title = (f"Ray fan — {telescope.primary_diameter:.0f} mm "
+                 f"f/{f_ratio:.1f}{primary_label}")
+    ax.set_title(title, fontsize=10)
+    ax.set_xlabel("Pupil entry height h (mm)")
+    ax.set_ylabel("Transverse ray error Δx (µm)")
+    ax.grid(True, alpha=0.3)
+    airy_um = 1.22 * (wavelength_nm * 1e-6) * f_ratio * 1000.0
+    y_half = max(max_um * 1.15, 3.0 * airy_um)
+    ax.set_ylim(-y_half, y_half)
+    if show_cheatsheet:
+        cheat = ("Δx(h) shape ↔ aberration\n"
+                 "  S-shape (h³)   spherical\n"
+                 "  U-shape (h²)   coma\n"
+                 "  tilt (h¹)      defocus\n"
+                 "  ≈ 0 across h   diffraction-limited")
+        ax.text(0.02, 0.98, cheat, transform=ax.transAxes,
+                va="top", ha="left", fontsize=6.5,
+                bbox=dict(boxstyle="round,pad=0.3", facecolor="white",
+                          alpha=0.85, edgecolor="gray"))
+    ax.text(0.98, 0.02,
+            f"RMS Δx = {rms_um:.2f} µm\nmax |Δx| = {max_um:.2f} µm",
+            transform=ax.transAxes, va="bottom", ha="right", fontsize=6.5,
+            bbox=dict(boxstyle="round,pad=0.3", facecolor="white",
+                      alpha=0.85, edgecolor="gray"))
+    return sm
+
+
+def _draw_sa_caustic_panel(ax, telescope, wavelength_nm, h_sorted, y_sorted):
+    """Focal-region 'caustic' for spherical aberration (R4.7): show that the
+    marginal (edge) rays cross the axis SHORT of the paraxial focus.
+
+    Derived from the SAME reliable ray-fan data (transverse error Δx(h) at
+    the paraxial plane) as the fan below — NOT from the raw folded-Newtonian
+    axis-crossing (which gave spurious spread even for a perfect parabola).
+    A ray at pupil height h reaches the paraxial plane (z=0) with transverse
+    offset Δx(h) and converges at slope ≈ h/f, so it crossed the axis at an
+    axial offset Δz(h) = Δx(h)·f/h before it. For spherical aberration
+    Δx ∝ h³ ⇒ Δz ∝ h² (marginal rays focus shortest) — the classic caustic.
+    """
+    f = telescope.focal_length
+    airy_um = 1.22 * (wavelength_nm * 1e-6) * telescope.focal_ratio * 1000.0
+    colors, _sm = _pupil_colormap_colors(h_sorted)
+    z_cross_mm = []
+    for h, dx in zip(h_sorted, y_sorted):
+        if abs(h) < 1e-6:
+            z_cross_mm.append(0.0)
+            continue
+        z_cross_mm.append(dx * f / h)   # axial offset of this ray's crossing
+    z_cross_mm = np.array(z_cross_mm)
+    # Draw each ray as a converging line through (Δx at z=0) with slope
+    # toward its own axis crossing; extend a little past both.
+    z_span = max(float(np.max(np.abs(z_cross_mm))) * 1.4, 1e-3)
+    x_span_um = max(float(np.max(np.abs(y_sorted))) * 1000.0 * 1.3,
+                    airy_um * 2.0)
+    for h, dx, zc, c in zip(h_sorted, y_sorted, z_cross_mm, colors):
+        dx_um = dx * 1000.0
+        # Line in (z_mm, x_um): passes through (0, dx_um) and (zc, 0).
+        z0, z1 = -z_span, z_span
+        if abs(zc) > 1e-9:
+            slope = -dx_um / zc            # x_um per mm of z
+        else:
+            slope = 0.0
+        x0 = dx_um + slope * (z0 - 0.0)
+        x1 = dx_um + slope * (z1 - 0.0)
+        ax.plot([z0, z1], [x0, x1], color=c, linewidth=1.0, alpha=0.8)
+    ax.axhline(0.0, color="black", linestyle=":", alpha=0.4)
+    ax.axvline(0.0, color="gray", linestyle="--", alpha=0.6)
+    ax.plot(0.0, 0.0, marker="*", color="red", markersize=11, zorder=6,
+            label="Paraxial focus")
+    ax.set_xlim(-z_span, z_span)
+    ax.set_ylim(-x_span_um, x_span_um)
+    ax.set_xlabel("Axial distance from paraxial focus, Δz (mm)")
+    ax.set_ylabel("Transverse, x (µm)")
+    ax.set_title("Focal-region caustic — marginal rays cross short of ★",
+                 fontsize=10)
+    ax.grid(True, alpha=0.3)
+    ax.legend(fontsize=7, loc="upper right")
+
+
+def plot_spherical_focal_analysis(telescope: Telescope,
+                                  wavelength_nm: float = 550.0,
+                                  num_rays: int = 21,
+                                  figsize: tuple[float, float] = (6, 8),
+                                  save_path: str | None = None,
+                                  ) -> plt.Figure:
+    """Two-panel spherical-aberration analysis (secondary for the SA module,
+    mirroring the chromatic focal-plane layout — R4.7):
+
+      Top: focal-region CAUSTIC — the marginal rays cross the axis short of
+        the paraxial focus (the longitudinal signature of SA).
+      Bottom: the RAY FAN — transverse error Δx vs pupil height h (the
+        S-cubic signature). The caustic explains WHY the fan is an S: the
+        edge rays have already crossed and are diverging at the paraxial
+        plane, so their Δx is large and opposite the mid-zone rays.
+    """
+    fig, (ax_top, ax_bot) = plt.subplots(2, 1, figsize=figsize,
+                                         gridspec_kw={"hspace": 0.32})
+    h_sorted, y_sorted = _trace_ray_fan(telescope, wavelength_nm, num_rays)
+    if h_sorted is None:
+        ax_top.text(0.5, 0.5, "Ray trace failed", ha="center",
+                    va="center", transform=ax_top.transAxes)
+        return fig
+    _draw_sa_caustic_panel(ax_top, telescope, wavelength_nm,
+                           h_sorted, y_sorted)
+    sm = _draw_ray_fan_panel(ax_bot, telescope, wavelength_nm,
+                             h_sorted, y_sorted)
+    cbar = fig.colorbar(sm, ax=[ax_top, ax_bot], shrink=0.6,
+                        label="|Pupil zone| (mm)", pad=0.02)
+    cbar.ax.tick_params(labelsize=7)
+    if save_path:
+        fig.savefig(save_path, dpi=150, bbox_inches="tight")
+    return fig
+
+
 def plot_ray_fan_telescope(telescope: Telescope,
                             wavelength_nm: float = 550.0,
                             num_rays: int = 21,
@@ -884,113 +1040,16 @@ def plot_ray_fan_telescope(telescope: Telescope,
     ray fan, connecting "where the ray came from" to "where it
     landed".
     """
-    from telescope_sim.source.light_source import create_parallel_rays
-    rays = create_parallel_rays(
-        num_rays=num_rays,
-        aperture_diameter=telescope.primary_diameter,
-        entry_height=telescope.tube_length * 1.15,
-        wavelength_nm=wavelength_nm,
-    )
-    # Capture pupil entry heights before tracing
-    entry_heights = np.array([r.origin[0] for r in rays])
-
-    telescope.trace_rays(rays)
-    # Use the paraxial focal plane (where central rays focus) so SA
-    # produces the canonical Δy ∝ h³ cubic curve. Plotting at the
-    # circle of least confusion (min-spread plane) instead would
-    # give a less-canonical W-shape that doesn't match the textbook
-    # "cubic = SA" teaching.
-    y_offsets = _paraxial_focal_plane_offsets(rays)
-
+    h_sorted, y_sorted = _trace_ray_fan(telescope, wavelength_nm, num_rays)
     fig, ax = plt.subplots(figsize=figsize)
-
-    if y_offsets is None or len(y_offsets) == 0:
+    if h_sorted is None:
         ax.text(0.5, 0.5, "Ray trace failed", ha="center", va="center",
                 transform=ax.transAxes)
         return fig
-
-    # Drop NaN rays (failed traces or far-extrapolated)
-    valid = ~np.isnan(y_offsets)
-    entry_heights = entry_heights[valid]
-    y_offsets = y_offsets[valid]
-
-    # Sort by pupil height for a clean trace line
-    sort_idx = np.argsort(entry_heights)
-    h_sorted = entry_heights[sort_idx]
-    y_sorted = y_offsets[sort_idx]
-
-    colors, sm = _pupil_colormap_colors(h_sorted)
-
-    # The connecting trace line: faint, so it suggests "this is a
-    # smooth function of h" without competing with the dots.
-    ax.plot(h_sorted, y_sorted * 1000.0, color="gray", alpha=0.4,
-            linewidth=1.0, zorder=1)
-
-    # Coloured dots (one per ray)
-    ax.scatter(h_sorted, y_sorted * 1000.0, c=colors, s=70,
-                edgecolors="black", linewidths=0.5, zorder=3)
-
-    # Reference axes
-    ax.axhline(0.0, color="black", linestyle=":", alpha=0.4, zorder=0)
-    ax.axvline(0.0, color="black", linestyle=":", alpha=0.4, zorder=0)
-
-    # Annotations
-    primary = getattr(telescope, "primary_type", "")
-    primary_label = f" ({primary})" if primary else ""
-    f_ratio = telescope.focal_ratio
-    rms_um = float(np.std(y_sorted) * 1000.0)
-    max_um = float(np.max(np.abs(y_sorted)) * 1000.0)
-
-    if title is None:
-        title = (f"Ray fan — {telescope.primary_diameter:.0f} mm "
-                 f"f/{f_ratio:.1f}{primary_label}")
-    ax.set_title(title, fontsize=11)
-    ax.set_xlabel("Pupil entry height h (mm)")
-    # The vertical axis is the TRANSVERSE ray error — where a ray lands at the
-    # focal plane relative to the ideal focus, measured across the optical
-    # axis. That transverse direction is the x-axis of the companion ray-trace
-    # panel, so label it Δx (not Δy) for consistency with the left plot.
-    ax.set_ylabel("Transverse ray error at focal plane, Δx (µm)")
-    ax.grid(True, alpha=0.3)
-
-    # Floor the y-axis to a physical (diffraction) scale so a corrected
-    # system reads as FLAT, not a magnified floating-point zigzag. A
-    # parabolic primary has Δy ≈ 1e-11 µm (numerical noise); left to
-    # autoscale, matplotlib blows that up into a fake S/zigzag even though
-    # RMS = 0.00 µm. Referencing the axis to the Airy radius makes
-    # "aberration ≪ diffraction limit" look diffraction-limited (a flat
-    # line through zero), while a real aberration (max |Δy| ≫ Airy)
-    # autoscales normally and shows its full curve.
-    airy_um = 1.22 * (wavelength_nm * 1e-6) * f_ratio * 1000.0
-    y_floor_um = 3.0 * airy_um  # half-range floor ≈ 3 Airy radii
-    y_half = max(max_um * 1.15, y_floor_um)
-    ax.set_ylim(-y_half, y_half)
-
-    # Pupil-zone colorbar (matches the companion ray-trace panel)
-    cbar = fig.colorbar(sm, ax=ax, shrink=0.85,
-                        label="|Pupil zone| (mm)")
+    sm = _draw_ray_fan_panel(ax, telescope, wavelength_nm, h_sorted, y_sorted,
+                             title=title)
+    cbar = fig.colorbar(sm, ax=ax, shrink=0.85, label="|Pupil zone| (mm)")
     cbar.ax.tick_params(labelsize=8)
-
-    # Aberration cheat-sheet
-    cheat = ("Δx(h) shape ↔ aberration\n"
-             "  S-shape (h³)   spherical\n"
-             "  U-shape (h²)   coma\n"
-             "  tilt (h¹)      defocus\n"
-             "  ≈ 0 across h   diffraction-limited")
-    ax.text(0.02, 0.98, cheat, transform=ax.transAxes,
-            va="top", ha="left", fontsize=7,
-            bbox=dict(boxstyle="round,pad=0.3",
-                      facecolor="white", alpha=0.85,
-                      edgecolor="gray"))
-    # Stats
-    ax.text(0.98, 0.02,
-            f"RMS Δx = {rms_um:.2f} µm\nmax |Δx| = {max_um:.2f} µm",
-            transform=ax.transAxes, va="bottom", ha="right",
-            fontsize=7,
-            bbox=dict(boxstyle="round,pad=0.3",
-                      facecolor="white", alpha=0.85,
-                      edgecolor="gray"))
-
     plt.tight_layout()
     if save_path:
         fig.savefig(save_path, dpi=150, bbox_inches="tight")
@@ -1120,61 +1179,12 @@ def plot_ray_trace_pupil_colored(telescope: Telescope,
                 ax.plot(plane_pos, 0.0, "r*", markersize=12, zorder=5,
                         label="Paraxial focal plane")
 
-            # Focal-region zoom INSET (R3.8a): on the full-height ray trace the
-            # focus is a single point and the marginal-vs-paraxial spread is
-            # invisible. Magnify the axis-crossing region so the bright
-            # (marginal) rays crossing the axis SHORT of the dim (paraxial)
-            # rays is actually visible — the whole point of the scenario.
-            # (scan_axis == 1: optical axis is y, transverse is x.)
-            if scan_axis == 1:
-                crossings = []
-                for r in rays:
-                    if len(r.history) < 2:
-                        continue
-                    q0 = np.array(r.history[-2]); q1 = np.array(r.history[-1])
-                    dd = q1 - q0
-                    if abs(dd[1]) < 1e-12:
-                        continue
-                    tt = -q1[0] / dd[0] if abs(dd[0]) > 1e-12 else None
-                    # crossing of the optical axis (x = 0)
-                    if abs(dd[0]) > 1e-12:
-                        t_ax = -q1[0] / dd[0]
-                        crossings.append(q1[1] + t_ax * dd[1])
-                if crossings and (max(crossings) - min(crossings)) > 1e-4:
-                    cmin, cmax = min(crossings), max(crossings)
-                    span = cmax - cmin
-                    lo = min(cmin, plane_pos) - 0.25 * span
-                    hi = max(cmax, plane_pos) + 0.25 * span
-                    tw = span * 0.7 + 1e-4
-                    axin = ax.inset_axes([0.55, 0.28, 0.33, 0.30])
-                    for ray_idx, r in enumerate(rays):
-                        if len(r.history) < 2:
-                            continue
-                        q0 = np.array(r.history[-2])
-                        q1 = np.array(r.history[-1])
-                        dd = q1 - q0
-                        if abs(dd[1]) < 1e-12:
-                            continue
-                        t2 = (lo - q1[1]) / dd[1]
-                        e2 = q1 + t2 * dd
-                        c = colors[ray_idx] if ray_idx < len(colors) else "gold"
-                        axin.plot([q1[0], e2[0]], [q1[1], e2[1]],
-                                  color=c, linewidth=1.0, alpha=0.85)
-                    axin.axhline(plane_pos, color="gray", linestyle="--",
-                                 linewidth=0.8, alpha=0.6)
-                    axin.plot(0.0, plane_pos, "r*", markersize=8, zorder=5)
-                    axin.set_xlim(-tw, tw)
-                    axin.set_ylim(lo, hi)
-                    axin.set_title(
-                        "Focal-region zoom (marginal ✗ short of ★)",
-                        fontsize=6.5)
-                    axin.set_xlabel("x (mm)", fontsize=6)
-                    axin.set_ylabel("y (mm)", fontsize=6)
-                    axin.tick_params(labelsize=6)
-                    # Move the main-axes legend out of the inset's way
-                    # (recreate at lower-left; robust across mpl versions).
-                    if ax.get_legend() is not None:
-                        ax.legend(loc="lower left", fontsize=7, framealpha=0.9)
+            # (The old R3.8a focal-region zoom INSET was removed in R4.7: it
+            # relied on the raw folded-Newtonian axis-crossing, which gave
+            # spurious spread even for a perfect parabola and often rendered
+            # blank. The marginal-vs-paraxial detail now lives in the proper
+            # secondary panel `plot_spherical_focal_analysis` — a focal-region
+            # caustic derived from the reliable ray-fan data.)
 
     # Move the auto-generated ray-trace legend OUT of the plot (R3.18 /
     # R3.5c legends-out sweep): the rays fill the upper band, so the shared

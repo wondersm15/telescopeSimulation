@@ -274,6 +274,21 @@ class TestScenarioRunner:
         assert err is None
         plt.close(fig)
 
+    def test_run_spherical_secondary_is_caustic_plus_fan(self):
+        """R4.7: the spherical scenario's secondary is now a two-panel
+        focal-caustic + ray-fan analysis (mirroring chromatic), not the bare
+        ray fan."""
+        from telescope_gui.tutorial_mode.scenario_registry import get_scenario_by_id
+        from telescope_gui.tutorial_mode.scenario_runner import run_scenario_side
+        s = get_scenario_by_id("spherical_aberration")
+        assert s.secondary_plot_function == "plot_spherical_focal_analysis"
+        fig, info, err = run_scenario_side(
+            s.after_telescope, s.after_source, s.secondary_plot_function)
+        assert err is None
+        titles = " ".join(a.get_title().lower() for a in fig.axes)
+        assert "caustic" in titles and "ray fan" in titles
+        plt.close(fig)
+
     def test_run_coma_ray_fan_is_default(self):
         """The coma scenario defaults to the ray-fan view (R3.11a): left
         panel titled 'Coma ray fan …', not the RMS curve."""

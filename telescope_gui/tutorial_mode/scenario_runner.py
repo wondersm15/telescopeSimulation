@@ -172,6 +172,7 @@ def _call_plot_function(
         plot_spot_diagram_telescope,
         plot_chromatic_focal_planes,
         plot_ray_fan_telescope,
+        plot_spherical_focal_analysis,
         plot_ray_trace_pupil_colored,
     )
 
@@ -266,6 +267,14 @@ def _call_plot_function(
     elif name == "plot_ray_fan_telescope":
         fig = plot_ray_fan_telescope(
             telescope, wavelength_nm=wavelength_nm, figsize=figsize)
+        return fig, {"plot_function": name}
+
+    elif name == "plot_spherical_focal_analysis":
+        # Tall two-panel secondary (focal caustic + ray fan) mirroring the
+        # chromatic focal-plane layout.
+        tall = (figsize[0], figsize[1] * 1.5)
+        fig = plot_spherical_focal_analysis(
+            telescope, wavelength_nm=wavelength_nm, figsize=tall)
         return fig, {"plot_function": name}
 
     elif name == "plot_ray_trace_pupil_colored":

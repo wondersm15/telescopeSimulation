@@ -99,12 +99,16 @@ Status: ⬜ open · 🔧 in progress · ✅ done+verified · ❓ needs decision/
 > then. In the ray fan, you mention defocus/tilt but this is not mentioned anywhere
 > else. Am I correct? Should that aberration be mentioned somewhere? At least in
 > parameter and physics?"
-- ⬜ (a) The left-plot zoomed inset is BLANK — fix.
-- ⬜ (b) Promote the inset to a NEW plot in the UPPER RIGHT, equivalent to the
-  chromatic-aberration focal-zoom plots (analogous). Use it to better explain the
-  ray fan.
-- ⬜ (c) Ray fan mentions defocus/tilt but nowhere else — add defocus/tilt to P&P
-  (at least).
+- ✅ (a) Removed the blank R3.8a inset (it used the raw folded-Newtonian axis-
+  crossing → spurious spread even for a parabola, often blank).
+- ✅ (b) New secondary `plot_spherical_focal_analysis` (top = focal-region
+  CAUSTIC showing marginal rays crossing short of the paraxial ★, derived from the
+  reliable ray-fan Δx(h); bottom = the ray fan). Mirrors the chromatic focal-plane
+  layout and explains WHY the fan is an S-cubic. Refactored ray-fan tracing/drawing
+  into shared helpers. +1 test.
+- ✅ (c) Defocus + tilt are already described in P&P ("Reading the ray fan"
+  subsection, R3.8b): defocus = linear Δx∝h (wrong focus distance); tilt =
+  constant Δx (decentre/off-axis). Verified present.
 
 ### R4.8 — Chromatic aberration + seeing
 > "the brightness is better. Is it realistic? Even the APO doublet has significant
