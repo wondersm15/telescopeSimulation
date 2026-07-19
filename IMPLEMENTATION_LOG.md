@@ -2,7 +2,29 @@
 
 ---
 
-## Tutorial Tab — Round 4 (second verbatim-feedback round): in progress
+## Tutorial Tab — Round 4 (second verbatim-feedback round): COMPLETE
+
+All of Round 4 (R4.1–R4.15 + both user decisions D1/D2) is addressed; committed on
+`feature/tutorial-testing-tab`. 422 tests pass. One item (R4.4b, stray Strehl on
+the Airy module) could not be reproduced — flagged for user confirmation (likely a
+stale build).
+
+- **R4.7 ✅** Spherical restructured to mirror chromatic: removed the blank inset;
+  new secondary `plot_spherical_focal_analysis` = focal-region caustic (marginal
+  rays cross short of the paraxial ★) + ray fan. R4.7c defocus/tilt already in P&P.
+- **R4.6 ✅** Vignetting diagram reworked: star = source (incoming light from the
+  left), open circle = convergence, caught rays STOP at the secondary, missed rays
+  continue to the focus; caption adds the obstruction↔vignetting relationship and
+  concrete observable cases. R4.5b chromatic glass/cost P&P; R4.11 ND-2.0 +
+  exit-pupil notes.
+- **R4.8 ✅** Tightened APO chromatic residuals: doublet f/8000→f/16000 (~1.5× Airy,
+  near colour-free); triplet f/20000→f/45000 (below Airy, colour-free, green cores
+  gone). P&P table updated.
+- **R4.2c / D1 ✅** New "Viewing Modes: Detector vs Eye" module: recast the
+  exposure/saturation module and moved it to Act 1 right after Airy disc (absorbing
+  exposure/saturation), reframed as the foundational eye-vs-detector intro.
+
+## Tutorial Tab — Round 4 (second verbatim-feedback round): earlier batches
 
 **Ledger:** `PLAN_TUTORIAL_ROUND4.md` (verbatim R4.1–R4.15 + diagnosis + 2 user
 decisions: D1 = new Viewing-Modes module after Airy disc absorbing exposure/

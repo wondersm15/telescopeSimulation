@@ -306,6 +306,89 @@ SCENARIOS: list[ScenarioDefinition] = [
     ),
 
     ScenarioDefinition(
+        id="viewing_modes", applies_to="both",
+        title="Viewing Modes: Detector vs Eye",
+        act=1, act_label="Isolated Effects",
+        description=(
+            "Applies to: any telescope. START HERE — this is how every later "
+            "brightness image is shown. The SAME warm-orange star (mag 0) is "
+            "rendered two ways at once: as your EYE sees it (left) and as a "
+            "camera/DETECTOR records it (right).\n"
+            "WHY THEY DIFFER: a detector is LINEAR — pixel value ∝ collected "
+            "photons — so faint things stay faint and bright things clip. Your "
+            "eye is LOGARITHMIC (Weber–Fechner): it compresses a huge range of "
+            "brightness into what you can see at once, so it shows faint halo "
+            "and bright core together. Same star, same data — different "
+            "response curve. (See Parameters & Physics → Detector vs Eye.)\n"
+            "APERTURE affects BOTH panes: a bigger mirror collects more light, "
+            "so the star brightens on the eye AND the detector (∝ aperture²). "
+            "Change the Aperture control and watch both respond.\n"
+            "EXPOSURE & SATURATION are the DETECTOR's story: a detector "
+            "integrates over time, so raising Exposure builds signal until the "
+            "core SATURATES and clips to pure white (the colour burns out "
+            "channel-by-channel). The eye does NOT integrate over time, so "
+            "Exposure leaves the eye pane unchanged — exposure is a detector-"
+            "only knob, aperture is shared.\n"
+            "Toggle 'Eye blur' to add the eye's ~1″ spatial integration to the "
+            "eye pane."
+        ),
+        learn_more_section="Detector vs Eye (linear vs logarithmic)",
+        before_telescope=TelescopeConfig(
+            telescope_type="Newtonian", diameter=100.0, focal_length=800.0,
+            enable_obstruction=False, spider_vanes=0,
+        ),
+        before_source=SourceConfig(
+            source_type="PointSource",
+            kwargs={"magnitude": 0.0, "field_angle_arcsec": 0.0,
+                    "spectral_rgb": (1.0, 0.7, 0.35)},
+        ),
+        before_label="Eye view (perceptual)",
+        after_telescope=TelescopeConfig(
+            telescope_type="Newtonian", diameter=100.0, focal_length=800.0,
+            enable_obstruction=False, spider_vanes=0,
+        ),
+        after_source=SourceConfig(
+            source_type="PointSource",
+            kwargs={"magnitude": 0.0, "field_angle_arcsec": 0.0,
+                    "spectral_rgb": (1.0, 0.7, 0.35)},
+        ),
+        after_label="Detector view (linear) →",
+        plot_function="plot_source_image",
+        theory_function=None,
+        # Keep aperture (D² changes how fast the star saturates — relevant
+        # to the exposure/saturation lesson). Drop focal length: for a point
+        # source it changes only the PSF-kernel mm-scale, not the star's
+        # angular look, so it read as "no effect" (user feedback).
+        tweakable_params=("diameter",),
+        before_apply_vignetting=False,
+        before_apply_coma=False,
+        implemented=True,
+        default_exposure=1.0,
+        # R3.12: FIXED Eye-vs-Detector layout — Eye on the LEFT (pinned,
+        # eye-blur toggle), Detector on the RIGHT (pinned linear, exposure +
+        # saturation live). No free View combo. Aperture drives both panes;
+        # exposure drives only the Detector.
+        before_display_stretch="log",
+        after_display_stretch="linear",
+        show_eye_blur_toggle=True,
+        both_sides_dynamic=True,
+        before_telescope_dynamic=True,
+        terminal_template=(
+            "from telescope_gui.telescope_builder import build_telescope\n"
+            "from telescope_sim.source.sources import PointSource\n"
+            "from telescope_sim.plotting import plot_source_image\n\n"
+            "t = build_telescope(telescope_type='reflector',\n"
+            "                    diameter={diameter}, focal_length={focal_length},\n"
+            "                    primary_type='parabolic', enable_obstruction=False,\n"
+            "                    spider_vanes=0)\n"
+            "src = PointSource(magnitude=0.0)\n"
+            "fig = plot_source_image(t, src, wavelength_nm={wavelength_nm},\n"
+            "                        exposure_level=1.0,  # try 0.1, 1.0, 10.0\n"
+            "                        display_stretch='linear')"
+        ),
+    ),
+
+    ScenarioDefinition(
         id="rayleigh_criterion", applies_to="both",
         title="Rayleigh Criterion",
         act=1, act_label="Isolated Effects",
@@ -855,84 +938,6 @@ SCENARIOS: list[ScenarioDefinition] = [
     # Act 4. The brightness pipeline (mag → flux × aperture² × T(λ)
     # × exposure → saturate) is the same in every Act; the difference
     # is which knob the scenario asks you to study.
-
-    ScenarioDefinition(
-        id="exposure_demo", applies_to="both",
-        title="Exposure & Saturation",
-        act=3, act_label="Brightness, Saturation & Filters",
-        description=(
-            "Applies to: any telescope. "
-            "A single warm-orange star (mag 0) shown two ways at once — the "
-            "EYE (left) and a DETECTOR (right) — to compare how each responds "
-            "to BRIGHTNESS and to SATURATION.\n"
-            "APERTURE affects BOTH panes: a bigger mirror collects more light, "
-            "so the star brightens on the eye AND the detector (∝ aperture²). "
-            "Change the Aperture control and watch both sides respond.\n"
-            "EXPOSURE is the DETECTOR's knob — a detector integrates over time, "
-            "so longer exposure builds signal until the core SATURATES and "
-            "clips to pure white (the colour burns out channel-by-channel). "
-            "The eye does not integrate over time, so exposure leaves the eye "
-            "pane unchanged — its brightness comes from aperture (and, for "
-            "extended objects, exit pupil). So exposure is one brightness knob "
-            "among several, specific to the detector; aperture is shared.\n"
-            "Toggle 'Eye blur' to add the eye's ~1″ spatial integration to the "
-            "eye pane."
-        ),
-        learn_more_section="Photometry & Filters",
-        before_telescope=TelescopeConfig(
-            telescope_type="Newtonian", diameter=100.0, focal_length=800.0,
-            enable_obstruction=False, spider_vanes=0,
-        ),
-        before_source=SourceConfig(
-            source_type="PointSource",
-            kwargs={"magnitude": 0.0, "field_angle_arcsec": 0.0,
-                    "spectral_rgb": (1.0, 0.7, 0.35)},
-        ),
-        before_label="Eye view (perceptual)",
-        after_telescope=TelescopeConfig(
-            telescope_type="Newtonian", diameter=100.0, focal_length=800.0,
-            enable_obstruction=False, spider_vanes=0,
-        ),
-        after_source=SourceConfig(
-            source_type="PointSource",
-            kwargs={"magnitude": 0.0, "field_angle_arcsec": 0.0,
-                    "spectral_rgb": (1.0, 0.7, 0.35)},
-        ),
-        after_label="Detector view (linear) →",
-        plot_function="plot_source_image",
-        theory_function=None,
-        # Keep aperture (D² changes how fast the star saturates — relevant
-        # to the exposure/saturation lesson). Drop focal length: for a point
-        # source it changes only the PSF-kernel mm-scale, not the star's
-        # angular look, so it read as "no effect" (user feedback).
-        tweakable_params=("diameter",),
-        before_apply_vignetting=False,
-        before_apply_coma=False,
-        implemented=True,
-        default_exposure=1.0,
-        # R3.12: FIXED Eye-vs-Detector layout — Eye on the LEFT (pinned,
-        # eye-blur toggle), Detector on the RIGHT (pinned linear, exposure +
-        # saturation live). No free View combo. Aperture drives both panes;
-        # exposure drives only the Detector.
-        before_display_stretch="log",
-        after_display_stretch="linear",
-        show_eye_blur_toggle=True,
-        both_sides_dynamic=True,
-        before_telescope_dynamic=True,
-        terminal_template=(
-            "from telescope_gui.telescope_builder import build_telescope\n"
-            "from telescope_sim.source.sources import PointSource\n"
-            "from telescope_sim.plotting import plot_source_image\n\n"
-            "t = build_telescope(telescope_type='reflector',\n"
-            "                    diameter={diameter}, focal_length={focal_length},\n"
-            "                    primary_type='parabolic', enable_obstruction=False,\n"
-            "                    spider_vanes=0)\n"
-            "src = PointSource(magnitude=0.0)\n"
-            "fig = plot_source_image(t, src, wavelength_nm={wavelength_nm},\n"
-            "                        exposure_level=1.0,  # try 0.1, 1.0, 10.0\n"
-            "                        display_stretch='linear')"
-        ),
-    ),
 
     ScenarioDefinition(
         id="nd_filter_moon", applies_to="both",

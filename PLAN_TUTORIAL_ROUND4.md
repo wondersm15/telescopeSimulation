@@ -29,9 +29,14 @@ Status: ⬜ open · 🔧 in progress · ✅ done+verified · ❓ needs decision/
   scaling is clipped away (it looks the same at every aperture). Annotation now
   says "star brightness ∝ aperture² (until it saturates)". (Deeper reframe lands
   with the viewing-modes module, D1.)
-- ❓ (c) DESIGN QUESTION: add a new module to introduce eye vs detector view?
-  Possibly promote exposure/saturation and recast it from exposure/saturation to
-  "viewing modes". → needs user decision.
+- ✅ (c) DONE per D1. Recast the exposure/saturation module into "Viewing Modes:
+  Detector vs Eye" and MOVED it to Act 1, right after Airy disc (it already showed
+  Eye-left/Detector-right, so it absorbs exposure/saturation cleanly). Description
+  reframed as the foundational intro (START HERE; why detector=linear vs
+  eye=logarithmic; aperture shared, exposure detector-only). learn_more links the
+  P&P Detector-vs-Eye section. Act 1 now 8 modules, Act 3 now 3. Verified sidebar
+  order airy_disk → viewing_modes → rayleigh …; both panes render; eye-blur toggle
+  present.
 
 ### R4.3 — Central obstruction (1D mode)
 > "when it converts to 1d mode the figure titles should be changed- instead of No

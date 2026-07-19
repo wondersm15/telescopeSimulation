@@ -78,9 +78,12 @@ class TestScenarioRegistry:
     def test_acts_populated(self):
         from telescope_gui.tutorial_mode.scenario_registry import get_scenarios_by_act
         by_act = get_scenarios_by_act()
-        assert len(by_act[1]) == 7      # Isolated Effects
+        # R4.2c/D1: Viewing-Modes (detector-vs-eye + exposure/saturation) moved
+        # up to Act 1 right after Airy disc, absorbing the old Act-3 exposure
+        # module → Act 1 = 8, Act 3 = 3.
+        assert len(by_act[1]) == 8      # Isolated Effects (+ Viewing Modes)
         assert len(by_act[2]) == 4      # Combined Effects
-        assert len(by_act[3]) == 4      # Brightness, Saturation & Filters (J3)
+        assert len(by_act[3]) == 3      # Brightness, Saturation & Filters
         assert len(by_act[4]) == 2      # Real Objects (Saturn, Star Field)
 
     def test_all_scenarios_implemented(self):
@@ -94,7 +97,7 @@ class TestScenarioRegistry:
             "spherical_aberration",
             "obstruction_plus_spiders", "chromatic_plus_seeing",
             "aperture_vs_seeing", "fratio_coma",
-            "exposure_demo", "nd_filter_moon",
+            "viewing_modes", "nd_filter_moon",
             "color_filter_jupiter", "saturation_demo",
             "saturn_rings", "starfield_resolution",
         }
@@ -833,7 +836,7 @@ class TestPerSideDisplayControls:
     def test_exposure_demo_fixed_eye_left_detector_right(self):
         # R3.12: fixed Eye-vs-Detector layout — Eye left (pinned, eye-blur
         # toggle), Detector right (pinned linear, exposure acts). No View combo.
-        s = self._scn("exposure_demo")
+        s = self._scn("viewing_modes")
         assert s.before_display_stretch == "log"       # Eye (left)
         assert s.after_display_stretch == "linear"     # Detector (right, pinned)
         assert s.show_eye_blur_toggle is True
@@ -843,7 +846,7 @@ class TestPerSideDisplayControls:
     def test_exposure_demo_star_is_coloured(self):
         # B8: a coloured star so saturation whiteout / cone desaturation
         # is demonstrable (a mag-0 white star showed no colour).
-        s = self._scn("exposure_demo")
+        s = self._scn("viewing_modes")
         assert s.after_source.kwargs.get("spectral_rgb") is not None
 
     def test_color_filter_jupiter_before_unfiltered(self):
@@ -900,7 +903,7 @@ class TestRound2Batch1:
         assert "diameter" not in self._scn("nd_filter_moon").tweakable_params
 
     def test_exposure_demo_drops_focal_length_keeps_diameter(self):
-        params = self._scn("exposure_demo").tweakable_params
+        params = self._scn("viewing_modes").tweakable_params
         assert "focal_length" not in params
         assert "diameter" in params
 
