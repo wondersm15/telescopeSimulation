@@ -76,7 +76,8 @@ materials:</p>
     crown, cemented.</td>
   <td style="padding:4px 8px;">The ED glass has anomalous partial dispersion that
     flattens the focal curve. F, d, and C meet within a much tighter envelope.</td>
-  <td style="padding:4px 8px;">~f / 8000 residual.</td>
+  <td style="padding:4px 8px;">~f / 16000 residual (~1.5&times; Airy: a faint
+    halo only on the brightest stars).</td>
 </tr>
 <tr style="background:#f5f5f5;">
   <td style="padding:4px 8px;"><i>APO triplet</i></td>
@@ -85,7 +86,8 @@ materials:</p>
   <td style="padding:4px 8px;">Three free design degrees of freedom let the
     designer flatten the focal curve across the entire visible band. Approaches
     a diffraction-limited image at all wavelengths.</td>
-  <td style="padding:4px 8px;">~f / 20000 residual.</td>
+  <td style="padding:4px 8px;">~f / 45000 residual (below the Airy radius:
+    colour-free).</td>
 </tr>
 </table>
 
@@ -413,9 +415,10 @@ residual focal shift:</p>
       (656 nm) to a common focus, leaving a parabolic residual &ldquo;secondary
       spectrum&rdquo; with peak amplitude ≈ f / 2500 at the F&ndash;C midpoint.</li>
   <li><b>APO doublet (ED + crown):</b> the anomalous partial dispersion of the
-      ED glass collapses the residual to ≈ f / 8000.</li>
+      ED glass collapses the residual to ≈ f / 16000 (a faint halo on only the
+      brightest stars).</li>
   <li><b>APO triplet (ED + flint + ED, air-spaced):</b> three free degrees of
-      freedom drive the residual to ≈ f / 20000 &mdash; below the diffraction
+      freedom drive the residual to ≈ f / 45000 &mdash; below the diffraction
       limit at typical apertures.</li>
 </ul>
 <p>The defocus shift is converted to a per-wavelength PSF kernel by

@@ -564,8 +564,27 @@ class TestApertureDiffractionToggle:
             build_telescope("Refractor", 100.0, 500.0, objective_type="apo-triplet"),
             wl))
         assert d_singlet > d_achromat > d_apo_d > d_apo_t > 0
-        # Apo-triplet correction is roughly 8x tighter than achromat
+        # Apo-triplet correction is much tighter than achromat.
         assert d_achromat / d_apo_t >= 7.5
+
+    def test_apo_residuals_approach_color_free(self):
+        """R4.8: the APO doublet's residual defocus disk is a small fraction of
+        the Airy radius (faint halo) and the APO triplet's is BELOW the Airy
+        radius (colour-free) — so they no longer show significant fringing /
+        green cores."""
+        from telescope_sim.plotting.ray_trace_plot import chromatic_defocus
+        from telescope_gui.telescope_builder import build_telescope
+        D, F, wl = 200.0, 1200.0, 486.1          # 200 mm f/6, blue F-line
+        f_ratio = F / D
+        airy_mm = 1.22 * (wl * 1e-6) * f_ratio    # Airy radius, mm
+        def disk_over_airy(obj):
+            tel = build_telescope("Refractor", D, F, objective_type=obj)
+            df = abs(chromatic_defocus(tel, wl))
+            disk = df / (2.0 * f_ratio)           # defocus disk radius, mm
+            return disk / airy_mm
+        assert disk_over_airy("apo-doublet") < 2.0   # faint halo
+        assert disk_over_airy("apo-triplet") < 1.0   # colour-free
+        assert disk_over_airy("achromat") > 3.0      # notable false colour
 
     def test_tutorial_starfield_deterministic(self):
         from telescope_sim.source.sources import TutorialStarField

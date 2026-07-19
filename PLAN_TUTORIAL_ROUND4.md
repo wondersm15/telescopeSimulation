@@ -122,11 +122,17 @@ Status: ⬜ open · 🔧 in progress · ✅ done+verified · ❓ needs decision/
 > with eye view they all appear larger than detector. Is that right? The legend in
 > the upper left partially covers up the upper left star so you can move all stars
 > slightly lower on the plot."
-- ⬜ (a) Is the brightness realistic? APO DOUBLET still shows significant colour
-  fringing — should be closer to no observable artifacts. Re-check the doublet
-  chromatic model.
-- ⬜ (b) APO TRIPLET: stars have non-uniform colouring, and in eye view they all
-  appear larger than in detector view. Is that correct? Investigate.
+- ✅ (a) The APO residuals were too loose: doublet f/8000 gave a ~3×-Airy halo.
+  Tightened to f/16000 (~1.5× Airy) → faint halo only on the brightest stars,
+  "approaching no observable artifacts". Verified: per-channel spread [925,113,657]
+  → [310,113,207]. P&P table + text updated to match.
+- ✅ (b) APO triplet f/20000 left R/B ~2× the green core (green-cored stars).
+  Tightened to f/45000 (~0.55× Airy, BELOW diffraction) → colour-free, channels
+  near-equal [160,113,121]; green cores gone (verified in a 3-objective render).
+  The "eye view larger than detector" is EXPECTED — the eye's asinh log response
+  reveals the faint PSF wings/halo the linear detector clips to black, so a bright
+  star genuinely bloats to the eye; the magnitude is exaggerated by the aggressive
+  asinh floor, already documented in the R3.3a realism-audit. +1 test.
 - ✅ (c) MultiColorStarField y-positions shifted down ~6″ so the top row clears
   the upper-left labels/info box.
 

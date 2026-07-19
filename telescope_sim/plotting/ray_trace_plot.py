@@ -4115,11 +4115,17 @@ def chromatic_defocus(telescope: Telescope,
         # Residual secondary spectrum ≈ f/2500 at the F/C wavelengths
         return _parabolic_chromatic_defocus(f_design / 2500.0)
     elif obj_type == "apo-doublet":
-        # ED+crown corrected at three wavelengths; residual ~f/8000
-        return _parabolic_chromatic_defocus(f_design / 8000.0)
+        # ED+crown corrected at three wavelengths. R4.8a: f/8000 left a ~3×-Airy
+        # violet halo (too much for a premium ED doublet). f/16000 puts the
+        # residual defocus disk at ~1.5× the Airy radius — a faint halo on only
+        # the brightest stars, "approaching no observable artifacts".
+        return _parabolic_chromatic_defocus(f_design / 16000.0)
     elif obj_type == "apo-triplet":
-        # Triplet correction is near diffraction-limited; residual ~f/20000
-        return _parabolic_chromatic_defocus(f_design / 20000.0)
+        # Triplet correction is essentially colour-free. R4.8b: f/20000 still
+        # left the R/B channels ~2× the green core (a green-cored star). f/45000
+        # puts the residual BELOW the Airy radius (~0.55×) → no observable
+        # colour, all three channels the same diffraction-limited size.
+        return _parabolic_chromatic_defocus(f_design / 45000.0)
     else:
         # Singlet: full primary chromatic aberration
         glass = getattr(telescope.objective, 'glass', 'BK7')
