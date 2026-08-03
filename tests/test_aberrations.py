@@ -141,3 +141,128 @@ class TestBuildComaSpot2D:
         y = np.array([0.0, 0.0005, -0.0005])
         image = _build_coma_spot_2d(x, y, 0.01, 64)
         assert image.sum() > 0
+
+
+# ---------------------------------------------------------------------------
+# PSF kernel centring (R5.6 regression)
+# ---------------------------------------------------------------------------
+
+def _centroid_offset(kernel):
+    """Centroid of a 2D kernel measured from its TRUE centre, in pixels."""
+    n = kernel.shape[0]
+    c = (n - 1) / 2.0
+    yy, xx = np.mgrid[:n, :n]
+    total = kernel.sum()
+    return ((xx * kernel).sum() / total - c,
+            (yy * kernel).sum() / total - c)
+
+
+class TestPSFKernelCentring:
+    """Guards against the R5.6 per-channel misregistration bug.
+
+    `chromatic_psf_kernel` built its defocus disk around the integer index
+    `n // 2` rather than the array's true centre `(n-1)/2`. Combined with
+    `fftconvolve(..., mode="same")` that produced a measured +1 px diagonal
+    shift — but ONLY for channels that actually reached the convolution
+    branch. The in-focus channel returns early for sub-pixel defocus, so R
+    and B were displaced a full pixel relative to G and every star acquired a
+    directional colour fringe (pink upper-right, yellow lower-left). It was
+    WORST for the best optics, where a near-zero residual put different
+    wavelengths on opposite sides of the 0.5 px early-return threshold.
+    """
+
+    OBJECTIVES = ["singlet", "achromat", "apo_doublet", "apo_triplet"]
+    CHANNELS = [450.0, 550.0, 650.0]
+
+    def _scope(self, objective):
+        from telescope_gui.telescope_builder import build_telescope
+        return build_telescope(telescope_type="Refractor", diameter=100,
+                               focal_length=800, objective_type=objective)
+
+    @pytest.mark.parametrize("objective", OBJECTIVES)
+    def test_each_channel_is_centred(self, objective):
+        """Every wavelength's kernel must be centred on the array centre."""
+        from telescope_sim.plotting.ray_trace_plot import chromatic_psf_kernel
+        for wl in self.CHANNELS:
+            kernel = chromatic_psf_kernel(
+                self._scope(objective), wl, 256, 0.05, True,
+                focus_wavelength_nm=550.0,
+            )
+            dx, dy = _centroid_offset(kernel)
+            assert abs(dx) < 0.05, f"{objective} {wl}nm x-centroid {dx:+.4f} px"
+            assert abs(dy) < 0.05, f"{objective} {wl}nm y-centroid {dy:+.4f} px"
+
+    @pytest.mark.parametrize("objective", OBJECTIVES)
+    def test_channels_are_mutually_registered(self, objective):
+        """R/G/B must land on each other — misregistration IS colour fringing.
+
+        This is the assertion that actually fails on the pre-fix code: the
+        spread was ~1.00 px for the achromat and both APO designs.
+        """
+        from telescope_sim.plotting.ray_trace_plot import chromatic_psf_kernel
+        scope = self._scope(objective)
+        centroids = [
+            _centroid_offset(chromatic_psf_kernel(
+                scope, wl, 256, 0.05, True, focus_wavelength_nm=550.0))
+            for wl in self.CHANNELS
+        ]
+        spread_x = max(c[0] for c in centroids) - min(c[0] for c in centroids)
+        spread_y = max(c[1] for c in centroids) - min(c[1] for c in centroids)
+        assert spread_x < 0.05, f"{objective} inter-channel x spread {spread_x:.4f} px"
+        assert spread_y < 0.05, f"{objective} inter-channel y spread {spread_y:.4f} px"
+
+    def test_defocus_disk_never_empty(self):
+        """A symmetric grid can produce an EMPTY binary disk (min r = 0.707).
+
+        Centring the disk correctly is not enough: with a hard binary mask on
+        a symmetric even grid, a radius between 0.5 and 0.707 selects no
+        pixels at all, which would zero the PSF. The anti-aliased edge keeps
+        the disk populated at every radius past the early-return threshold.
+        """
+        from telescope_sim.plotting.ray_trace_plot import chromatic_psf_kernel
+        for objective in self.OBJECTIVES:
+            scope = self._scope(objective)
+            for wl in self.CHANNELS:
+                kernel = chromatic_psf_kernel(
+                    scope, wl, 256, 0.05, True, focus_wavelength_nm=550.0)
+                assert kernel.sum() > 0, f"{objective} {wl}nm produced an empty PSF"
+                assert np.all(np.isfinite(kernel))
+
+    def test_on_axis_psf_centred_for_both_primary_types(self):
+        """The spherical-aberration convolution must not shift the PSF.
+
+        Same latent idiom as the chromatic bug: the SA spot was stamped around
+        `num_pixels // 2` and used as an even-sized convolution kernel.
+        """
+        import warnings
+        from telescope_gui.telescope_builder import build_telescope
+        from telescope_sim.plotting.ray_trace_plot import _compute_psf_at_field_angle
+        for primary_type in ("parabolic", "spherical"):
+            scope = build_telescope(telescope_type="Newtonian", diameter=200,
+                                    focal_length=1200, primary_type=primary_type)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                psf = _compute_psf_at_field_angle(scope, 0.0, 550.0, 256, 0.05, True)
+            dx, dy = _centroid_offset(psf)
+            assert abs(dx) < 0.05, f"{primary_type} x-centroid {dx:+.4f} px"
+            assert abs(dy) < 0.05, f"{primary_type} y-centroid {dy:+.4f} px"
+
+
+class TestCenteredPixelCoords:
+    """The shared helper that encodes the centring convention."""
+
+    def test_symmetric_for_even_and_odd(self):
+        from telescope_sim.plotting.ray_trace_plot import _centered_pixel_coords
+        for n in (64, 65, 256, 257):
+            coords = _centered_pixel_coords(n)
+            assert len(coords) == n
+            # Symmetric about zero — this is the whole point.
+            assert np.allclose(coords, -coords[::-1])
+            assert abs(coords.sum()) < 1e-9
+
+    def test_even_centre_is_half_integer(self):
+        """Documents WHY `n // 2` is wrong: for even n the centre is x.5."""
+        from telescope_sim.plotting.ray_trace_plot import _centered_pixel_coords
+        coords = _centered_pixel_coords(256)
+        assert coords[128] == 0.5   # the old `n // 2` origin — off by half
+        assert coords[127] == -0.5

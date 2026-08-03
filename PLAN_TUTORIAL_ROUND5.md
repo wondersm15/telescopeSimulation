@@ -1,0 +1,384 @@
+# Tutorial Tab — Round 5 feedback ledger
+
+**Branch:** `feature/tutorial-testing-tab` (Round 4 complete at commit `0deea48`).
+**Rule (same as Rounds 3 & 4):** record every item verbatim; do NOT paraphrase away or
+mark DONE without canvas-pipeline verification through the REAL GUI navigation.
+Status: ⬜ open · 🔧 in progress · ✅ done+verified · ❓ needs decision/answer.
+
+**Context:** Round 4 closed with 422 tests passing and 32 commits ahead of `main`,
+unmerged. This round is explicitly gating the merge — user: *"there are still some
+items that need work before merging."*
+
+---
+
+## Verbatim feedback (2026-08-02)
+
+### R5.1 — Detector vs Eye (viewing_modes)
+> "Detector vs eye: why is it orange? Is this level of orange a realistic thing
+> anyone would ever see?"
+
+- ⬜ (a) Star colour is unrealistically saturated.
+
+### R5.2 — Central obstruction (linear mode / 2D PSF)
+> "Central obstruction- linear viewing mode and 2d psf in general. When linear in
+> variations of the 2d pattern- unless the exposure is turned up, we never really
+> see the secondary diffraction spikes. From the 1d plots, it looks like this
+> should be a few % of the amplitude of the main peak; I am surprised that we
+> cannot see any signal that is 1% of the main peak. Does this seem right?"
+
+- ⬜ (a) Answer the question in-module: is 1%-of-peak visibility correct?
+
+### R5.3 — Chromatic aberration
+> "The legends in the left canvas can be made bigger now that they are out of the
+> main plot canvas. You can also remove the text saying which focal plane is being
+> used in the left plot. It covers up the focal region and is sufficient to have
+> that label on the right. In the Physics and Parameters, I still don't see much
+> discussion of the different glasses used. From last time, In chromatic aberration
+> parameters and physics, add a note on the different types of glasses that are
+> used, how they relate to the achromat vs APO designs, including how they are
+> applied in the tutorial module and relative costs/performance improvement for
+> them."
+
+- ⬜ (a) Enlarge left-canvas legends (now that they sit outside the plot).
+- ⬜ (b) Remove the focal-plane text from the LEFT plot (it covers the focal
+      region); the right-plot label is sufficient.
+- ⬜ (c) **REPEAT ITEM from R4.5b** — glass-type discussion still not findable.
+
+### R5.4 — Vignetting
+> "Vignetting- for the tutorial module, also specify where typical eyepiece FOVs
+> are- e.g., is 10,000 arcsec a lot or a little?"
+
+- ⬜ (a) Add real eyepiece true-FOV context to the vignetting module.
+
+### R5.5 — Spherical aberration
+> "the narrative needs updated now that there are two plots on the right including
+> the inset plot, which I think is on its side. Ensure consistent axis labeling
+> (i.e., x, y, z) across all figures. Also, I think you should update the color
+> zscale to not be symmetric- the plot is inherently not symmetric (i.e., the left
+> side is positive and right side negative). You should have a color scheme that
+> distinguishes clearly where each comes from, consistent across all figures."
+
+- ⬜ (a) Narrative rewrite for the new two-plot right side.
+- ⬜ (b) Inset plot appears rotated / "on its side".
+- ⬜ (c) Consistent x/y/z axis labelling across ALL figures.
+- ⬜ (d) Signed (diverging) pupil-zone colour scale, not `|h|`; consistent across
+      all figures.
+
+### R5.6 — Chromatic aberration + seeing
+> "I am still not sure all the colors are correctly implemented. Are these colors
+> too enhanced? With APO-triplet and no atmospheric seeing, each star also seems
+> like it has multi-colors and is not uniformly colored across it. This requires
+> serious review to ensure correctness. Extensively review the implementation here
+> with a fresh perspective."
+
+Follow-up detail (same session):
+> "For the chromatic aberration and seeing, the coloring is also asymmetrical. For
+> example the central star looks pink on its upper right and more yellow to its
+> lower left. The lower right star has its upper right part more purple than the
+> rest."
+
+- ✅ (a) Colours possibly over-enhanced. **Yes, and the cause was found** — see
+      "R5.6a" below. Residual singlet saturation is real physics, now explained
+      in-module.
+- ✅ (b) APO-triplet stars show multi-colour structure when they should be ~white.
+- ✅ (c) **Directional colour asymmetry** — pink upper-right / yellow lower-left on
+      the central star; purple upper-right on the lower-right star.
+- ✅ (d) Full fresh-perspective review of the polychromatic star implementation.
+
+### R5.7 — Coma
+> "Coma field image on the left- the stars again seem like they have clear
+> rectangular outlines when coma is enhanced. Go through everywhere and make sure
+> we don't have these box artifacts anywhere."
+
+- ⬜ (a) Box artifact still present at enhanced coma.
+- ⬜ (b) Sweep EVERYWHERE for box artifacts (explicit cross-cutting instruction).
+
+### R5.8 — Colour filters on Jupiter
+> "with detector view as you vary exposure you can get what appears to be a high
+> quality original image. With eye mode, it looks more like highlighter orange
+> stripes again. Are we sure this is right? It looks worse than before in eye mode.
+> I suppose this suggests eye viewing is worse than detector pictures. Aperture
+> also does not change apparent brightness which seems wrong."
+
+- ⬜ (a) Eye mode renders "highlighter orange stripes"; worse than before.
+- ⬜ (b) Aperture does not change apparent brightness — verify + explain.
+
+### R5.9 — NEW MODULE: magnification / exit pupil / FOV
+> "I am realizing we should also have a new module that describes magnification,
+> exit pupil, FOV stuff etc. Most things are autoscaled to take up most of the
+> image, but changing eyepieces changes the actual size of the object which is an
+> effect neglected in our tutorial. Propose a module to describe these eyepiece
+> features which are not currently captured."
+
+- ⬜ (a) Design + implement the eyepiece module (proposal below, awaiting sign-off).
+
+---
+
+## Diagnosis (2026-08-02) — pre-implementation investigation
+
+### R5.6c — ROOT CAUSE FOUND AND MEASURED: per-channel pixel misregistration
+
+`chromatic_psf_kernel` (`ray_trace_plot.py:4193–4198`) builds the defocus disk on a
+grid centred on **integer index `n // 2`**, while the array's true centre for an even
+`n` is `(n-1)/2`:
+
+```python
+center = psf_size_pixels // 2        # 128 for n=256
+coords = np.arange(psf_size_pixels) - center   # -128 .. +127  (asymmetric!)
+```
+
+`psf_n = min(num_pixels, 256)` (line 4549) → **256, even** → the bug is live in the
+default path.
+
+Measured effect (symmetric Gaussian "star" convolved with the disk as built):
+
+| defocus_radius_pix | output centroid offset |
+|---|---|
+| 0.6 | **+1.00, +1.00 px** |
+| 1.5 | **+1.00, +1.00 px** |
+| 4.0 | **+1.00, +1.00 px** |
+| 12.0 | **+1.00, +1.00 px** |
+
+The half-pixel disk offset compounds with `fftconvolve(..., mode="same")`'s
+even-kernel convention into a **full one-pixel shift, up and to the right**.
+
+**The channel-dependent part is the killer.** Line 4187 early-returns the *unshifted*
+Airy PSF when `defocus_radius_pix < 0.5`:
+
+- In-focus channel (G at `focus_wavelength_nm=550`) → early return → **no shift**.
+- Defocused channels (R, B) → convolve branch → **shifted +1, +1**.
+
+So R and B land one pixel up-and-right of G. That is exactly the reported
+**"pink on its upper right and more yellow to its lower left"** — R+B (pink) displaced
+into the upper right, G left behind with R (yellow) on the lower left.
+
+It also explains **R5.6b**: for an APO triplet the residual defocus is tiny, so
+different wavelengths straddle the 0.5 px early-return threshold unpredictably —
+some channels shift, some don't. The misregistration is *worst* precisely when the
+optics are *best*, which is why the triplet looks multi-coloured.
+
+And **per-star variation** (R5.6c, the purple lower-right star): star centres are
+placed with `cx = int(round(...))` (line ~4771), so each star carries a different
+sub-pixel rounding residual, which combines differently with the fixed +1 px channel
+offset — every star gets its own fringe direction and strength.
+
+> **Note:** this is a genuine pixel-registration bug, NOT a physics/colour-palette
+> problem. The channel normalisation (`common_peak`) and the intrinsic star tint
+> (`star_color[ch]`, line 4884) both verified CORRECT. Do not "fix" the palette.
+
+### Sibling sites — same `n // 2` centring idiom (AUDITED + MEASURED 2026-08-02)
+
+| Line | What it does | Measured verdict |
+|---|---|---|
+| `2473`/`2485` | defocus disk in the chromatic profile plot | **SAFE** — `n_psf = 257`, odd, so `n//2 == (n-1)/2`. Correct by accident. |
+| `1722` | `combined_2d[center, center:]` radial profile | **SAFE** — see below |
+| `3042` | `combined_2d[center, center:]` radial profile | **SAFE** — see below |
+| `4255` | SA geometric spot stamping origin | wavelength-independent → no colour artifact, but **fixed anyway** (odd grid) for uniformity |
+| `4383` | coma geometric spot stamping origin | same → **fixed anyway** (odd Airy kernel) |
+
+> **Correction to an earlier claim in this ledger.** I originally wrote that `3042`
+> was depressing the 1D obstruction ring amplitudes the user reads in R5.2. That is
+> **false**, and it was measured, not assumed: the `fftconvolve(mode="same")` +½ px
+> output shift and the +½ px profile-sampling offset act in *opposite* directions and
+> cancel. Peak error is **+0.067%**. R5.2's ring amplitudes are trustworthy as printed,
+> so R5.2 is purely a narrative gap with no code defect behind it.
+
+### R5.6b/c — FIX APPLIED AND VERIFIED THROUGH THE RENDER PIPELINE
+
+Fix in `chromatic_psf_kernel`: build the defocus disk on its own **odd-sized** grid
+sized to the radius, centre it on `(n-1)/2`, and replace the hard binary mask with an
+anti-aliased coverage ramp (`clip(radius - r + 0.5, 0, 1)`), then normalise.
+
+Two traps avoided, both real:
+1. Odd size is *required* — merely re-centring on `(n-1)/2` with an even `n` still left
+   +0.50 px, because `fftconvolve(mode="same")` slices at `(m-1)//2`.
+2. A hard mask on a *symmetric* grid is **empty** for radii between 0.5 and 0.707 px
+   (min `r` = 0.707), which would render a black star. The ramp prevents this and also
+   removes small-radius centroid wander. Covered by `test_defocus_disk_never_empty`.
+
+Measured on the real `MultiColorStarField` render (`info["image_rgb"]`, 3 stars each):
+
+| Objective | chroma asymmetry pre → post | channel-centroid spread pre → post |
+|---|---|---|
+| achromat | 0.00018 → **0.00000** | 0.0044 → **0.0000 px** |
+| apo_doublet | 0.0743 → **0.00000** | 0.905 → **0.0000 px** |
+| apo_triplet | **0.0963** → **0.00000** | 0.897 → **0.0000 px** |
+
+Pre-fix the triplet lost **9.6 percentage points of green** on one diagonal flank while
+gaining red and blue on it — literally "pink on one side, yellow on the other", worst on
+the *best* objective, exactly as reported. Post-fix every figure is identically zero.
+
+Two measurement traps hit while verifying (recorded so they are not repeated):
+- The 2-D value returned by `_render_source_through_telescope` is **not** the colour
+  image; fabricating `dstack([img]*3)` from it forces every channel fraction to exactly
+  1/3 and reports zero asymmetry both before and after. The RGB array is `info["image_rgb"]`.
+- The displacement is along the `x = y` diagonal, so splitting the star into
+  upper-right / lower-left halves puts the split line *parallel* to the displacement and
+  reads exactly zero. The split must be **perpendicular** to it.
+
+### R5.6a/d — SECOND, INDEPENDENT DEFECT: three delta wavelengths, not a spectrum
+
+The fresh-perspective review found a bug the centring fix does not touch. The
+renderer sampled exactly **three** wavelengths (656.3 / 550 / 486.1 nm) and poured
+each into **one** RGB channel, 1:1. A star emits a continuum, and collapsing it onto
+three deltas throws away everything in between — including the 500–640 nm light that
+is barely defocused and therefore nearly as sharp as the focus wavelength.
+
+Measured consequence, at each star's core pixel:
+
+| Objective | before | after |
+|---|---|---|
+| singlet | hue 120.0°, **R and B numerically identical**, sat 0.46–0.67 | hue 120°, sat 0.75–0.84 (real — see below) |
+| achromat | hue **299.7° ± 0.3 for every star**, sat 0.84–**0.98** | hue 71–82°, sat 0.59–0.71 |
+| apo triplet | hue 149–195, no relation to star temperature | hue 93–192, tracks temperature |
+
+The achromat case is the user's complaint exactly: every star rendered near-pure
+magenta at up to **0.98 saturation**, with all five stars within 0.5° of the same hue
+regardless of spectral type. The star's own colour had been annihilated.
+
+**Fix:** new `telescope_sim/physics/colorimetry.py` — CIE 1931 2° colour-matching
+functions, Planck's law for the stellar SED, linear-sRGB conversion. The visible band
+is sampled in 9 slices; each slice gets its own chromatic-defocus PSF and contributes
+to **all three** channels via its CMF weight. Star colour is now *integrated from*
+the star's effective temperature rather than tabulated. Verified 9 slices ≈ 21 slices
+(< 0.05 per channel), so the default is converged, not arbitrary.
+
+Two side benefits:
+- Kernels are now built **once per band for the whole field** instead of once per band
+  *per star*. Despite tripling the band count the singlet render got *faster*
+  (1.41 s → 1.05 s).
+- Each band gets a grid sized to its **own** defocus. The old single shared grid had to
+  choose between coarsening the pixel scale until the in-focus Airy core was unresolved,
+  or clipping the violet disk square — the "big squares" artefact family (cf. R5.7).
+
+**Not a defect — the singlet's green core.** Focused at 550 nm, a singlet's core is
+nearly monochromatic, and near-monochromatic 550 nm is *outside the sRGB gamut*: the
+raw conversion is (−0.13, 1.45, −0.17). Gamut-mapping instead of clipping moves it only
+to (0.025, 1.0, 0.0), so no monitor can render it less saturated than full green. This
+is a display limit, not an exaggeration, and it is now stated in the module text and in
+PHYSICS.md §7.
+
+**Verified through real GUI navigation** (sidebar → `chromatic_plus_seeing` → every
+combo): 21 renders, 0 failures, and with no atmospheric seeing the hottest star
+(22 400 K) renders hue 219.0 / sat 0.44 against a true-blackbody target of 223.6 / 0.60.
+
+### R5.1 — root cause: R4.15 desaturation never propagated
+
+`scenario_registry.py:343,353` hardcodes `spectral_rgb=(1.0, 0.7, 0.35)` — saturation
+**0.65**. R4.15 desaturated the *star-field* palette via `_TINT_STRENGTH = 0.45`
+(`sources.py:560`), reaching max saturation ~0.27, but this scenario bypasses the
+palette with a literal tuple. Classic propagate-the-fix miss. A real mag-0 K star is a
+pale amber; at mag 0 the core should burn to white with tint surviving only in the halo.
+**Action:** route ALL scenario star colours through the shared palette; audit for other
+hardcoded `spectral_rgb` literals.
+
+### R5.2 — the simulation is right; the display is the honest limit
+
+Computed unobstructed Airy ring peaks:
+
+| Ring | Fraction of peak | 8-bit level |
+|---|---|---|
+| 1st | 1.750% | 4.5 / 255 |
+| 2nd | 0.416% | 1.1 / 255 |
+| 3rd | 0.160% | 0.4 / 255 |
+
+At linear scale with the core at full white, the first ring is ~4/255 — indistinguishable
+from black on any monitor, and the eye's own log response makes a 1.7% patch beside a
+100% patch read as nothing. "Turn up exposure and they appear" is not a bug; it is the
+reason astronomers stretch images. **This is a narrative gap, not a code bug.** (The `3042`
+centring suspicion raised earlier was measured and cleared — 0.067% peak error; the 1D ring
+amplitudes the user is comparing against are correct as printed.)
+
+### R5.3c — the glass content EXISTS but is unreachable from where the user is sent
+
+Full treatment (glass table, achromat vs APO, tutorial application, cost/performance) is
+at `reference_tab.py:44–120` under **Telescope Types → Refractor**, near the *top* of the
+page. The chromatic module's link reads *"Learn more → Parameters & Physics: **Chromatic
+Aberration**"*, which points at §4 (`reference_tab.py:405`) far down the page — where
+there is only a one-line cross-reference.
+
+Compounding it: that "Learn more" is a plain `QLabel` (`tutorial_tab.py:173`), **not a
+clickable link**, and the reference tab is a single long `QScrollArea` with no anchors or
+table of contents.
+
+**Action:** move/duplicate the glass content into §4 where the link points, AND make
+"Learn more" actually navigate. Writing more prose in the wrong place will fail a third time.
+
+### R5.8b — correct physics, invisible reasoning
+
+`ray_trace_plot.py:5099–5107`: in eye mode for extended sources the D² collection factor
+is deliberately divided back out and replaced by `(exit_pupil / EYE_PUPIL_MM)²`:
+
+```python
+eye_surface_brightness_factor = min(1.0, (exit_pupil_mm / EYE_PUPIL_MM) ** 2)
+brightness_scale = eye_surface_brightness_factor / aperture_factor
+```
+
+A telescope can never raise a resolved object's surface brightness above the naked-eye
+level — aperture buys resolution, not surface brightness. With no eyepiece control exposed,
+`exit_pupil_mm` sits at its default, the factor is 1.0, and aperture appears inert **for no
+visible reason**. The user's own conclusion ("eye viewing is worse than detector pictures")
+is correct for planets. This resolves itself once R5.9 ships.
+
+### R5.7 — mechanism in place, something escaping it
+
+`_apply_circular_taper` (line 4442) is called at three star paths (4778, 4851, 5020), so
+the fix exists and something specific is bypassing it. Leading hypothesis: at enhanced coma
+the geometric spot exceeds the kernel and the `if 0 <= ix < num_pixels` guard clips it
+square (the documented Pattern A footgun). **Must be reproduced by rendering before fixing.**
+
+---
+
+## Proposed module (R5.9) — "Magnification, Exit Pupil & True Field"
+
+**Placement:** Act 1, immediately after *Viewing Modes*. Together they are "how the image
+reaches your eye"; every later module assumes both.
+
+**Key design constraint:** this module must **NOT autoscale**. Both panes render on a fixed
+angular canvas showing the eyepiece's true-field circle, with the object at its actual
+apparent size inside it. The contrast against every other module IS the lesson.
+
+- **Left:** low power (e.g. 32 mm eyepiece) — wide true field, small bright object.
+- **Right:** adjustable eyepiece focal length + apparent FOV. Shorten it and the object
+  grows, the field circle shrinks, the image visibly dims.
+
+**Live theory readout:**
+
+| Quantity | Formula |
+|---|---|
+| Magnification | `M = f_tel / f_eye` |
+| Exit pupil | `D / M = f_eye / f-ratio` |
+| True FOV | `AFOV / M` |
+| Surface brightness | `(exit_pupil / 7 mm)²` |
+| Max useful mag | `≈ 2 × D(mm)` |
+| Min useful mag | exit pupil ≤ 7 mm (else light spills past the iris) |
+
+**What it resolves:** R5.8b's aperture-brightness confusion gets its actual explanation;
+the R4.11 exit-pupil and ND-filter notes finally have a home; and "why does the Moon never
+look crisp" becomes answerable (empty magnification — exit pupil below ~0.5 mm magnifies
+blur, not detail). Also supplies the eyepiece FOV numbers R5.4 asks for.
+
+---
+
+## Plan — proposed batches
+
+User (2026-08-02): **order doesn't matter.**
+
+- **Batch M — star colour + obstruction narrative:** R5.1 (route all scenario star colours
+  through the shared palette; audit hardcoded `spectral_rgb`), R5.2 (linear/dynamic-range
+  narrative).
+- **Batch N — chromatic presentation + P&P relocation:** R5.3a (bigger legends), R5.3b
+  (drop left focal-plane text), R5.3c (**relocate** glass content to §4 + make "Learn more"
+  clickable).
+- **Batch O — pupil colour scale + spherical:** R5.5d (signed diverging colormap across ALL
+  ray-fan/spot figures), R5.5a/b/c (narrative, inset orientation, x/y/z consistency).
+- **Batch P — box-artifact sweep:** R5.7a/b — render every star path at extreme
+  coma/defocus, find what escapes `_apply_circular_taper`.
+- **Batch Q — chromatic colour correctness:** R5.6a–d. Fix the `n // 2` centring in
+  `chromatic_psf_kernel`, audit all five sibling sites, add a regression test asserting
+  per-channel centroid alignment.
+- **Batch R — Jupiter eye mode:** R5.8a/b.
+- **Batch S — new eyepiece module:** R5.9 + R5.4 (vignetting FOV context).
+
+**Rough size:** ~8–9 focused sessions. M–P are well understood; Q's root cause is now
+measured but the sibling audit may expand; R is still an open investigation.

@@ -1286,6 +1286,31 @@ def plot_spot_diagram(rays: list[Ray],
     return fig
 
 
+def _centered_pixel_coords(n: int) -> np.ndarray:
+    """Pixel offsets measured from an array's TRUE geometric centre.
+
+    The centre of an ``n``-element axis is ``(n-1)/2`` — a half-integer when
+    ``n`` is even. Building a radial grid around the integer index ``n // 2``
+    instead (the natural-looking thing to write) puts the origin half a pixel
+    off, and any kernel built on that grid drags the convolution result with
+    it.
+
+    That bug shipped for real (R5.6): the chromatic defocus disk was centred
+    on ``n // 2``, which combined with ``fftconvolve(..., mode="same")`` into
+    a measured one-pixel diagonal shift — applied to the defocused colour
+    channels but NOT to the in-focus one (which returns early for sub-pixel
+    defocus), so every star grew a directional colour fringe. Use this helper
+    for any grid that a kernel is built on.
+
+    Companion rule: ``fftconvolve(..., mode="same")`` slices the full
+    convolution at ``(m-1)//2`` for a kernel of length ``m``, which equals the
+    kernel's true centre ``(m-1)/2`` ONLY when ``m`` is odd. Give convolution
+    kernels an odd size or they carry a residual half-pixel shift regardless
+    of how well they are centred.
+    """
+    return np.arange(n) - (n - 1) / 2.0
+
+
 def _build_geometric_spot_2d(y_offsets: np.ndarray, half_size: float,
                              num_pixels: int) -> np.ndarray:
     """Build a 2D geometric spot image from 1D ray offsets.
@@ -4190,12 +4215,41 @@ def chromatic_psf_kernel(
             airy_psf /= total
         return airy_psf
 
-    # Build defocus disk kernel
-    center = psf_size_pixels // 2
-    coords = np.arange(psf_size_pixels) - center
+    # Build defocus disk kernel.
+    #
+    # CENTRING (R5.6): centre on the array's TRUE geometric centre,
+    # (n-1)/2, and NOT the integer index n//2. For even n those differ by
+    # half a pixel, and fftconvolve(..., mode="same") turns that offset into
+    # a full-pixel shift of the result (measured: +1.0, +1.0 px at every
+    # defocus radius). This matters because the branch above early-returns
+    # the UNSHIFTED Airy PSF for sub-pixel defocus: the in-focus channel
+    # therefore does not shift while the defocused channels do, so R/B land
+    # a pixel up-and-right of G and every star acquires a directional colour
+    # fringe (pink upper-right, yellow lower-left). It is worst for the BEST
+    # optics, where a near-zero residual puts different wavelengths on
+    # opposite sides of the 0.5 px threshold.
+    #
+    # The disk is built on an ODD-sized grid, which is what actually makes
+    # the convolution shift-free: fftconvolve(..., mode="same") slices the
+    # full convolution at offset (m-1)//2, and only for odd m does that
+    # integer equal the kernel's true centre (m-1)/2. An even kernel leaves
+    # a residual half-pixel shift no matter how well the disk is centred.
+    # Sizing the grid to the disk (rather than reusing psf_size_pixels) is
+    # also much cheaper: a 2 px disk no longer allocates a 256x256 array.
+    disk_n = 2 * int(np.ceil(defocus_radius_pix + 1.0)) + 1
+    disk_n = min(disk_n, 2 * psf_size_pixels + 1)
+    center = (disk_n - 1) / 2.0
+    coords = np.arange(disk_n) - center
     xx, yy = np.meshgrid(coords, coords)
     rr = np.sqrt(xx ** 2 + yy ** 2)
-    defocus_disk = np.where(rr <= defocus_radius_pix, 1.0, 0.0)
+    # Anti-aliased edge (1-pixel linear ramp) rather than a hard binary
+    # mask. A binary mask at small radii is a lumpy handful of pixels whose
+    # effective centroid wanders with radius — a second, subtler source of
+    # per-channel inconsistency — and on this symmetric grid it can be
+    # entirely EMPTY (the minimum rr is 0.707 for even n), which would zero
+    # the PSF. The ramp approximates fractional pixel coverage, so it is
+    # also a slightly more accurate disk than the binary version.
+    defocus_disk = np.clip(defocus_radius_pix - rr + 0.5, 0.0, 1.0)
     disk_sum = defocus_disk.sum()
     if disk_sum > 0:
         defocus_disk /= disk_sum
@@ -4249,10 +4303,18 @@ def _compute_spherical_aberration_spot(telescope: Telescope,
     if y_offsets is None or len(y_offsets) == 0:
         return None
 
-    # Build 2D spot image
+    # Build 2D spot image on an ODD grid. This array is used as the KERNEL in
+    # fftconvolve(diffraction_psf, sph_spot, mode="same"), and that slices at
+    # the kernel's true centre only for odd lengths (see
+    # _centered_pixel_coords). An odd grid also has an exact integer centre,
+    # so the stamping below lands the caustic dead-centre instead of half a
+    # pixel off. Same latent idiom as the R5.6 chromatic bug; harmless here
+    # (wavelength-independent, so it produced no colour artifact) but fixed
+    # so the convention is uniform.
+    grid_n = num_pixels | 1
     pixel_size = 2.0 * half_size_mm / num_pixels
-    spot_image = np.zeros((num_pixels, num_pixels))
-    center = num_pixels // 2
+    spot_image = np.zeros((grid_n, grid_n))
+    center = (grid_n - 1) // 2
 
     # Defensive overflow check (see coma analogue in
     # _compute_psf_at_field_angle). If the SA caustic exceeds the
@@ -4275,7 +4337,7 @@ def _compute_spherical_aberration_spot(telescope: Telescope,
         iy = center + int(round(y_offset / pixel_size))
         # x is always 0 for our 2D ray tracing
         ix = center
-        if 0 <= ix < num_pixels and 0 <= iy < num_pixels:
+        if 0 <= ix < grid_n and 0 <= iy < grid_n:
             spot_image[iy, ix] += 1.0
 
     # Smooth slightly for stability
@@ -4392,9 +4454,14 @@ def _compute_psf_at_field_angle(telescope: Telescope,
         from scipy.ndimage import gaussian_filter
         coma_image = gaussian_filter(coma_image, sigma=sigma_pix)
 
-        # Build Airy kernel
+        # Build Airy kernel. ODD size: fftconvolve(..., mode="same") only
+        # slices at the kernel's true centre when the kernel length is odd
+        # (see _centered_pixel_coords). An even kernel here shifted the whole
+        # coma PSF half a pixel — benign on its own (wavelength-independent,
+        # so no colour fringe) but the same latent idiom that produced R5.6.
         kernel_half = max(airy_radius * 5, pixel_size * 3)
         kernel_n = min(num_pixels, 128)
+        kernel_n |= 1
         if use_fft:
             base_pitch = wavelength_mm * f_ratio
             pixels_per_airy = airy_radius / base_pitch
@@ -4641,40 +4708,32 @@ def _render_source_through_telescope(
 
         if _star_use_chromatic:
             image_rgb = np.zeros((num_pixels, num_pixels, 3))
-            channel_wavelengths = [656.3, 550.0, 486.1]  # R, G, B
+            # SPECTRAL SAMPLING (R5.6a). Stars emit a continuum, not three
+            # emission lines. The previous model sampled exactly three
+            # wavelengths (656.3 / 550 / 486.1 nm) and sent each into one RGB
+            # channel, which discarded everything in between — including the
+            # 500-640 nm light that sits close enough to focus to stay sharp.
+            # Focused at 550 nm, that left the core holding one delta's worth
+            # of light in one channel: pure green, hue exactly 120 degrees,
+            # with R and B numerically zero, for every star whatever its
+            # spectral type. Sampling the band properly restores the star's
+            # own colour in the core and leaves the chromatic halo where it
+            # belongs. Each band is projected to linear sRGB through the
+            # CIE 1931 colour-matching functions.
+            from telescope_sim.physics.colorimetry import (
+                spectral_bands, band_weights_for_source)
+            band_centres_nm, band_rgb_weights = spectral_bands()
 
-            # Expand the PSF kernel if chromatic defocus is wider than the
-            # Airy-only kernel half-size. Otherwise chromatic_psf_kernel's
-            # defocus disk overflows the kernel — every pixel ends up inside
-            # the (clipped) disk and the kernel renders as a uniform-fill
-            # rectangle ("big squares"), not a defocus blur. Keep the same
-            # pixel scale so Airy sampling is preserved.
-            max_defocus_mm = max(
-                abs(chromatic_defocus(telescope, wl))
-                for wl in channel_wavelengths
-            )
-            max_defocus_radius_mm = (
-                max_defocus_mm / (2.0 * telescope.focal_ratio)
-            )
-            needed_half_mm = max_defocus_radius_mm * 1.5
-            if needed_half_mm > psf_half_mm:
-                old_pixel_scale_mm = 2.0 * psf_half_mm / psf_n
-                new_psf_n = int(2 * needed_half_mm / old_pixel_scale_mm)
-                if new_psf_n % 2 == 0:
-                    new_psf_n += 1  # odd for symmetric centring
-                # Cap to image-canvas size to bound memory/compute
-                new_psf_n = min(new_psf_n, num_pixels)
-                psf_half_mm = needed_half_mm
-                psf_n = max(psf_n, new_psf_n)
-                # Refresh derived quantities used downstream / in closures
-                psf_pixel_scale_mm = 2.0 * psf_half_mm / psf_n
-                psf_zoom = psf_pixel_scale_mm / pixel_scale_mm
+        def _resample_to_canvas(psf, zoom=None):
+            """Resample a PSF kernel to match the image-canvas pixel scale.
 
-        def _resample_to_canvas(psf):
-            """Resample a PSF kernel to match the image-canvas pixel scale."""
-            if abs(psf_zoom - 1.0) > 0.02:
+            `zoom` overrides the shared kernel zoom, which the chromatic
+            bands need because each one is built on its own grid.
+            """
+            psf_zoom_eff = psf_zoom if zoom is None else zoom
+            if abs(psf_zoom_eff - 1.0) > 0.02:
                 from scipy.ndimage import zoom as _ndz, gaussian_filter as _gf
-                if psf_zoom < 1.0:
+                if psf_zoom_eff < 1.0:
                     # Anti-alias BEFORE downsampling. The spider-vane FFT PSF
                     # has fine high-frequency ring structure between the
                     # spikes; point/bilinear downsampling to the coarser
@@ -4682,8 +4741,8 @@ def _render_source_through_telescope(
                     # fills the field and reads as "general blur". A Gaussian
                     # low-pass sized to the downsample factor removes the
                     # moiré while keeping the core + spikes.
-                    psf = _gf(psf, sigma=0.5 / psf_zoom)
-                psf = _ndz(psf, psf_zoom, order=1)
+                    psf = _gf(psf, sigma=0.5 / psf_zoom_eff)
+                psf = _ndz(psf, psf_zoom_eff, order=1)
                 psf = np.maximum(psf, 0.0)
                 max_half = num_pixels // 2
                 h = psf.shape[0] // 2
@@ -4695,6 +4754,64 @@ def _render_source_through_telescope(
         # Per-star spectral RGB tints (MultiColorStarField); default to
         # equal weights (white star) for plain StarField/PointSource.
         star_rgb = getattr(source, "star_spectral_rgb", None)
+        # Per-star effective temperature, when the source models one. Lets the
+        # band weights come from Planck's law instead of a tabulated tint.
+        star_temps = getattr(source, "star_temperatures_K", None)
+
+        band_kernels = []
+        if _star_use_chromatic:
+            # Build one PSF kernel per spectral band, ONCE for the whole field.
+            # The chromatic PSF is on-axis and identical for every star, so the
+            # old code (which built kernels inside the star loop) repeated the
+            # same work once per star. Hoisting it pays for the extra bands
+            # several times over.
+            base_pixel_scale_mm = 2.0 * psf_half_mm / psf_n
+            focus_defocus_mm = chromatic_defocus(telescope,
+                                                 focus_wavelength_nm)
+            for wl_b in band_centres_nm:
+                defocus_radius_mm = (
+                    abs(chromatic_defocus(telescope, float(wl_b))
+                        - focus_defocus_mm)
+                    / (2.0 * telescope.focal_ratio)
+                )
+                # Each band gets a grid sized to ITS OWN defocus disk. A single
+                # shared grid cannot work: sized to the violet band it coarsens
+                # the pixel scale until the in-focus Airy core is unresolved
+                # (measured: a singlet's core drops to ~1 px across); sized to
+                # the in-focus band it clips the violet disk to the grid edge
+                # and the kernel renders as a filled square ("big squares"),
+                # not a defocus blur.
+                half_mm_b = max(psf_half_mm, 1.5 * defocus_radius_mm)
+                n_b = int(2.0 * half_mm_b / base_pixel_scale_mm) | 1
+                if n_b > num_pixels:
+                    # Too big to sample at the Airy pixel scale. A heavily
+                    # defocused band is a smooth disk with no fine structure,
+                    # so coarsening ITS grid discards nothing real — and it
+                    # keeps the disk whole instead of clipping it square.
+                    n_b = num_pixels | 1
+                pixel_scale_b = 2.0 * half_mm_b / n_b
+                kern = chromatic_psf_kernel(
+                    telescope, float(wl_b), n_b, half_mm_b,
+                    include_obstruction,
+                    focus_wavelength_nm=focus_wavelength_nm,
+                )
+                kern = _resample_to_canvas(
+                    kern, zoom=pixel_scale_b / pixel_scale_mm)
+                # Circular taper: removes the square kernel support and turns
+                # the geometric defocus disk (which fills its square grid) into
+                # the physically-correct circular disk.
+                kern = _apply_circular_taper(kern)
+                band_kernels.append(kern)
+            # Anchor brightness to the peak-normalised convention used by the
+            # monochrome path: divide every band by the SHARPEST band's peak,
+            # so a well-corrected scope puts the star's brightest channel at
+            # ~1 x intensity, matching a non-chromatic star of the same
+            # magnitude. RELATIVE peaks are preserved, so defocused bands
+            # still render as the dim colour halo they physically are.
+            common_peak = max((float(k.max()) for k in band_kernels),
+                              default=0.0)
+            if common_peak > 0:
+                band_kernels = [k / common_peak for k in band_kernels]
 
         for star_idx, (field_r, pa_deg, mag) in enumerate(stars):
             # Absolute intensity: photon flux from this magnitude × aperture²
@@ -4815,75 +4932,60 @@ def _render_source_through_telescope(
                 for ch in range(3):
                     image_rgb[y1:y2, x1:x2, ch] += stamp * star_color[ch]
 
-            # Polychromatic per-channel stamping. Each R/G/B PSF includes
-            # the chromatic defocus for its wavelength so a singlet refractor
-            # produces visible colored halos around each star.
+            # Polychromatic per-band stamping. Each band's PSF carries the
+            # chromatic defocus for its own wavelength, so a singlet refractor
+            # produces visible coloured halos around every star.
             #
-            # chromatic_psf_kernel is sum-normalised (energy-conserving):
-            # the in-focus channel concentrates energy into the Airy core
-            # (bright sharp point); defocused channels spread the same
-            # total energy over the defocus disk (naturally dim halo).
-            # This is the physically-correct rendering — the previous
-            # per-channel PEAK normalisation made every halo uniformly
-            # bright at the in-focus peak, so overlapping halos from
-            # multiple stars saturated R+B and washed out the in-focus G
-            # cores ("all stars look red-magenta regardless of intrinsic
-            # tint"). A display stretch is applied at the end of this
-            # function so the now-dim halos remain visible without
-            # saturating the bright cores.
-            # Computation is roughly 3x the monochrome path; only enabled
-            # when polychromatic and a refractor objective is present.
-            if _star_use_chromatic:
-                # Build all three channel kernels (sum-normalised, so the
-                # in-focus channel keeps a high peak and defocused channels
-                # spread into dim disks — the chromatic effect).
-                ch_kernels = []
-                for wl_ch in channel_wavelengths:
-                    psf_ch = chromatic_psf_kernel(
-                        telescope, wl_ch, psf_n, psf_half_mm,
-                        include_obstruction,
-                        focus_wavelength_nm=focus_wavelength_nm,
-                    )
-                    psf_ch = _resample_to_canvas(psf_ch)
-                    # Circular taper: removes the square box and turns the
-                    # geometric defocus disk (which fills its square support)
-                    # into the physically-correct circular disk.
-                    psf_ch = _apply_circular_taper(psf_ch)
-                    ch_kernels.append(psf_ch)
-                # Anchor brightness to the peak-normalised convention used by
-                # the (monochrome) per-star path: divide all channels by the
-                # SHARPEST channel's peak so the in-focus channel peaks at ~1
-                # (× intensity), matching a non-chromatic star of the same
-                # magnitude. Without this, the sum-normalised kernels made
-                # chromatic stars render ~6× too faint (peak 0.16 vs 0.89) —
-                # the "chromatic + seeing everything is too dim" bug. The
-                # RELATIVE peaks are preserved, so defocused channels still
-                # show as dim colour halos.
-                common_peak = max((float(k.max()) for k in ch_kernels),
-                                  default=0.0)
-                if common_peak > 0:
-                    ch_kernels = [k / common_peak for k in ch_kernels]
-                for ch, psf_ch in enumerate(ch_kernels):
-                    psf_ch_h, psf_ch_w = psf_ch.shape
-                    psf_ch_hh = psf_ch_h // 2
-                    y_start_c = cy - psf_ch_hh
-                    x_start_c = cx - psf_ch_hh
+            # chromatic_psf_kernel is sum-normalised (energy-conserving): a
+            # band near focus concentrates its energy into the Airy core
+            # (bright, sharp), while a defocused band spreads the SAME total
+            # energy across its disk (naturally dim halo). That is the
+            # physically-correct rendering — an earlier per-band PEAK
+            # normalisation made every halo as bright as the in-focus core, so
+            # overlapping halos saturated R+B and washed out the cores ("all
+            # stars look red-magenta regardless of intrinsic tint"). The
+            # display stretch applied at the end of this function keeps the
+            # now-dim halos visible without blowing out the cores.
+            #
+            # Each band contributes to ALL THREE channels, weighted by the CIE
+            # colour-matching functions, rather than one band per channel.
+            # Only enabled when polychromatic and a refractor objective is
+            # present.
+            if _star_use_chromatic and band_kernels:
+                # Per-band spectral weights for THIS star. When the source
+                # models an effective temperature, the weights come from
+                # Planck's law and the star's colour falls out of the
+                # integral; otherwise a flat spectrum carries the source's
+                # tabulated tint, reproducing the previous colour exactly.
+                temp_k = None
+                if star_temps is not None and star_idx < len(star_temps):
+                    temp_k = float(star_temps[star_idx])
+                band_w, band_rgb_eff, _src_rgb = band_weights_for_source(
+                    band_centres_nm, band_rgb_weights,
+                    temperature_k=temp_k,
+                    tint_rgb=None if temp_k else star_color,
+                )
+                for b_idx, psf_b in enumerate(band_kernels):
+                    psf_b_h, psf_b_w = psf_b.shape
+                    psf_b_hh = psf_b_h // 2
+                    y_start_c = cy - psf_b_hh
+                    x_start_c = cx - psf_b_hh
                     y1c = max(0, y_start_c)
-                    y2c = min(num_pixels, y_start_c + psf_ch_h)
+                    y2c = min(num_pixels, y_start_c + psf_b_h)
                     x1c = max(0, x_start_c)
-                    x2c = min(num_pixels, x_start_c + psf_ch_w)
+                    x2c = min(num_pixels, x_start_c + psf_b_w)
                     py1c = y1c - y_start_c
                     py2c = py1c + (y2c - y1c)
                     px1c = x1c - x_start_c
                     px2c = px1c + (x2c - x1c)
-                    if y2c > y1c and x2c > x1c:
-                        # Modulate by the star's spectral RGB weight so a
-                        # red star contributes mostly to R, etc. White
-                        # stars (default 1,1,1) behave as before.
-                        image_rgb[y1c:y2c, x1c:x2c, ch] += (
-                            psf_ch[py1c:py2c, px1c:px2c]
-                            * intensity * vignetting * star_color[ch]
-                        )
+                    if y2c <= y1c or x2c <= x1c:
+                        continue
+                    stamp_b = (psf_b[py1c:py2c, px1c:px2c]
+                               * intensity * vignetting * band_w[b_idx])
+                    for ch in range(3):
+                        w_ch = band_rgb_eff[b_idx, ch]
+                        if w_ch > 0.0:
+                            image_rgb[y1c:y2c, x1c:x2c, ch] += stamp_b * w_ch
 
     elif hasattr(source, 'render_ideal_rgb'):
         # Extended source with RGB colors (Jupiter, Saturn, Moon, etc.)

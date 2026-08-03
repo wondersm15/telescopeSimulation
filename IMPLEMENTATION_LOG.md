@@ -2,6 +2,67 @@
 
 ---
 
+## Tutorial Tab — Round 5, Batch Q (chromatic colour correctness): COMPLETE
+
+Ledger: `PLAN_TUTORIAL_ROUND5.md`. Closes R5.6a/b/c/d. **468 tests pass** (was 422
+at the end of Round 4); committed on `feature/tutorial-testing-tab`, not merged.
+
+Two independent defects were found behind the user's report that star colours in
+*Chromatic Aberration + Seeing* were "too enhanced", non-uniform, and asymmetric.
+
+**Defect 1 — per-channel pixel misregistration (R5.6b/c).**
+`chromatic_psf_kernel` centred its defocus disk on integer index `n // 2`, while an
+even array's true centre is `(n-1)/2`. Compounded with `fftconvolve(mode="same")`
+this became a full **+1, +1 px** shift. The function early-returns the *unshifted*
+Airy PSF for sub-pixel defocus, so the in-focus channel stayed put while the
+defocused ones moved — producing the reported "pink upper-right / yellow lower-left"
+fringe, worst on the *best* objective (a near-zero residual straddles the threshold).
+
+Fixed by building the disk on its own **odd-sized** grid centred on `(n-1)/2`, with
+an anti-aliased coverage ramp instead of a hard mask. Odd size is the part that
+actually matters: `mode="same"` slices at `(m-1)//2`, which equals the true centre
+only for odd `m`. The ramp also prevents an **empty** disk for radii between 0.5 and
+0.707 px (min `r` on a symmetric grid is 0.707) — which would have rendered a black
+star. Measured on the real render, chroma asymmetry 0.0963 → 0.00000 and channel-
+centroid spread 0.897 px → 0.0000 px on the APO triplet.
+
+Sibling `n // 2` sites audited and **measured**, not pattern-matched: `2473`/`2485`
+safe (odd `n`); `1722`/`3042` safe — the convolution and sampling offsets cancel,
+peak error +0.067%, which also **retracts** an earlier claim in the ledger that this
+was depressing the 1D obstruction amplitudes in R5.2. `4255`/`4383` had no colour
+consequence but were made odd for uniformity.
+
+**Defect 2 — three delta wavelengths instead of a spectrum (R5.6a/d).**
+The renderer sampled 656.3 / 550 / 486.1 nm and sent each into one RGB channel, 1:1.
+Stars emit a continuum; discarding everything in between left the achromat rendering
+**every** star at hue 299.7° ± 0.3 with saturation up to **0.98** — the star's own
+colour annihilated. That is the "too enhanced" complaint.
+
+- **New** `telescope_sim/physics/colorimetry.py`: CIE 1931 2° colour-matching
+  functions, Planck's law, linear-sRGB conversion, band weights.
+- The visible band is sampled in **9 slices**; each carries its own chromatic-defocus
+  PSF and contributes to **all three** channels via its CMF weight. Star colour is now
+  integrated from `star_temperatures_K` rather than tabulated. 9 slices verified
+  converged against 21.
+- Kernels are built **once per band for the field** instead of once per band per star,
+  so despite 3× the bands the singlet render got *faster*: 1.41 s → 1.05 s.
+- Each band gets a grid sized to its own defocus, removing a latent forced choice
+  between an unresolved Airy core and a square-clipped violet disk.
+- After: achromat hue 71–82°, sat 0.59–0.71, hues now vary per star; APO triplet star
+  hues track effective temperature.
+
+**Not a defect:** the singlet's saturated green core. Its core is nearly
+monochromatic at 550 nm, which is outside the sRGB gamut — raw conversion is
+(−0.13, 1.45, −0.17), and gamut-mapping rather than clipping only reaches
+(0.025, 1.0, 0.0). No monitor can show it less saturated. Now explained in the module
+description and PHYSICS.md §7 (new section on spectral rendering / colorimetry).
+
+Verified through **real GUI navigation** (sidebar → scenario → every combo): 21
+renders, 0 failures. New `tests/test_colorimetry.py` (34 tests); 4 of the rendering
+assertions confirmed failing pre-fix by stash.
+
+---
+
 ## Tutorial Tab — Round 4 (second verbatim-feedback round): COMPLETE
 
 All of Round 4 (R4.1–R4.15 + both user decisions D1/D2) is addressed; committed on

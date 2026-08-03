@@ -92,7 +92,7 @@ Airy disk radius = 1.22 · λ · f/D  (in mm at focal plane)
 
 **Implementation**:
 - Wavelength-dependent refractive index via Sellmeier equation
-- Per-channel PSF convolution for RGB source images
+- Per-band PSF convolution for RGB source images (see §7)
 - Longitudinal chromatic aberration causes wavelength-dependent defocus
 
 **Accuracy**:
@@ -101,6 +101,41 @@ Airy disk radius = 1.22 · λ · f/D  (in mm at focal plane)
 - Approximate formula for singlets: `blur ≈ 30/f-ratio arcsec`
 
 **Real physics**: ✅ Accurate for implemented lens types
+
+
+---
+
+### 7. Spectral Rendering / Colorimetry
+
+**Location**: `telescope_sim/physics/colorimetry.py`, used by
+`_render_source_through_telescope` in `telescope_sim/plotting/ray_trace_plot.py`
+
+**What**: Turning a source spectrum plus wavelength-dependent optics into
+screen RGB.
+
+**Implementation**:
+- CIE 1931 2° standard-observer colour-matching functions, 10 nm table
+- Planck's law for the stellar spectral energy distribution, from each star's
+  effective temperature (`star_temperatures_K`)
+- The visible band (400–700 nm, 9 slices by default) is sampled; each slice
+  gets its own chromatic defocus PSF and its own linear-sRGB weight from the
+  CMF integral, so every slice contributes to all three channels
+- Weights are white-balanced to equal energy, putting the neutral point near
+  5500 K — Sun-like stars render white, cooler amber, hotter blue-white
+- 9 slices verified converged against 21 (colour shift < 0.05 per channel)
+
+**Accuracy**:
+- Star colours are *integrated from* Planck's law and the CMFs rather than
+  tabulated, so they are real physics rather than art direction
+- ⚠️ Out-of-gamut spectral colours are clipped to the sRGB cube. This is a
+  display limit, not a modelling choice: near-monochromatic 550 nm light
+  (a badly chromatic objective's core) cannot be shown by an sRGB monitor at
+  its true saturation, so it renders as full green
+- ⚠️ Sources without a modelled temperature (plain `StarField`, `PointSource`)
+  fall back to a flat spectrum carrying their tabulated tint
+
+**Real physics**: ✅ Colour science and stellar SED are accurate; ⚠️ display
+gamut is a hard limit of sRGB output
 
 
 ---
