@@ -651,10 +651,53 @@ class TestRound4RenderFixes:
         assert 8 < visible < 400, f"ideal dot spans {visible}px (want a few)"
 
     def test_star_field_tints_are_subtle(self):
-        """R4.15: the spectral tints are desaturated so the field reads
-        naturally (no 'very pronounced' saturated stars)."""
+        """R4.15: the star field must READ naturally to the eye — no 'very
+        pronounced' saturated stars.
+
+        R5.1 moved where this is enforced. The source now carries each star's
+        TRUE blackbody colour (a camera would record exactly that), and the
+        desaturation happens once at the eye-view display stage, keyed off
+        actual pixel flux. So the property is asserted on the rendered eye
+        view rather than on the source array — which is the thing the user
+        actually looks at, and which survives the source keeping real colours.
+        """
         from telescope_sim.source.sources import ShowcaseStarField
-        rgb = np.asarray(ShowcaseStarField().star_spectral_rgb)
-        mx, mn = rgb.max(axis=1), rgb.min(axis=1)
+        from telescope_sim.plotting.ray_trace_plot import (
+            _render_source_through_telescope)
+        tel = NewtonianTelescope(primary_diameter=200.0, focal_length=1000.0)
+        _im, _hf, info = _render_source_through_telescope(
+            ShowcaseStarField(), tel, num_pixels=256, seeing_arcsec=1.5,
+            display_stretch="log")
+        rgb = info["image_rgb"]
+        lum = (0.2126 * rgb[..., 0] + 0.7152 * rgb[..., 1]
+               + 0.0722 * rgb[..., 2])
+        lit = lum > 0.02 * lum.max()
+        px = rgb[lit]
+        mx, mn = px.max(axis=1), px.min(axis=1)
         sat = np.where(mx > 1e-6, (mx - mn) / (mx + 1e-9), 0.0)
-        assert sat.max() < 0.35, f"max star saturation {sat.max():.2f} too high"
+        assert np.percentile(sat, 99) < 0.35, (
+            f"99th-pct rendered star saturation {np.percentile(sat, 99):.2f} "
+            "too high — the field reads as 'candy'-coloured")
+
+    def test_detector_view_keeps_true_star_colour(self):
+        """R5.1 counterpart: the DETECTOR pane must NOT be desaturated. A
+        camera has no cones, so it records a star's real colour at any
+        brightness. Detector saturation must exceed the eye view's."""
+        from telescope_sim.source.sources import ShowcaseStarField
+        from telescope_sim.plotting.ray_trace_plot import (
+            _render_source_through_telescope)
+        tel = NewtonianTelescope(primary_diameter=200.0, focal_length=1000.0)
+
+        def _sat99(stretch):
+            _im, _hf, info = _render_source_through_telescope(
+                ShowcaseStarField(), tel, num_pixels=256, seeing_arcsec=1.5,
+                display_stretch=stretch)
+            rgb = info["image_rgb"]
+            lum = (0.2126 * rgb[..., 0] + 0.7152 * rgb[..., 1]
+                   + 0.0722 * rgb[..., 2])
+            px = rgb[lum > 0.02 * lum.max()]
+            mx, mn = px.max(axis=1), px.min(axis=1)
+            return np.percentile(
+                np.where(mx > 1e-6, (mx - mn) / (mx + 1e-9), 0.0), 99)
+
+        assert _sat99("linear") > _sat99("log")

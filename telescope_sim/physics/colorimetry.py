@@ -300,3 +300,91 @@ def band_weights_for_source(centres_nm, rgb_weights,
         band_w = band_w / peak
         source_rgb = source_rgb / peak
     return band_w, effective, source_rgb
+
+
+# ---------------------------------------------------------------------------
+# Mesopic (rod/cone) colour vision — EYE VIEW ONLY
+# ---------------------------------------------------------------------------
+# Flux below which the cones contribute nothing and vision is rod-only, i.e.
+# achromatic, expressed as a fraction of the display saturation level. Flux
+# above which the cones bleach and the percept whitens, same units.
+CONE_THRESHOLD_FLUX = 0.05
+CONE_BLEACH_FLUX = 0.5
+
+
+def mesopic_chroma_gain(flux,
+                        cone_threshold: float = CONE_THRESHOLD_FLUX,
+                        bleach_level: float = CONE_BLEACH_FLUX):
+    """How much of a pixel's colour a dark-adapted eye actually perceives.
+
+    Human colour vision is *band-pass in luminance*, not monotonic:
+
+    * **Too dim** — below roughly 0.005 cd/m² only the rods respond. Rods are
+      a single photoreceptor class, so their output carries no colour
+      information at all: scotopic vision is genuinely achromatic. This is why
+      a faint nebula looks grey through an eyepiece however colourful the
+      photograph is, and why only the brightest few stars show an obvious tint
+      to the naked eye.
+    * **Mid range** — the mesopic zone (~0.005 to ~5 cd/m², CIE 191:2010),
+      where cones progressively take over and colour saturation climbs.
+    * **Too bright** — cone photopigment bleaches and the percept desaturates
+      toward white. This is the familiar whiteout of a brilliant star's core.
+
+    Both limits blend the pixel toward its own luminance (neutral grey of the
+    same brightness); only the middle of the range shows full chroma.
+
+    ⚠️ APPROXIMATION — the shape is real, the calibration is not. The renderer
+    works in normalised display flux (1.0 = the saturation level), not in
+    cd/m², so the two thresholds are anchored by eye rather than derived from
+    an absolute retinal illuminance. Both terms are smooth Michaelis-Menten
+    saturating curves rather than the CIE mesopic interpolation. Treat the
+    *ordering* of effects as physical and the exact crossover flux as a tuned
+    display parameter.
+
+    Applies to the eye view only. A detector has no cones: a camera records
+    the same chromaticity at any flux until the pixel wells clip, so the
+    linear/detector path must not call this.
+
+    Args:
+        flux: Linear flux array, normalised so 1.0 is the display saturation
+            level (i.e. after division by ``saturation_divisor``).
+        cone_threshold: Flux at which cones supply half their full chroma.
+        bleach_level: Flux at which bleaching has removed half the chroma.
+
+    Returns:
+        Array of gains in [0, 1) to multiply each pixel's departure from its
+        own luminance by. 0 = grey, 1 = the source's full colour.
+    """
+    flux = np.asarray(flux, dtype=float)
+    flux = np.maximum(flux, 0.0)
+    # Cones switching on: 0 at zero flux → 1 well above threshold.
+    cone_on = flux / (flux + max(cone_threshold, 1e-12))
+    # Cones bleaching out: 1 at low flux → 0 well above the bleach level.
+    bleach_out = max(bleach_level, 1e-12) / (flux + max(bleach_level, 1e-12))
+    return cone_on * bleach_out
+
+
+def apply_mesopic_desaturation(image_rgb,
+                               cone_threshold: float = CONE_THRESHOLD_FLUX,
+                               bleach_level: float = CONE_BLEACH_FLUX):
+    """Blend an RGB image toward grey where the eye could not see colour.
+
+    Thin wrapper over `mesopic_chroma_gain` that computes each pixel's Rec.709
+    luminance, evaluates the gain at that luminance, and interpolates between
+    grey and the original colour.
+
+    Args:
+        image_rgb: (H, W, 3) linear RGB, normalised so 1.0 is the display
+            saturation level.
+        cone_threshold: See `mesopic_chroma_gain`.
+        bleach_level: See `mesopic_chroma_gain`.
+
+    Returns:
+        A new (H, W, 3) array; the input is not modified.
+    """
+    image_rgb = np.asarray(image_rgb, dtype=float)
+    lum = (0.2126 * image_rgb[..., 0]
+           + 0.7152 * image_rgb[..., 1]
+           + 0.0722 * image_rgb[..., 2])
+    gain = mesopic_chroma_gain(lum, cone_threshold, bleach_level)
+    return lum[..., None] + gain[..., None] * (image_rgb - lum[..., None])

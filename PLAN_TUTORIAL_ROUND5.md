@@ -382,3 +382,127 @@ User (2026-08-02): **order doesn't matter.**
 
 **Rough size:** ~8–9 focused sessions. M–P are well understood; Q's root cause is now
 measured but the sibling audit may expand; R is still an open investigation.
+
+---
+
+## R5.1 / R5.2 — BATCH M: FIX APPLIED AND VERIFIED THROUGH THE RENDER PIPELINE
+
+### R5.1 — the diagnosis above was right but INCOMPLETE
+
+The hardcoded `spectral_rgb=(1.0, 0.7, 0.35)` was real, and fixing it was
+necessary. It was not sufficient. Answering the user's *second* question — "is
+this level of orange a realistic thing anyone would ever see?" — turned up a
+deeper defect that the propagate-the-palette framing would have missed
+entirely.
+
+**(a) The tint was not a star colour at all.** Saturation 0.65 exceeds *any*
+stellar blackbody. Derived properly (Planck → CIE 1931 → linear sRGB), a
+4300 K K-giant is `(1.00, 0.91, 0.66)`, saturation **0.34**. The scenario now
+declares `temperature_k=4300.0` and `PointSource` derives the colour, so the
+physical quantity is what's stated and the colour falls out.
+
+**(b) The eye view was displaying colour where no eye could see any.** Human
+colour vision is band-pass in luminance — below the cone threshold only the
+rods respond, and rods are a single receptor class, so scotopic vision is
+genuinely achromatic. The renderer modelled only the *bright* end (cone
+bleaching → white core). Nothing removed chroma at the *faint* end. And
+because the eye view's asinh stretch is deliberately chroma-preserving, it
+lifted the star's faint outer halo to near-full display brightness **while
+keeping its full saturation** — painting the frame with vivid orange that no
+observer could ever perceive. That, not the tint value, is why it read as
+"highlighter orange".
+
+Measured on the eye pane, mag-0 star through a 100 mm scope:
+
+| Radius | sat BEFORE | sat AFTER |
+|---|---|---|
+| core (r=0) | 0.109 | 0.105 |
+| r = 10 px  | 0.232 | 0.194 |
+| r = 20 px  | 0.333 | **0.044** |
+| r = 40 px  | 0.335 | **0.024** |
+
+The bright end is untouched (by construction — the bleach term reproduces the
+old `I/(I+0.5)` exactly). The faint halo drains to grey. A thin amber annulus
+survives in between, which is what an observer actually sees.
+
+New `colorimetry.mesopic_chroma_gain` / `apply_mesopic_desaturation`.
+⚠️ The shape is real physiology; the two thresholds are tuned display
+parameters, because the renderer works in normalised flux, not cd/m². Flagged
+in the module docstring, PHYSICS.md §7b, and the module narrative.
+
+**(c) Detector vs eye now genuinely disagree, which is the module's whole
+point.** The desaturation is eye-view only: a camera has no cones and records
+the same chromaticity at any flux. Measured through the GUI:
+
+| Pane | r=0 | r=10 | r=20 | r=40 |
+|---|---|---|---|---|
+| Eye (log)       | 0.105 | 0.194 | 0.044 | 0.024 |
+| Detector (linear) | 0.337 | 0.337 | 0.337 | 0.337 |
+
+The detector row is flat at exactly `blackbody_linear_srgb(4300)`.
+
+### R5.1 — SIBLING AUDIT (per the standing "check elsewhere" instruction)
+
+Sweeping for the same defect class — *a colour asserted by hand where physics
+could derive it, or a perceptual effect baked into the source data* — found
+two more instances, both fixed:
+
+1. **`_SPECTRAL_PALETTE_RAW` (`sources.py`)** — six hand-written class tints.
+   Demonstrably wrong, not merely approximate: it gave class F a **warm** tint
+   (hue 38°) when a 7000 K blackbody is slightly **blue** of the sRGB white
+   point (hue 211°), because sRGB white is D65 ≈ 6500 K. Replaced by
+   `blackbody_linear_srgb` at each class's temperature.
+2. **`MultiColorStarField.STARS`** — carried a hand-written RGB tint *next to*
+   the true `T_eff`. Two disagreeing sources of truth: after Batch Q the
+   polychromatic path derives colour from `T_eff` while the monochromatic path
+   used the tint, so the same star changed colour when polychromatic was
+   toggled. The tabulated "Antares" tint was `(1.00, 0.45, 0.10)` against a
+   3500 K blackbody's `(1.00, 0.79, 0.43)`. Tint column removed; colour
+   derived on both paths.
+
+Also removed: `ShowcaseStarField`'s magnitude-dependent desaturation and
+`_TINT_STRENGTH = 0.45`. Both were perceptual models living in the *source*,
+which meant (i) they double-counted against the display-stage model in the eye
+view and (ii) they wrongly desaturated the **detector** view, where a camera
+would faithfully record a faint star's colour. The effect now exists once, at
+the display stage, keyed off actual pixel flux — so a faint star fades to grey
+in the eye pane and keeps its colour in the detector pane.
+
+### R5.2 — narrative written, with the numbers
+
+Confirmed the earlier finding: no code defect, the display is the honest
+limit. Wrote the quantitative version into both places the user was looking —
+*Viewing Modes* and *Central Obstruction*:
+
+| Case | 1st ring | 8-bit level |
+|---|---|---|
+| Unobstructed | 1.75% | 4 / 255 |
+| ε = 0.25 | 3.80% | 10 / 255 |
+| ε = 0.33 | 5.40% | 14 / 255 |
+| ε = 0.40 | 7.07% | 18 / 255 |
+| ε = 0.50 | 9.63% | 25 / 255 |
+
+2nd ring unobstructed: 0.42% → level 1. The narrative also names *why* the 1D
+plot disagrees (its y-axis rescales per curve; the 2D image cannot) and gives
+the asinh comparison: the same 1.75% maps to level **119** in the eye view,
+~30× the displayed contrast for identical photons.
+
+### Verification
+
+- **481 tests pass** (was 468). New: 11 mesopic/eye-vs-detector tests in
+  `test_colorimetry.py`, 2 rewritten to assert on the *rendered* image rather
+  than the source array, 1 new detector-keeps-colour test.
+- **Pre-fix failure demonstrated**: forcing `cone_threshold → 0` reproduces the
+  old one-sided model exactly and gives halo saturation 0.333 against the
+  test's `< 0.10` bound.
+- **Real GUI navigation** (sidebar → 5 scenarios → every combo, checkbox and
+  slider): **411 renders, 0 null figures.** Pane measurements above were read
+  out of the figures the GUI actually produced.
+
+### Carried into Batch R
+
+R5.8's "highlighter orange stripes in eye mode" is the same family — Jupiter's
+belts are dim in eye mode and were chroma-preserved through the asinh stretch.
+Measured post-fix disk saturation is now p90 = 0.18 in eye mode vs 0.25 linear.
+Whether that fully answers R5.8 needs its own visual check; the aperture-
+brightness half of R5.8 is untouched and still open.

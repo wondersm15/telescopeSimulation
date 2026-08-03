@@ -647,7 +647,7 @@ def _chromatic_star_labels_overlay(fig: Figure, theory_result: dict,
         return
     sf = MultiColorStarField()
     K_per_eV = 11604.5
-    for label, x, y, mag, rgb, T_K in sf.STARS:
+    for label, x, y, mag, T_K in sf.STARS:
         cls_short = label.split("(")[-1].rstrip(")") if "(" in label else ""
         eV = T_K / K_per_eV
         text = f"{cls_short}\n{T_K} K\n{eV:.2f} eV"

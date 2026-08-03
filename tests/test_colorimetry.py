@@ -17,8 +17,10 @@ from telescope_sim.physics.colorimetry import (
     CMF_MAX_NM,
     CMF_MIN_NM,
     blackbody_linear_srgb,
+    apply_mesopic_desaturation,
     band_weights_for_source,
     cie_xyz_at,
+    mesopic_chroma_gain,
     planck_spectral_radiance,
     spectral_bands,
     xyz_to_linear_srgb,
@@ -289,3 +291,117 @@ class TestSpectralStarRendering:
         spread = max(np.hypot(a[0] - b[0], a[1] - b[1])
                      for a in centroids for b in centroids)
         assert spread < 0.05, f"channel centroids spread {spread:.3f} px"
+
+
+class TestMesopicVision:
+    """R5.1: human colour vision is band-pass in luminance, not monotonic."""
+
+    def test_gain_is_zero_in_the_dark(self):
+        """Rods are a single receptor class, so scotopic vision is
+        achromatic — no colour survives at very low flux."""
+        assert mesopic_chroma_gain(0.0) == 0.0
+        assert mesopic_chroma_gain(1e-4) < 0.01
+
+    def test_gain_falls_off_again_when_bleached(self):
+        """Cone photopigment bleaches at high flux and the percept whitens."""
+        assert mesopic_chroma_gain(100.0) < 0.05
+
+    def test_gain_peaks_between_the_two_thresholds(self):
+        """Full colour is only available in the middle of the range."""
+        from telescope_sim.physics.colorimetry import (
+            CONE_BLEACH_FLUX, CONE_THRESHOLD_FLUX)
+        mid = np.sqrt(CONE_THRESHOLD_FLUX * CONE_BLEACH_FLUX)
+        assert mesopic_chroma_gain(mid) > mesopic_chroma_gain(
+            CONE_THRESHOLD_FLUX / 10.0)
+        assert mesopic_chroma_gain(mid) > mesopic_chroma_gain(
+            CONE_BLEACH_FLUX * 10.0)
+
+    def test_gain_is_bounded(self):
+        flux = np.logspace(-6, 3, 200)
+        gain = mesopic_chroma_gain(flux)
+        assert np.all(gain >= 0.0) and np.all(gain < 1.0)
+
+    def test_bright_end_matches_the_previous_model(self):
+        """The old one-sided model used w = I/(I+0.5) toward grey; the bleach
+        term must reproduce it so R4-era behaviour is unchanged at high flux."""
+        from telescope_sim.physics.colorimetry import CONE_BLEACH_FLUX
+        for flux in (0.5, 1.0, 4.0):
+            expected = 1.0 - flux / (flux + CONE_BLEACH_FLUX)
+            cone_on = flux / (flux + 0.05)
+            assert mesopic_chroma_gain(flux) == pytest.approx(
+                cone_on * expected, rel=1e-9)
+
+    def test_desaturation_preserves_luminance(self):
+        """Blending toward grey must not change how bright a pixel looks."""
+        rng = np.random.default_rng(0)
+        img = rng.uniform(0.0, 2.0, (16, 16, 3))
+        out = apply_mesopic_desaturation(img)
+
+        def _lum(a):
+            return (0.2126 * a[..., 0] + 0.7152 * a[..., 1]
+                    + 0.0722 * a[..., 2])
+
+        assert np.allclose(_lum(out), _lum(img))
+
+    def test_desaturation_does_not_mutate_input(self):
+        img = np.full((4, 4, 3), 0.3)
+        img[..., 0] = 0.9
+        before = img.copy()
+        apply_mesopic_desaturation(img)
+        assert np.array_equal(img, before)
+
+
+class TestEyeVersusDetectorColour:
+    """R5.1 end-to-end: the two panes must disagree, in the right direction."""
+
+    @staticmethod
+    def _render(stretch):
+        from telescope_gui.telescope_builder import build_telescope
+        from telescope_sim.source.sources import PointSource
+        from telescope_sim.plotting.ray_trace_plot import (
+            _render_source_through_telescope)
+        scope = build_telescope(telescope_type="reflector", diameter=100.0,
+                               focal_length=800.0, primary_type="parabolic",
+                               enable_obstruction=False, spider_vanes=0)
+        star = PointSource(magnitude=0.0, temperature_k=4300.0)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            _, _, info = _render_source_through_telescope(
+                star, scope, num_pixels=256, seeing_arcsec=None,
+                display_stretch=stretch)
+        return np.asarray(info["image_rgb"], dtype=float)
+
+    @staticmethod
+    def _ring_sat(rgb, radius_px):
+        lum = (0.2126 * rgb[..., 0] + 0.7152 * rgb[..., 1]
+               + 0.0722 * rgb[..., 2])
+        cy, cx = np.unravel_index(int(np.argmax(lum)), lum.shape)
+        yy, xx = np.mgrid[:rgb.shape[0], :rgb.shape[1]]
+        ring = np.abs(np.hypot(yy - cy, xx - cx) - radius_px) < 1.0
+        mean = rgb[ring].mean(axis=0)
+        return (mean.max() - mean.min()) / max(mean.max(), 1e-12)
+
+    def test_detector_records_the_same_colour_everywhere(self):
+        """A camera has no cones: chromaticity is flux-independent."""
+        rgb = self._render("linear")
+        core = self._ring_sat(rgb, 4)
+        halo = self._ring_sat(rgb, 20)
+        assert core == pytest.approx(halo, abs=0.02)
+
+    def test_eye_drains_colour_from_the_faint_halo(self):
+        """R5.1: the halo is ~1% of the peak — far below the cone threshold —
+        so an observer sees grey there, not the vivid orange the chroma-
+        preserving asinh stretch used to display."""
+        rgb = self._render("log")
+        assert self._ring_sat(rgb, 20) < 0.10
+
+    def test_eye_whitens_the_blazing_core(self):
+        """The bright end (cone bleaching) must still work."""
+        rgb = self._render("log")
+        assert self._ring_sat(rgb, 0.0) < 0.15
+
+    def test_eye_keeps_colour_in_the_middle(self):
+        """Between the two limits the star's amber must survive, otherwise
+        the fix has simply thrown all colour away."""
+        rgb = self._render("log")
+        assert self._ring_sat(rgb, 10) > self._ring_sat(rgb, 20)

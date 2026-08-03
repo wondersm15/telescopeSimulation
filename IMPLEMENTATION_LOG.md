@@ -2,6 +2,71 @@
 
 ---
 
+## Tutorial Tab — Round 5, Batch M (star colour realism + dynamic range): COMPLETE
+
+Ledger: `PLAN_TUTORIAL_ROUND5.md`. Closes R5.1 and R5.2. **481 tests pass**
+(was 468); committed on `feature/tutorial-testing-tab`, not merged.
+
+**R5.1 — "why is it orange? is this level of orange realistic?"**
+
+The hardcoded `spectral_rgb=(1.0, 0.7, 0.35)` in the *Viewing Modes* scenario was
+real and is fixed — saturation 0.65 exceeds *any* stellar blackbody. The scenario
+now declares `temperature_k=4300.0` (an Arcturus-like K giant) and `PointSource`
+derives the colour via Planck → CIE 1931 → linear sRGB, giving
+(1.00, 0.91, 0.66), saturation 0.34.
+
+But the user's second question exposed a deeper defect. Human colour vision is
+**band-pass in luminance**: below the cone threshold only rods respond, and rods
+are a single receptor class, so scotopic vision is genuinely achromatic. The
+renderer modelled only the *bright* end (cone bleaching → white core). Nothing
+removed chroma at the *faint* end — and because the eye view's asinh stretch is
+deliberately chroma-preserving, it lifted the star's faint halo to near-full
+display brightness **while keeping full saturation**, painting the frame with
+vivid orange no observer could perceive. Halo saturation at r=20 px: 0.333 → 0.044.
+
+New `colorimetry.mesopic_chroma_gain` / `apply_mesopic_desaturation`, applied to
+the **eye view only** — a camera has no cones and records the same chromaticity at
+any flux. The two panes now genuinely disagree, which is the module's whole point:
+detector reads a flat 0.337 at every radius, eye reads 0.105 core / 0.194 annulus /
+0.044 halo. The bright end is unchanged by construction (the bleach term reproduces
+the old `I/(I+0.5)` exactly). ⚠️ Shape is real physiology, thresholds are tuned
+display parameters — flagged in the docstring, PHYSICS.md §7b, and the narrative.
+
+**Sibling audit** (per the standing "check elsewhere" instruction) found two more
+instances of *a colour asserted by hand where physics could derive it*:
+
+- `_SPECTRAL_PALETTE_RAW` — six hand-written class tints, demonstrably wrong, not
+  just approximate: class F got a **warm** tint (hue 38°) when a 7000 K blackbody
+  is slightly **blue** of the sRGB white point (hue 211°), since sRGB white is
+  D65 ≈ 6500 K. Now derived.
+- `MultiColorStarField.STARS` — carried a hand tint *next to* the true `T_eff`.
+  After Batch Q the polychromatic path derived colour from `T_eff` while the
+  monochromatic path used the tint, so the same star changed colour when
+  polychromatic was toggled. Tint column removed.
+
+Also removed `ShowcaseStarField`'s magnitude desaturation and `_TINT_STRENGTH`:
+perceptual models living in the *source* double-counted in the eye view and wrongly
+desaturated the **detector** view. The effect now exists once, at the display stage.
+
+**R5.2 — "1% of the peak should be visible, does this seem right?"**
+
+Yes — no code defect; the linear display is the honest limit, and the earlier
+suspicion about site 3042 was already measured and cleared in Batch Q. Wrote the
+quantitative narrative into both places the user was looking (*Viewing Modes* and
+*Central Obstruction*): the 1st Airy ring is 1.75% of peak = level **4 of 255**
+unobstructed, rising to 5.4% = level 14 at ε = 0.33; the 2nd ring is 0.42% = level 1.
+The narrative names why the 1D plot disagrees (its y-axis rescales per curve, the 2D
+image cannot) and gives the payoff: asinh maps that same 1.75% to level **119**,
+~30× the displayed contrast for identical photons.
+
+**Verification:** pre-fix failure demonstrated by forcing `cone_threshold → 0`,
+which reproduces the old one-sided model and yields halo saturation 0.333 against
+the new test's `< 0.10` bound. Real GUI navigation across 5 scenarios sweeping every
+combo, checkbox and slider: **411 renders, 0 null figures**; the pane measurements
+above were read out of the figures the GUI actually produced.
+
+---
+
 ## Tutorial Tab — Round 5, Batch Q (chromatic colour correctness): COMPLETE
 
 Ledger: `PLAN_TUTORIAL_ROUND5.md`. Closes R5.6a/b/c/d. **468 tests pass** (was 422

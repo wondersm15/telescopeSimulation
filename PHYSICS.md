@@ -126,7 +126,11 @@ screen RGB.
 
 **Accuracy**:
 - Star colours are *integrated from* Planck's law and the CMFs rather than
-  tabulated, so they are real physics rather than art direction
+  tabulated, so they are real physics rather than art direction. Every
+  spectral-class palette in `sources.py` is derived this way — the previous
+  hand-written tuples disagreed with the blackbody colours (they gave class F
+  a warm tint where a 7000 K blackbody is slightly *blue* of the D65 sRGB
+  white point)
 - ⚠️ Out-of-gamut spectral colours are clipped to the sRGB cube. This is a
   display limit, not a modelling choice: near-monochromatic 550 nm light
   (a badly chromatic objective's core) cannot be shown by an sRGB monitor at
@@ -136,6 +140,40 @@ screen RGB.
 
 **Real physics**: ✅ Colour science and stellar SED are accurate; ⚠️ display
 gamut is a hard limit of sRGB output
+
+#### 7b. Mesopic colour vision (eye view only)
+
+**Location**: `colorimetry.mesopic_chroma_gain` / `apply_mesopic_desaturation`
+
+**What**: How much of a pixel's colour a dark-adapted observer can actually
+perceive. Human colour vision is **band-pass in luminance**:
+
+| Regime | Luminance | Percept |
+|---|---|---|
+| Scotopic | ≲ 0.005 cd/m² | Rods only — a single receptor class, so **no colour at all** |
+| Mesopic | ~0.005–5 cd/m² | Cones progressively engage; saturation climbs |
+| Photopic (bright) | ≫ 5 cd/m² | Cone pigment bleaches; percept whitens |
+
+Both ends blend a pixel toward its own luminance; only the middle shows full
+chroma. This is why a nebula looks grey in an eyepiece and colourful in a
+photograph, and why only the brightest stars show an obvious tint.
+
+**Applied to the eye/log view only.** A detector has no cones — a camera
+records the same chromaticity at any flux until the wells clip — so the linear
+path deliberately skips it. That difference is the point of the *Viewing Modes:
+Detector vs Eye* tutorial module.
+
+**Accuracy**:
+- ✅ The *shape* is real: the two-sided rod/cone/bleaching structure, and the
+  fact that faint flux is achromatic, are established visual physiology
+- ⚠️ The *calibration* is not derived. The renderer works in normalised
+  display flux (1.0 = saturation level), not cd/m², so the cone threshold
+  (0.05) and bleach level (0.5) are tuned display parameters, and both terms
+  are smooth Michaelis–Menten curves rather than the CIE 191:2010 mesopic
+  interpolation. Flagged in the module docstring and in the module narrative
+
+**Real physics**: ⚠️ Physiologically-motivated perceptual model — ordering and
+limiting behaviour are real, absolute thresholds are tuned
 
 
 ---

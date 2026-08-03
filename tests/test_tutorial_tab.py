@@ -846,8 +846,25 @@ class TestPerSideDisplayControls:
     def test_exposure_demo_star_is_coloured(self):
         # B8: a coloured star so saturation whiteout / cone desaturation
         # is demonstrable (a mag-0 white star showed no colour).
+        # R5.1: the colour is now specified as a TEMPERATURE and derived via
+        # Planck's law + CIE, rather than asserted as a hand-picked RGB.
+        for side in (self._scn("viewing_modes").before_source,
+                     self._scn("viewing_modes").after_source):
+            assert (side.kwargs.get("temperature_k") is not None
+                    or side.kwargs.get("spectral_rgb") is not None)
+
+    def test_exposure_demo_star_colour_is_physical(self):
+        """R5.1 'is this level of orange realistic?' — the tint must be a real
+        blackbody colour, not the old hand-picked (1.0, 0.7, 0.35) whose
+        saturation (0.65) exceeded that of ANY stellar blackbody."""
+        from telescope_sim.source.sources import PointSource
+        from telescope_sim.physics.colorimetry import blackbody_linear_srgb
         s = self._scn("viewing_modes")
-        assert s.after_source.kwargs.get("spectral_rgb") is not None
+        temp = s.after_source.kwargs["temperature_k"]
+        rgb = PointSource(temperature_k=temp).star_spectral_rgb[0]
+        assert np.allclose(rgb, blackbody_linear_srgb(temp))
+        sat = (rgb.max() - rgb.min()) / rgb.max()
+        assert sat < 0.45, f"tint saturation {sat:.2f} hotter than any star"
 
     def test_color_filter_jupiter_before_unfiltered(self):
         s = self._scn("color_filter_jupiter")

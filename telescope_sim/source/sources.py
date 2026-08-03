@@ -12,6 +12,10 @@ from abc import ABC, abstractmethod
 
 import numpy as np
 
+from telescope_sim.physics.colorimetry import (
+    blackbody_linear_srgb as _blackbody_linear_srgb,
+)
+
 
 # ---------------------------------------------------------------------------
 # Shared real-texture globe projection (used by Moon, Jupiter, Saturn)
@@ -151,23 +155,36 @@ class PointSource(AstronomicalSource):
             from the +x axis (degrees).
         magnitude: Apparent magnitude (used for relative brightness
             in star fields).
+        temperature_k: Optional effective surface temperature in kelvin.
+            Preferred over `spectral_rgb`: the colour is then *derived* from
+            Planck's law through the CIE 1931 observer rather than asserted,
+            and the polychromatic renderer can weight its spectral bands by
+            the same SED.
         spectral_rgb: Optional (R, G, B) intrinsic colour tint in [0, 1]
-            representing the star's spectral energy distribution. None
-            (default) = white. When set, the renderer tints the star with
-            this colour — independent of chromatic aberration, so even a
-            reflector shows the star's true colour. Used to demonstrate
-            saturation whiteout / cone desaturation on a coloured star.
+            representing the star's spectral energy distribution. Escape
+            hatch for sources with no meaningful temperature; prefer
+            `temperature_k`. None (default) = white. When set, the renderer
+            tints the star with this colour — independent of chromatic
+            aberration, so even a reflector shows the star's true colour.
+            Used to demonstrate saturation whiteout / cone desaturation on a
+            coloured star.
     """
 
     def __init__(self, field_angle_arcsec: float = 0.0,
                  position_angle_deg: float = 0.0,
                  magnitude: float = 0.0,
-                 spectral_rgb: tuple[float, float, float] | None = None):
+                 spectral_rgb: tuple[float, float, float] | None = None,
+                 temperature_k: float | None = None):
         self.field_angle_arcsec = field_angle_arcsec
         self.position_angle_deg = position_angle_deg
         self.magnitude = magnitude
-        # Exposed as a 1-row array so the per-star renderer's
-        # `star_spectral_rgb[idx]` lookup works uniformly with star fields.
+        # Exposed as 1-row arrays so the per-star renderer's
+        # `star_spectral_rgb[idx]` / `star_temperatures_K[idx]` lookups work
+        # uniformly with star fields.
+        if temperature_k is not None:
+            self.star_temperatures_K = np.array([float(temperature_k)])
+            if spectral_rgb is None:
+                spectral_rgb = tuple(_blackbody_linear_srgb(temperature_k))
         if spectral_rgb is not None:
             self.star_spectral_rgb = np.array([spectral_rgb], dtype=float)
 
@@ -511,7 +528,7 @@ class MultiColorStarField(StarField):
     Used by the chromatic + seeing tutorial scenario.
     """
 
-    # (label, x_arcsec, y_arcsec, magnitude, (R, G, B) tint, T_eff_K)
+    # (label, x_arcsec, y_arcsec, magnitude, T_eff_K)
     # Stars are spread across a wide field (~80″ extent) so achromat
     # chromatic halos (~5″ radius) fit comfortably around each isolated
     # star without overlapping its neighbours.
@@ -520,12 +537,20 @@ class MultiColorStarField(StarField):
     # T_eff_K / 11604.5.
     # y-positions shifted down ~6″ from a symmetric ±18 layout so the top row
     # clears the spectral-class labels / legend in the upper-left (R4.8c).
+    #
+    # R5.1: the table used to carry a hand-written RGB tint next to the
+    # temperature. That was a second, disagreeing source of truth — the
+    # tabulated "Antares" tint was (1.00, 0.45, 0.10) where a 3500 K
+    # blackbody is (1.00, 0.79, 0.43) — and since the polychromatic path
+    # derives colour from T_eff while the monochromatic path used the tint,
+    # the SAME star changed colour when you toggled polychromatic. Colour is
+    # now derived from T_eff on both paths.
     STARS = [
-        ("Antares-like (M1)",   -25.0, +12.0,  0.5, (1.00, 0.45, 0.10),  3500),
-        ("Arcturus-like (K1)",  +25.0, +12.0,  0.0, (1.00, 0.70, 0.30),  4300),
-        ("Sun-like (G2)",       -25.0, -24.0,  0.5, (1.00, 0.92, 0.65),  5800),
-        ("Sirius-like (A1)",      0.0,  -6.0, -0.5, (0.85, 0.92, 1.00),  9900),
-        ("Spica-like (B1)",     +25.0, -24.0,  0.0, (0.55, 0.75, 1.00), 22400),
+        ("Antares-like (M1)",   -25.0, +12.0,  0.5,  3500),
+        ("Arcturus-like (K1)",  +25.0, +12.0,  0.0,  4300),
+        ("Sun-like (G2)",       -25.0, -24.0,  0.5,  5800),
+        ("Sirius-like (A1)",      0.0,  -6.0, -0.5,  9900),
+        ("Spica-like (B1)",     +25.0, -24.0,  0.0, 22400),
     ]
 
     def __init__(self, field_radius_arcsec: float = 40.0):
@@ -536,39 +561,51 @@ class MultiColorStarField(StarField):
         xs = [s[1] for s in self.STARS]
         ys = [s[2] for s in self.STARS]
         mags = [s[3] for s in self.STARS]
-        # Per-star spectral RGB tint (used by the polychromatic per-star
-        # renderer to weight each channel)
-        self.star_spectral_rgb = np.array([s[4] for s in self.STARS])
         self.star_labels = [s[0] for s in self.STARS]
         # Effective surface temperatures in Kelvin
-        self.star_temperatures_K = np.array([s[5] for s in self.STARS])
+        self.star_temperatures_K = np.array([s[4] for s in self.STARS])
+        # Per-star spectral RGB tint, DERIVED from the temperature via
+        # Planck's law + the CIE 1931 observer. Used by the monochromatic
+        # path; the polychromatic path integrates the same SED per band, so
+        # both agree by construction.
+        self.star_spectral_rgb = np.array(
+            [_blackbody_linear_srgb(T) for T in self.star_temperatures_K])
         self.star_x_arcsec = np.array(xs)
         self.star_y_arcsec = np.array(ys)
         self.star_magnitudes = np.array(mags)
         self.num_stars = len(xs)
 
 
-# Spectral-class RGB palette (approximate visual tints, normalised so the
-# brightest channel ≈ 1.0). Ordered hot → cool. Used by ShowcaseStarField to
+# Spectral-class RGB palette, ordered hot → cool. Used by ShowcaseStarField to
 # give the population realistic colour so the star-field showcase reads as a
 # rich, varied field rather than uniform white dots.
 #
-# R4.15: real stars show only SUBTLE colour to the dark-adapted eye — even an
-# M giant is a pale orange, not a saturated red — so the raw blackbody-ish
-# tints below read as "very pronounced". Each tint is desaturated toward white
-# by keeping only _TINT_STRENGTH of its departure from white.
-_TINT_STRENGTH = 0.45
-_SPECTRAL_PALETTE_RAW = [
-    ("O/B", (0.62, 0.72, 1.00), 25000),   # blue
-    ("A",   (0.80, 0.86, 1.00), 9500),    # blue-white
-    ("F",   (1.00, 0.97, 0.92), 7000),    # white
-    ("G",   (1.00, 0.93, 0.72), 5600),    # yellow (Sun-like)
-    ("K",   (1.00, 0.78, 0.48), 4300),    # orange
-    ("M",   (1.00, 0.52, 0.32), 3400),    # red
+# R5.1: these are now DERIVED, not tabulated — each class's characteristic
+# effective temperature is pushed through Planck's law and the CIE 1931 2°
+# observer to get a true linear-sRGB colour (see
+# `telescope_sim.physics.colorimetry.blackbody_linear_srgb`). The previous
+# hand-tuned tuples were wrong in places: they gave class F a *warm* tint
+# (hue 38°) when a 7000 K blackbody is slightly BLUE of the sRGB white point
+# (hue 211°), because sRGB white is D65 ≈ 6500 K.
+#
+# These are the stars' TRUE colours, as a camera would record them. They are
+# deliberately NOT pre-desaturated here. Real stars look pale to the eye
+# because of rod/cone physiology, not because their light is pale — so that
+# desaturation now happens once, at the eye-view display stage, via
+# `colorimetry.apply_mesopic_desaturation`. Baking it into the source as well
+# (the old `_TINT_STRENGTH = 0.45`) double-counted it in the eye view and
+# wrongly applied it to the detector view, which has no cones to fatigue.
+_SPECTRAL_CLASS_TEMPERATURES = [
+    ("O/B", 25000),   # blue
+    ("A",    9500),   # blue-white
+    ("F",    7000),   # white
+    ("G",    5600),   # yellow (Sun-like)
+    ("K",    4300),   # orange
+    ("M",    3400),   # red
 ]
 _SPECTRAL_PALETTE = [
-    (name, tuple(1.0 + _TINT_STRENGTH * (c - 1.0) for c in rgb), temp)
-    for name, rgb, temp in _SPECTRAL_PALETTE_RAW
+    (name, tuple(_blackbody_linear_srgb(temp)), temp)
+    for name, temp in _SPECTRAL_CLASS_TEMPERATURES
 ]
 
 
@@ -652,20 +689,17 @@ class ShowcaseStarField(StarField):
         self.star_x_arcsec = np.array(xs)
         self.star_y_arcsec = np.array(ys)
         self.star_magnitudes = np.array(mags)
-        # Magnitude-dependent colour desaturation. Through a real telescope
-        # most stars look white/pale — only the BRIGHT ones show a tint,
-        # because faint sources fall below the eye's cone (photopic) colour
-        # threshold. Blend each star's spectral tint toward white by an amount
-        # set by its magnitude: the brightest stars keep their full tint, the
-        # faintest go nearly white. (Previously every star carried a fully
-        # saturated tint, which read as unrealistically "candy"-coloured.)
-        tints = np.array(rgb, dtype=float)
-        mags_arr = np.array(mags)
-        m_bright, m_faint, sat_min = -1.0, 4.5, 0.15
-        frac = np.clip((mags_arr - m_bright) / (m_faint - m_bright), 0.0, 1.0)
-        sat = 1.0 - frac * (1.0 - sat_min)          # 1.0 (bright) → sat_min (faint)
-        white = np.ones((len(mags_arr), 3))
-        self.star_spectral_rgb = white + sat[:, None] * (tints - white)
+        # True stellar colours, undesaturated. Through a real telescope most
+        # stars DO look white/pale, with only the bright ones showing a tint —
+        # but that is the observer's rod/cone physiology, not the starlight.
+        # This used to be modelled here as a magnitude-dependent blend toward
+        # white, which meant a faint star was *recorded* pale even in the
+        # detector view, where a camera would faithfully capture its colour.
+        # The effect now lives once, at the eye-view display stage, where it
+        # keys off actual pixel flux — so a faint star fades to grey in the
+        # eye pane and keeps its colour in the detector pane, which is what
+        # really happens (R5.1). See colorimetry.apply_mesopic_desaturation.
+        self.star_spectral_rgb = np.array(rgb, dtype=float)
         self.num_stars = len(xs)
 
 

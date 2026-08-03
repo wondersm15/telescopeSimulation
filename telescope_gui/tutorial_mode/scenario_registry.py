@@ -311,9 +311,27 @@ SCENARIOS: list[ScenarioDefinition] = [
         act=1, act_label="Isolated Effects",
         description=(
             "Applies to: any telescope. START HERE — this is how every later "
-            "brightness image is shown. The SAME warm-orange star (mag 0) is "
-            "rendered two ways at once: as your EYE sees it (left) and as a "
-            "camera/DETECTOR records it (right).\n"
+            "brightness image is shown. The SAME star is rendered two ways at "
+            "once: as your EYE sees it (left) and as a camera/DETECTOR "
+            "records it (right).\n"
+            "WHY IS IT ORANGE? The star is an Arcturus-like K giant, surface "
+            "temperature 4300 K — cooler than the Sun, so its blackbody "
+            "spectrum peaks redward. Its true colour, from Planck's law "
+            "through the CIE 1931 observer, is RGB (1.00, 0.91, 0.66): a "
+            "pale amber. That is what the DETECTOR pane shows, and it is "
+            "honest — a camera records a star's real colour at any "
+            "brightness.\n"
+            "WOULD YOUR EYE SEE THAT MUCH ORANGE? No — and the two panes now "
+            "disagree on purpose. Colour vision is band-pass in brightness: "
+            "too dim and only your rods respond (rods are a single receptor "
+            "type, so scotopic vision is genuinely colourless — this is why "
+            "nebulae look grey in an eyepiece but colourful in photos); too "
+            "bright and the cones bleach toward white. Only the middle of the "
+            "range shows full colour. So on the EYE side the blazing core "
+            "whitens and the faint outer halo drains to grey, leaving a thin "
+            "amber annulus — while the DETECTOR pane keeps the same amber "
+            "everywhere. Watch the star's colour, not just its brightness, as "
+            "you change Aperture.\n"
             "WHY THEY DIFFER: a detector is LINEAR — pixel value ∝ collected "
             "photons — so faint things stay faint and bright things clip. Your "
             "eye is LOGARITHMIC (Weber–Fechner): it compresses a huge range of "
@@ -323,6 +341,16 @@ SCENARIOS: list[ScenarioDefinition] = [
             "APERTURE affects BOTH panes: a bigger mirror collects more light, "
             "so the star brightens on the eye AND the detector (∝ aperture²). "
             "Change the Aperture control and watch both respond.\n"
+            "HOW MUCH DYNAMIC RANGE A LINEAR DISPLAY THROWS AWAY (R5.2): the "
+            "screen has 256 levels per channel, spread evenly from 0 to the "
+            "saturation level. A feature at 1.75% of the peak — the 1st Airy "
+            "ring — lands on level 4 of 255, which is black to your eye. The "
+            "2nd ring, 0.42%, lands on level 1. That is why the 2D linear "
+            "image looks like a bare dot even though the 1D profile plots "
+            "clearly show a few % of signal: the 1D plot rescales its y-axis "
+            "per curve, the 2D image cannot. The eye's asinh stretch maps that "
+            "same 1.75% to level 119 — over a quarter of the way up the "
+            "screen. Same photons, ~30× the displayed contrast.\n"
             "EXPOSURE & SATURATION are the DETECTOR's story: a detector "
             "integrates over time, so raising Exposure builds signal until the "
             "core SATURATES and clips to pure white (the colour burns out "
@@ -339,8 +367,12 @@ SCENARIOS: list[ScenarioDefinition] = [
         ),
         before_source=SourceConfig(
             source_type="PointSource",
+            # R5.1: was a hand-picked tint (1.0, 0.7, 0.35) — saturation 0.65,
+            # more orange than ANY real star. Now the colour is derived from
+            # a 4300 K blackbody (a K1 giant, i.e. Arcturus), which comes out
+            # at (1.00, 0.91, 0.66) — saturation 0.34.
             kwargs={"magnitude": 0.0, "field_angle_arcsec": 0.0,
-                    "spectral_rgb": (1.0, 0.7, 0.35)},
+                    "temperature_k": 4300.0},
         ),
         before_label="Eye view (perceptual)",
         after_telescope=TelescopeConfig(
@@ -349,8 +381,12 @@ SCENARIOS: list[ScenarioDefinition] = [
         ),
         after_source=SourceConfig(
             source_type="PointSource",
+            # R5.1: was a hand-picked tint (1.0, 0.7, 0.35) — saturation 0.65,
+            # more orange than ANY real star. Now the colour is derived from
+            # a 4300 K blackbody (a K1 giant, i.e. Arcturus), which comes out
+            # at (1.00, 0.91, 0.66) — saturation 0.34.
             kwargs={"magnitude": 0.0, "field_angle_arcsec": 0.0,
-                    "spectral_rgb": (1.0, 0.7, 0.35)},
+                    "temperature_k": 4300.0},
         ),
         after_label="Detector view (linear) →",
         plot_function="plot_source_image",
@@ -447,7 +483,19 @@ SCENARIOS: list[ScenarioDefinition] = [
             "A central secondary mirror blocks part of the aperture, transferring energy from the "
             "Airy disk into the surrounding rings. This reduces peak intensity (Strehl ratio) and "
             "increases contrast in the secondary rings. Compare the theoretical Strehl (1\u2212\u03b5\u00b2)\u00b2 "
-            "to the simulation."
+            "to the simulation.\n"
+            "WHY THE RINGS LOOK ABSENT IN 2D WHILE THE 1D CUT SHOWS THEM "
+            "(R5.2): they are there \u2014 they are just far below what a linear "
+            "display can render. Unobstructed, the 1st ring peaks at 1.75% of "
+            "the core, which is pixel level 4 out of 255: black, for all "
+            "practical purposes. At \u03b5 = 0.33 it rises to 5.4% \u2014 still only "
+            "level 14. The 2nd ring is 0.42% \u2192 level 1. The 1D plot shows "
+            "them because its y-axis is rescaled per curve (often log); the "
+            "2D image cannot cheat that way. Raise Exposure, or switch to the "
+            "Eye view whose asinh stretch lifts that same 1.75% to level 119, "
+            "and the rings appear. Nothing changed in the data \u2014 only the "
+            "mapping from intensity to screen brightness. This is precisely "
+            "why astrophotographers stretch their images."
         ),
         learn_more_section="Central Obstruction",
         before_telescope=_CLEAN_200MM,

@@ -5291,22 +5291,23 @@ def _render_source_through_telescope(
     if image_rgb is not None:
         image_rgb = image_rgb / saturation_divisor
 
-    # Cone-desaturation (Eye-view modes only): at high linear flux the
-    # eye's colour discrimination drops — bright sources appear
-    # whitewashed. Blend RGB toward grey luminance by w = I / (I + I_sat)
-    # so high-flux pixels desaturate smoothly without ad-hoc thresholds.
-    # I_sat = 0.5 means a pixel at the saturation level is ~half-blended
-    # toward grey; very bright (clipped) pixels are nearly white.
+    # Mesopic desaturation (Eye-view modes only). Human colour vision is
+    # band-pass in luminance: rods alone below the cone threshold (no colour
+    # at all), full chroma through the mesopic/photopic range, then bleaching
+    # to white at the top. The renderer previously modelled only the BRIGHT
+    # end, so faint flux kept its full saturation — and because the asinh
+    # stretch below lifts faint flux to near-full display brightness while
+    # preserving chroma, a star's outer halo (a couple of % of the peak, far
+    # under any real cone threshold) was displayed as a large area of vivid
+    # colour that no observer could ever see. See
+    # `telescope_sim.physics.colorimetry.mesopic_chroma_gain` for the model
+    # and its ⚠️ calibration caveat. Detector view deliberately skips this:
+    # a camera has no cones and records the same chromaticity at any flux.
     if (display_stretch in ("log", "log_integrated")
             and image_rgb is not None):
-        lum = (0.2126 * image_rgb[..., 0]
-               + 0.7152 * image_rgb[..., 1]
-               + 0.0722 * image_rgb[..., 2])
-        I_sat = 0.5
-        w_desat = lum / (lum + I_sat)
-        # Broadcast: blend each channel toward luminance.
-        image_rgb = (image_rgb
-                     + w_desat[..., None] * (lum[..., None] - image_rgb))
+        from telescope_sim.physics.colorimetry import (
+            apply_mesopic_desaturation)
+        image_rgb = apply_mesopic_desaturation(image_rgb)
 
     if display_stretch in ("log", "log_integrated"):
         a = 0.001
