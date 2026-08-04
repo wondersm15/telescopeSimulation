@@ -609,3 +609,159 @@ the section-level hint.
 
 The left-hand ray-trace panel labels its x-axis but not its y-axis. That is R5.5c's
 "consistent axis labelling (x, y, z) across all figures" — logged here, fixed in **Batch O**.
+
+---
+
+## R5.5 — BATCH O: FIX APPLIED AND VERIFIED THROUGH THE GUI
+
+> **User feedback (verbatim).** *"the narrative needs updated now that there are two
+> plots on the right including the inset plot, which I think is on its side. Ensure
+> consistent axis labeling (i.e., x, y, z) across all figures. Also, I think you should
+> update the color zscale to not be symmetric- the plot is inherently not symmetric
+> (i.e., the left side is positive and right side negative). You should have a color
+> scheme that distinguishes clearly where each comes from, consistent across all
+> figures."*
+
+Four distinct defects, all in the Spherical Aberration module but three of them
+project-wide.
+
+### R5.5d — the colour scale (the substantive one)
+
+**What was wrong.** `_pupil_colormap_colors` mapped **|h|** onto viridis. A ray entering
+the pupil at −80 mm and one entering at +80 mm therefore got the *same* colour — on a
+figure whose entire point is that those two rays land on **opposite** sides of the
+focus. The reader could see how far out in the pupil a ray came from but not which
+half it came from, which is exactly the asymmetry the feedback names.
+
+**The scheme now.** Colour carries both facts about the entry point:
+
+| Channel | Meaning |
+|---|---|
+| **Hue** | which side — `Blues` for h < 0 (below axis), `Oranges` for h > 0 (above) |
+| **Depth** | how far out — pale near the axis, deep at the mirror edge |
+
+Both wings start at `_PUPIL_RAMP_FLOOR = 0.40` rather than 0, so a paraxial ray is
+never near-white on a white panel (`#94c4df` / `#fda762` at the seam). The norm is
+`Normalize(-h_max, +h_max)`, so h = 0 always sits at the middle of the colourbar.
+
+Applied at all four **meridional** call sites — `_draw_ray_fan_panel`,
+`_draw_sa_caustic_panel`, `plot_ray_trace_pupil_colored`, `_draw_coma_ray_fan_panel`.
+
+**The deliberate exception.** 2D spot diagrams (`_draw_spot_diagram`,
+`_draw_coma_spot_grid`) replicate each pupil zone around all 36 azimuths, so a dot
+there has a radius but no "above/below" — a signed scale would be a lie. They keep a
+magnitude ramp, built as the **positive wing of the same map** (`_pupil_magnitude_cmap`),
+so both families speak one colour language. Their colourbars now say so
+(`PUPIL_ZONE_CBAR_LABEL`), and the stale claim that the spot grid used "the same scale
+as the ray fan" was corrected.
+
+Two knock-on fixes found while checking the rendered result rather than the code:
+
+- The coma spot grid was drawn on a **near-black** panel because viridis put its
+  *bright* end at the mirror edge. The shared ramp *deepens* toward the edge, so a deep
+  brown on `#101010` would have hidden the very rays the caption points at. The panels
+  are now light (`#fbfbfb`) with a dark dashed Airy circle.
+- The pupil-coloured ray trace drew its mirrors in **steel-blue**, and blue now *means*
+  "ray from below the axis". That figure alone draws its optics in neutral `#444444`.
+
+### R5.5b — the caustic was on its side
+
+`_draw_sa_caustic_panel` plotted Δz **horizontally** while the ray trace beside it and
+the chromatic zoom panel both plot the optical axis **vertically**. Same picture,
+rotated 90°, which is what the feedback describes. It is now axis-vertical: transverse
+x (µm) across, Δz from paraxial focus (mm) up, light climbing the page exactly as in
+the trace on the left. `plot_spherical_focal_analysis` is used by that one scenario
+(a Newtonian), so "light travels up the page" is a true statement there, not a
+generic one.
+
+### R5.5c — axis labelling
+
+Three conventions coexisted. The project now uses the standard optical one — **z is
+the optical axis, x and y are transverse** — everywhere:
+
+| Figure kind | Was | Now |
+|---|---|---|
+| Side views (ray trace, chromatic zoom) | `x (mm)` / **`y (mm)`** | `x, transverse (mm)` / `z, along optical axis (mm)` |
+| Spot diagram | `Position on focal plane (mm)` ×2 | `x on focal plane (mm)` / `y on focal plane (mm)` |
+| PSF / focal-plane images (×4 sites) | `Position (mm)` ×2 | `x on focal plane (mm)` / `y on focal plane (mm)` |
+| Coma spot grid | `µm` ×2 | `x (µm)` / `y (µm)` |
+| Rendered scene | `Field angle (arcsec)` ×2 | `Field angle, x (arcsec)` / `Field angle, y (arcsec)` |
+| SA caustic | `Δz` on x, `x` on y | `x` on x, `Δz` on y (see R5.5b) |
+
+The old `y (mm)` for the optical axis was the collision: it meant something different
+from the `y` of every focal-plane view. The convention is now documented in the
+reference under **Axis and colour conventions in the figures**, reachable from the
+module's Learn-more link.
+
+### R5.5a — the narrative
+
+The description still described one right-hand plot and a magnified **inset** that
+R4.7 had already deleted. Rewritten to state the axis convention, state the colour
+convention, and walk the two right-hand panels separately — including *why* the top
+explains the bottom (the edge rays have already crossed by the time they reach the
+paraxial plane, so at that plane they are diverging again and their Δx is large and of
+opposite sign — which is what bends the fan into an S). The side label went from
+"Ray fan (h vs Δx) →" to "Focal caustic (top) + ray fan (bottom) →".
+
+### Found while verifying, fixed in the same batch
+
+- **Ray fan annotation boxes sat on the data.** The cheat-sheet was pinned upper-left
+  and the RMS box lower-right — precisely the two corners the spherical S-curve
+  occupies. Moved to lower-left / upper-right, the two corners free for both an S-curve
+  and a flat (corrected) fan.
+- **Coma figure caption overprinted the in-panel verdict.** The verdict sat at
+  `y = -0.22` in axes coordinates, i.e. inside the figure caption's band. Moved inside
+  the axes on a translucent background; caption re-flowed to explicit lines.
+- **Coma panel titles collided** with each other and with the suptitle at GUI render
+  size. Titles set to 10 pt and `wspace` 0.3 → 0.38 (the right panel's y-label lives in
+  that gap).
+- **The caustic panel was broken in the PARABOLIC state** — the `primary_type`
+  dropdown's other value, i.e. exactly the "skipping state combinations" failure mode.
+  Found by rendering it; invisible in the source. Three separate defects, all in the
+  corrected case:
+  1. **Degenerate axis.** `z_span` floored at `1e-3` mm, which is not a physical
+     scale. A parabolic primary puts every crossing at Δz ≈ 0, so the panel zoomed to
+     ±1 µm of numerical noise. Now floored at 3× the **Rayleigh depth of focus**,
+     `±2λN²` — real physics, and the yardstick the panel needed anyway.
+  2. **The converging cone collapsed to one vertical line.** The per-ray slope came
+     from `-Δx/z_cross`, which is algebraically right but 0/0 when the ray crosses at
+     the paraxial plane; the code fell back to `slope = 0`. Now taken directly from
+     the convergence geometry, `dx/dz = -h/f` — identical wherever the old form was
+     defined, and correct where it wasn't.
+  3. **The title asserted an effect that wasn't there.** "marginal rays cross BELOW ★"
+     is simply false for a parabola. Now state-aware: "No caustic — every ray crosses
+     at ★, inside the depth of focus" when corrected, and in the aberrated case it
+     *quantifies* the error against the tolerance ("by 80× the depth of focus")
+     instead of leaving a bare millimetre figure with no scale.
+
+  A green depth-of-focus band is now drawn in both states, and the narrative explains
+  it — the same "is this a lot or a little?" context R5.4 asks for on vignetting.
+
+  Checked for other instances of the same pattern: no other figure derives a line
+  slope from a crossing point, and the only other effect-asserting title (the coma
+  ray-fan verdict) was already state-aware.
+
+### Verification
+
+- **511 tests pass**, up from 489. 22 new across five classes:
+  `TestPupilColourLanguage`, `TestFigureAxisConventions`,
+  `TestSphericalCausticOrientation`, `TestCausticInTheCorrectedState`,
+  `TestSphericalNarrativeMatchesTheFigures`.
+- **The new tests are load-bearing**: run against the pre-Batch-O files, **16 of 17**
+  of the first round fail; all **5** of `TestCausticInTheCorrectedState` fail against
+  the pre-fix caustic panel. The 17th
+  (`test_marginal_rays_cross_below_the_paraxial_focus`) passed
+  coincidentally because the old horizontal ylim spanned ±210 µm and so contained the
+  −1.36 mm crossing; it was tightened to assert the vertical axis is on the Δz scale,
+  which is what actually fails if the panel is rotated back.
+- **Rendered through the real GUI**, sidebar navigation, not a `_load_scenario` bypass:
+  spherical (both primaries), coma (both view modes), chromatic. Read the PNGs; that
+  is how the three knock-on defects above were found — none of them are visible in the
+  source.
+- **Full control sweep** over all 17 implemented scenarios — sidebar navigation, then
+  every combo index, every checkbox state and every slider at min/mid/max — auditing
+  every figure that reaches a canvas: **2475 renders, 0 null figures, 0 banned axis
+  labels, 0 stale colourbar labels**, and 14 distinct (xlabel, ylabel) pairs, all
+  conforming to the z-is-the-optical-axis convention. The spherical module was swept
+  again on its own after the depth-of-focus fix landed (40 renders across both
+  primaries and both slider extremes, same clean audit).

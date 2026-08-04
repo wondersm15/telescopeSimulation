@@ -689,20 +689,45 @@ SCENARIOS: list[ScenarioDefinition] = [
         description=(
             "A spherical primary mirror does not focus all rays to the same point — "
             "marginal rays focus closer than paraxial rays.\n"
-            "Left: the ray trace, with each ray coloured by its pupil entry zone "
-            "(dark = central, bright = marginal). The magnified inset zooms into "
-            "the focal region so you can SEE the bright marginal rays crossing "
-            "the axis short of the dim paraxial rays.\n"
-            "Right: the ray fan. The vertical axis, Δx, is the TRANSVERSE RAY "
-            "ERROR — for a ray entering the pupil at height h, how far from the "
-            "ideal focus it actually lands, measured ACROSS the optical axis "
-            "(the same x-direction as the ray trace on the left). Plotting Δx "
-            "against h reveals the aberration by its curve shape: a cubic "
-            "(S-shape) is the signature of spherical aberration; coma gives a "
-            "parabolic (U-shape) fan, defocus a linear one, and a perfect "
-            "system gives Δx ≈ 0 at every h.\n"
-            "Toggle to a parabolic primary to see both the inset spread vanish "
-            "and the ray-fan curve collapse to ≈ 0 (diffraction-limited)."
+            "Axes, everywhere in this module: z is the OPTICAL AXIS, x and y are "
+            "ACROSS it. The two side views (left, and the caustic top-right) both "
+            "put z up the page, so light climbs from the mirror toward the focus "
+            "in each of them.\n"
+            "Colour, everywhere in this module: it encodes the ray's SIGNED pupil "
+            "entry height h — BLUE for rays entering below the axis, ORANGE for "
+            "above, deepening toward the mirror edge. So colour tells you both how "
+            "far out in the pupil a ray came from and which side it came from — "
+            "which matters here, because the two sides land on OPPOSITE sides of "
+            "the focus.\n"
+            "Left: the ray trace, each ray coloured that way. Follow a deep blue "
+            "or deep orange ray in and watch where it crosses.\n"
+            "Right, TOP — the focal-region caustic. This is a magnified side view "
+            "of the focal region from the left-hand trace. Horizontal is transverse "
+            "x in µm; vertical is Δz, the distance along the optical axis from the "
+            "paraxial focus (★), in mm. The deep marginal rays cross BELOW ★ — "
+            "short of it — while the pale near-axis rays cross at ★. That axial "
+            "spread of crossing points IS spherical aberration.\n"
+            "The green band is the DEPTH OF FOCUS: the Rayleigh quarter-wave "
+            "tolerance ±2λN², inside which a crossing is close enough to ★ to "
+            "cost nothing. It is the yardstick for 'is this a lot?' — with a "
+            "spherical primary the marginal rays miss by tens of times the "
+            "band, and the panel title says by how many.\n"
+            "Right, BOTTOM — the ray fan, taken at one plane: the paraxial focal "
+            "plane through ★. The vertical axis, Δx, is the TRANSVERSE RAY ERROR — "
+            "for a ray entering the pupil at height h, how far from the ideal focus "
+            "it lands, measured ACROSS the optical axis (the same x as the trace on "
+            "the left). Plotting Δx against h reveals the aberration by its curve "
+            "shape: a cubic (S-shape) is the signature of spherical aberration; "
+            "coma gives a parabolic (U-shape) fan, defocus a linear one, and a "
+            "perfect system gives Δx ≈ 0 at every h.\n"
+            "The two right-hand panels are the same defect seen two ways, and the "
+            "top explains the bottom: the edge rays have ALREADY crossed by the "
+            "time they reach ★, so at that plane they are diverging again and their "
+            "Δx is large and of opposite sign to the mid-zone rays — which is "
+            "exactly what bends the fan into an S.\n"
+            "Toggle to a parabolic primary to see the caustic collapse to a single "
+            "crossing at ★ and the ray-fan curve flatten to ≈ 0 "
+            "(diffraction-limited)."
         ),
         learn_more_section="Spherical Aberration",
         before_telescope=TelescopeConfig(
@@ -718,7 +743,7 @@ SCENARIOS: list[ScenarioDefinition] = [
             enable_obstruction=False, spider_vanes=0,
         ),
         after_source=_POINT,
-        after_label="Ray fan (h vs Δx) →",
+        after_label="Focal caustic (top) + ray fan (bottom) →",
         plot_function="plot_ray_trace_pupil_colored",
         secondary_plot_function="plot_spherical_focal_analysis",
         theory_function="compute_spherical_aberration_theory",

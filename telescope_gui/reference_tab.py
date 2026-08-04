@@ -513,6 +513,41 @@ errors are below the diffraction limit.</li>
 sum of these plus the higher-order aberrations above; the ray-fan curve shape is
 how you tell them apart.</p>
 
+<h3>Axis and colour conventions in the figures</h3>
+<p>Every ray figure in this program follows the standard optical-design
+convention, so a coordinate means the same thing wherever you see it:</p>
+<ul>
+<li><b>z</b> is the <b>optical axis</b> &mdash; the direction light travels down
+the tube. <b>x</b> and <b>y</b> are <b>transverse</b>, i.e. across the beam.</li>
+<li><b>Side views</b> (ray traces, the chromatic focal-region zoom, the spherical
+focal caustic) are drawn with <b>z running up the page</b> and the transverse
+coordinate <i>x</i> across it. They are all the same way round, so you can carry
+your eye from one to the next.</li>
+<li><b>Focal-plane views</b> (spot diagrams, PSF images, rendered scenes) look
+<i>along</i> z, so they are labelled <b>x</b> and <b>y</b>. There is no z to
+show: the whole image lies in one plane.</li>
+<li>&Delta;<b>x</b> is a <i>transverse ray error</i> (how far off a ray lands);
+&Delta;<b>z</b> is a <i>longitudinal</i> one (how far along the axis a ray or a
+colour focuses). Chromatic and spherical aberration each produce both, which is
+why they get a side-view panel and a focal-plane panel.</li>
+</ul>
+<p>Where rays are coloured by where they entered the pupil, the colour carries
+<b>both</b> facts about the entry point:</p>
+<ul>
+<li><b>Hue = which side.</b> <span style="color:#2166ac;"><b>Blue</b></span> for
+rays entering <i>below</i> the axis (h &lt; 0),
+<span style="color:#b3510a;"><b>orange</b></span> for <i>above</i> (h &gt; 0).
+This matters because the two halves of the pupil land on <i>opposite</i> sides of
+the focus &mdash; a single-hue scale on |h| hides that, and the figures are not
+symmetric.</li>
+<li><b>Depth = how far out.</b> Pale near the axis, deep at the mirror
+edge.</li>
+<li><b>2D spot diagrams are the exception, on purpose.</b> They replicate each
+pupil zone around <i>every</i> azimuth, so a dot there has a radius but no
+&ldquo;above/below&rdquo;. Those use the orange half alone, as an unsigned
+<i>pupil zone</i> scale, and their colourbars say so.</li>
+</ul>
+
 <h3>7. Vignetting</h3>
 <p>At off-axis field angles, the cone of light from the primary is partially
 clipped by the secondary mirror (or tube walls), reducing illumination toward

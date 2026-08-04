@@ -320,8 +320,13 @@ def _draw_ray_trace(ax: plt.Axes, rays: list[Ray], components: dict,
         _draw_eyepiece_icon(ax, rays, focal_area, components)
 
     ax.set_aspect("equal")
-    ax.set_xlabel("x (mm)")
-    ax.set_ylabel("y (mm)")
+    # R5.5c: one axis convention across every figure in the project —
+    # z is the OPTICAL AXIS, x and y are transverse. This is a side view, so
+    # the optical axis runs up the page and the transverse coordinate is x.
+    # (It used to be labelled "y (mm)", which collided with the transverse y
+    # of the focal-plane views.)
+    ax.set_xlabel("x, transverse (mm)")
+    ax.set_ylabel("z, along optical axis (mm)")
     ax.set_title(title)
     ax.legend(loc="upper right", fontsize="small")
     ax.grid(True, alpha=0.3)
@@ -676,12 +681,16 @@ def _draw_spot_diagram(ax: plt.Axes, y_offsets: np.ndarray | None,
             normalized_radii = aperture_radii / max_radius
             for i in range(n_rays):
                 color2d[i * n_azimuth:(i + 1) * n_azimuth] = normalized_radii[i]
-            scatter = ax.scatter(x2d, y2d, c=color2d, cmap='viridis',
+            # Unsigned pupil ZONE (each ray is replicated around every
+            # azimuth), so this uses the positive wing of the shared pupil
+            # ramp — see the R5.5d note by `_pupil_diverging_cmap`.
+            scatter = ax.scatter(x2d, y2d, c=color2d,
+                               cmap=_pupil_magnitude_cmap(),
                                edgecolors='none', s=12, alpha=0.7, zorder=3,
                                vmin=0, vmax=1, label="Ray positions")
             cbar = plt.colorbar(scatter, ax=ax, pad=0.02, fraction=0.046)
-            cbar.set_label('Incident Radial Distance\n(normalized)',
-                          rotation=270, labelpad=20, fontsize=9)
+            cbar.set_label(PUPIL_ZONE_CBAR_LABEL,
+                          rotation=270, labelpad=24, fontsize=8)
         else:
             ax.scatter(x2d, y2d, c="gold", edgecolors="none",
                       s=12, alpha=0.7, zorder=3, label="Ray positions")
@@ -708,8 +717,8 @@ def _draw_spot_diagram(ax: plt.Axes, y_offsets: np.ndarray | None,
     ax.set_xlim(-margin, margin)
     ax.set_ylim(-margin, margin)
     ax.set_aspect("equal")
-    ax.set_xlabel("Position on focal plane (mm)")
-    ax.set_ylabel("Position on focal plane (mm)")
+    ax.set_xlabel("x on focal plane (mm)")
+    ax.set_ylabel("y on focal plane (mm)")
     ax.set_title(title)
     # Compact legend pinned outside the data region so it doesn't cover the
     # spot itself in small tutorial figures.
@@ -839,21 +848,74 @@ def _paraxial_focal_plane_offsets(rays: list[Ray]) -> np.ndarray | None:
     return np.asarray(offsets, dtype=float)
 
 
+# ---------------------------------------------------------------------------
+# Pupil colour language (R5.5d) — shared by every ray-fan / caustic / spot plot
+# ---------------------------------------------------------------------------
+# Meridional figures (ray fan, SA caustic, pupil-coloured side-view trace) plot
+# a SIGNED pupil entry height h, and the sign is the whole lesson: a ray
+# entering at -80 mm lands on the opposite side of the focus from one entering
+# at +80 mm. Colouring by |h| — what this module used to do — gave those two
+# rays the SAME colour, so a reader could not tell which side of the pupil any
+# trace came from, on a plot that is inherently not symmetric.
+#
+# The scheme: HUE carries the side (blue = negative h, orange = positive h),
+# DEPTH carries |h| (pale near the axis, deep at the mirror edge). Both wings
+# start at _PUPIL_RAMP_FLOOR rather than 0 so the paraxial rays are never
+# near-white against a white background.
+#
+# 2D spot diagrams are the exception, and deliberately so: they replicate each
+# ray around every azimuth, so only the pupil ZONE |h| exists there and a
+# signed scale would be a lie. They use the positive wing of the same ramp, so
+# the two families still speak one colour language.
+_PUPIL_NEG_CMAP = "Blues"
+_PUPIL_POS_CMAP = "Oranges"
+_PUPIL_RAMP_FLOOR = 0.40
+
+
+def _pupil_diverging_cmap(n: int = 256):
+    """Blue (−h) → pale → orange (+h) colormap for SIGNED pupil height."""
+    from matplotlib.colors import LinearSegmentedColormap
+    half = n // 2
+    neg = plt.get_cmap(_PUPIL_NEG_CMAP)(
+        np.linspace(1.0, _PUPIL_RAMP_FLOOR, half))
+    pos = plt.get_cmap(_PUPIL_POS_CMAP)(
+        np.linspace(_PUPIL_RAMP_FLOOR, 1.0, n - half))
+    return LinearSegmentedColormap.from_list(
+        "pupil_signed", np.vstack([neg, pos]))
+
+
+def _pupil_magnitude_cmap(n: int = 256):
+    """Pale → deep orange ramp for |h|, where the sign is not defined."""
+    from matplotlib.colors import LinearSegmentedColormap
+    return LinearSegmentedColormap.from_list(
+        "pupil_zone",
+        plt.get_cmap(_PUPIL_POS_CMAP)(
+            np.linspace(_PUPIL_RAMP_FLOOR, 1.0, n)))
+
+
+#: Colorbar labels, defined once so the wording cannot drift between figures.
+#: No directional arrows: these bars are drawn vertically, and a rotated "←"
+#: means something different from a horizontal one. Name the colours instead.
+PUPIL_SIGNED_CBAR_LABEL = ("Pupil entry height h (mm)\n"
+                           "blue = below axis · orange = above axis")
+PUPIL_ZONE_CBAR_LABEL = ("Pupil zone |h|  (0 = centre, 1 = mirror edge)\n"
+                         "unsigned: every azimuth is drawn")
+
+
 def _pupil_colormap_colors(entry_heights: np.ndarray):
     """Return (per-ray RGBA colors, ScalarMappable for colorbar).
 
-    Maps |entry height| onto the viridis colormap so the innermost
-    rays are dark and marginal rays are bright. Symmetric: a ray at
-    +5 mm and -5 mm share the same colour, because in a rotationally
-    symmetric system they belong to the same pupil zone.
+    Maps the SIGNED entry height onto the diverging pupil colormap on limits
+    symmetric about zero, so h = 0 always sits at the pale centre of the bar
+    and the two halves of the pupil are never confusable (R5.5d).
     """
-    h_abs = np.abs(entry_heights)
-    h_max = float(np.max(h_abs)) if len(h_abs) > 0 else 1.0
+    h = np.asarray(entry_heights, dtype=float)
+    h_max = float(np.max(np.abs(h))) if h.size else 1.0
     if h_max <= 0:
         h_max = 1.0
-    norm = plt.Normalize(vmin=0.0, vmax=h_max)
-    cmap = plt.get_cmap("viridis")
-    colors = [cmap(norm(float(h))) for h in h_abs]
+    norm = plt.Normalize(vmin=-h_max, vmax=h_max)
+    cmap = _pupil_diverging_cmap()
+    colors = [cmap(norm(float(v))) for v in h]
     sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
     sm.set_array([])
     return colors, sm
@@ -910,19 +972,24 @@ def _draw_ray_fan_panel(ax, telescope, wavelength_nm, h_sorted, y_sorted,
     airy_um = 1.22 * (wavelength_nm * 1e-6) * f_ratio * 1000.0
     y_half = max(max_um * 1.15, 3.0 * airy_um)
     ax.set_ylim(-y_half, y_half)
+    # Annotation corners: the spherical S-curve rises on the left and falls on
+    # the right, so the two FREE corners are lower-left and upper-right. The
+    # boxes used to sit upper-left and lower-right — i.e. exactly on top of the
+    # marginal-ray points that carry the lesson. A flat (corrected) fan hugs
+    # Δx ≈ 0 through the middle and leaves both of these corners clear too.
     if show_cheatsheet:
         cheat = ("Δx(h) shape ↔ aberration\n"
                  "  S-shape (h³)   spherical\n"
                  "  U-shape (h²)   coma\n"
                  "  tilt (h¹)      defocus\n"
                  "  ≈ 0 across h   diffraction-limited")
-        ax.text(0.02, 0.98, cheat, transform=ax.transAxes,
-                va="top", ha="left", fontsize=6.5,
+        ax.text(0.02, 0.02, cheat, transform=ax.transAxes,
+                va="bottom", ha="left", fontsize=6.5,
                 bbox=dict(boxstyle="round,pad=0.3", facecolor="white",
                           alpha=0.85, edgecolor="gray"))
-    ax.text(0.98, 0.02,
+    ax.text(0.98, 0.98,
             f"RMS Δx = {rms_um:.2f} µm\nmax |Δx| = {max_um:.2f} µm",
-            transform=ax.transAxes, va="bottom", ha="right", fontsize=6.5,
+            transform=ax.transAxes, va="top", ha="right", fontsize=6.5,
             bbox=dict(boxstyle="round,pad=0.3", facecolor="white",
                       alpha=0.85, edgecolor="gray"))
     return sm
@@ -950,32 +1017,72 @@ def _draw_sa_caustic_panel(ax, telescope, wavelength_nm, h_sorted, y_sorted):
             continue
         z_cross_mm.append(dx * f / h)   # axial offset of this ray's crossing
     z_cross_mm = np.array(z_cross_mm)
+    # Rayleigh depth of focus (quarter-wave criterion): a defocus of δz costs
+    # a peak wavefront error δz/(8N²), so the tolerance either side of best
+    # focus is δz = 2λN². Real physics, and the yardstick this panel needs —
+    # without it "the marginal rays cross 1.4 mm early" has no scale, and the
+    # CORRECTED (parabolic) case has nothing to show at all.
+    dof_half_mm = 2.0 * (wavelength_nm * 1e-6) * telescope.focal_ratio ** 2
+    z_cross_max = float(np.max(np.abs(z_cross_mm)))
     # Draw each ray as a converging line through (Δx at z=0) with slope
     # toward its own axis crossing; extend a little past both.
-    z_span = max(float(np.max(np.abs(z_cross_mm))) * 1.4, 1e-3)
+    #
+    # The floor used to be 1e-3 mm, which is not a physical scale: with a
+    # parabolic primary every ray crosses at Δz ≈ 0, so the panel zoomed to
+    # ±1 µm of numerical noise and drew a single bare vertical line. Floor it
+    # at 3× the depth of focus instead, so the corrected case reads as "the
+    # whole bundle crosses inside the in-focus band" (R5.5b, parabolic state).
+    z_span = max(z_cross_max * 1.4, dof_half_mm * 3.0)
     x_span_um = max(float(np.max(np.abs(y_sorted))) * 1000.0 * 1.3,
                     airy_um * 2.0)
-    for h, dx, zc, c in zip(h_sorted, y_sorted, z_cross_mm, colors):
+    #: True when the whole caustic collapses inside the depth of focus — i.e.
+    #: the primary is corrected and there is no caustic left to point at.
+    diffraction_limited = z_cross_max <= dof_half_mm
+    # R5.5b: the optical axis is drawn VERTICALLY here, the same way round as
+    # the side-view ray trace this panel sits beside. It used to be drawn
+    # axis-horizontal, i.e. the same picture rotated 90°, so the reader had to
+    # mentally re-orient between the two halves of the module.
+    for h, dx, c in zip(h_sorted, y_sorted, colors):
         dx_um = dx * 1000.0
-        # Line in (z_mm, x_um): passes through (0, dx_um) and (zc, 0).
+        # Line in (x_um, z_mm) through (dx_um, 0), sloping at the ray's own
+        # convergence angle. Take the slope from the geometry (dx/dz = -h/f,
+        # i.e. 1000·(-h/f) in µm per mm) rather than from -dx_um/zc: the two
+        # are algebraically identical whenever the ray crosses off the
+        # paraxial plane, but a corrected primary puts EVERY crossing at
+        # zc = 0, and the old form fell back to slope = 0 there and drew the
+        # whole converging cone as one vertical line.
+        slope = -1000.0 * h / f
         z0, z1 = -z_span, z_span
-        if abs(zc) > 1e-9:
-            slope = -dx_um / zc            # x_um per mm of z
-        else:
-            slope = 0.0
-        x0 = dx_um + slope * (z0 - 0.0)
-        x1 = dx_um + slope * (z1 - 0.0)
-        ax.plot([z0, z1], [x0, x1], color=c, linewidth=1.0, alpha=0.8)
-    ax.axhline(0.0, color="black", linestyle=":", alpha=0.4)
-    ax.axvline(0.0, color="gray", linestyle="--", alpha=0.6)
+        x0 = dx_um + slope * z0
+        x1 = dx_um + slope * z1
+        ax.plot([x0, x1], [z0, z1], color=c, linewidth=1.0, alpha=0.8)
+    # Depth-of-focus band: anywhere inside it the image is in focus to better
+    # than a quarter wave, so a crossing inside the band costs nothing.
+    ax.axhspan(-dof_half_mm, dof_half_mm, color="#2ca02c", alpha=0.12,
+               zorder=0,
+               label=f"Depth of focus ±{dof_half_mm * 1000:.0f} µm")
+    ax.axvline(0.0, color="black", linestyle=":", alpha=0.4)   # optical axis
+    ax.axhline(0.0, color="gray", linestyle="--", alpha=0.6)   # paraxial plane
     ax.plot(0.0, 0.0, marker="*", color="red", markersize=11, zorder=6,
             label="Paraxial focus")
-    ax.set_xlim(-z_span, z_span)
-    ax.set_ylim(-x_span_um, x_span_um)
-    ax.set_xlabel("Axial distance from paraxial focus, Δz (mm)")
-    ax.set_ylabel("Transverse, x (µm)")
-    ax.set_title("Focal-region caustic — marginal rays cross short of ★",
-                 fontsize=10)
+    ax.set_xlim(-x_span_um, x_span_um)
+    ax.set_ylim(-z_span, z_span)
+    ax.set_xlabel("Transverse x (µm)")
+    ax.set_ylabel("Δz from paraxial focus (mm)\n(+ = past focus)")
+    # The title states what the panel actually shows in THIS state. A
+    # parabolic primary has no caustic — every ray crosses at ★ — so claiming
+    # "marginal rays cross BELOW ★" there would be simply false.
+    if diffraction_limited:
+        ax.set_title("No caustic — every ray crosses at ★, inside the "
+                     "depth of focus\n"
+                     "(light travels up the page, as in the trace on the "
+                     "left)", fontsize=9)
+    else:
+        ax.set_title("Focal-region caustic — marginal rays cross BELOW ★, "
+                     f"by {z_cross_max / dof_half_mm:.0f}× the depth of "
+                     "focus\n"
+                     "(light travels up the page, as in the trace on the "
+                     "left)", fontsize=9)
     ax.grid(True, alpha=0.3)
     ax.legend(fontsize=7, loc="upper right")
 
@@ -1008,8 +1115,9 @@ def plot_spherical_focal_analysis(telescope: Telescope,
     sm = _draw_ray_fan_panel(ax_bot, telescope, wavelength_nm,
                              h_sorted, y_sorted)
     cbar = fig.colorbar(sm, ax=[ax_top, ax_bot], shrink=0.6,
-                        label="|Pupil zone| (mm)", pad=0.02)
+                        label=PUPIL_SIGNED_CBAR_LABEL, pad=0.02)
     cbar.ax.tick_params(labelsize=7)
+    cbar.ax.yaxis.label.set_size(8)
     if save_path:
         fig.savefig(save_path, dpi=150, bbox_inches="tight")
     return fig
@@ -1033,12 +1141,12 @@ def plot_ray_fan_telescope(telescope: Telescope,
       • linear (Δx ∝ h)     → defocus
       • flat (Δx ≈ 0)        → diffraction-limited
 
-    Each point is one traced ray, coloured by its pupil entry height
-    using a viridis colormap that the companion ray-trace plot
-    (`plot_ray_trace_pupil_colored`) reuses — so the viewer can pick
-    a coloured ray in the ray trace and find the same colour in the
-    ray fan, connecting "where the ray came from" to "where it
-    landed".
+    Each point is one traced ray, coloured by its SIGNED pupil entry height
+    on the shared diverging scale that the companion ray-trace plot
+    (`plot_ray_trace_pupil_colored`) reuses — so the viewer can pick a
+    coloured ray in the ray trace and find the same colour in the ray fan,
+    connecting "where the ray came from" to "where it landed", including
+    which side of the pupil it came from.
     """
     h_sorted, y_sorted = _trace_ray_fan(telescope, wavelength_nm, num_rays)
     fig, ax = plt.subplots(figsize=figsize)
@@ -1048,8 +1156,10 @@ def plot_ray_fan_telescope(telescope: Telescope,
         return fig
     sm = _draw_ray_fan_panel(ax, telescope, wavelength_nm, h_sorted, y_sorted,
                              title=title)
-    cbar = fig.colorbar(sm, ax=ax, shrink=0.85, label="|Pupil zone| (mm)")
+    cbar = fig.colorbar(sm, ax=ax, shrink=0.85,
+                        label=PUPIL_SIGNED_CBAR_LABEL)
     cbar.ax.tick_params(labelsize=8)
+    cbar.ax.yaxis.label.set_size(8)
     plt.tight_layout()
     if save_path:
         fig.savefig(save_path, dpi=150, bbox_inches="tight")
@@ -1065,11 +1175,12 @@ def plot_ray_trace_pupil_colored(telescope: Telescope,
                                   ) -> plt.Figure:
     """Ray-trace plot with rays coloured by pupil entry zone.
 
-    Companion to `plot_ray_fan_telescope` — both use the same
-    viridis-on-|h| colormap so a ray in the trace and its point in
-    the ray fan share a colour. Useful for spherical-aberration
-    teaching: the user can see that the bright (marginal) rays
-    cross the axis short of the dim (paraxial) rays.
+    Companion to `plot_ray_fan_telescope` — both use the same signed
+    diverging pupil colormap (blue below the axis, orange above, deepening
+    toward the mirror edge) so a ray in the trace and its point in the ray
+    fan share a colour. Useful for spherical-aberration teaching: the user
+    can see that the deeply-coloured (marginal) rays cross the axis short of
+    the pale (paraxial) ones, and which half of the pupil each came from.
     """
     from telescope_sim.source.light_source import create_parallel_rays
     rays = create_parallel_rays(
@@ -1095,6 +1206,11 @@ def plot_ray_trace_pupil_colored(telescope: Telescope,
     _draw_ray_trace(ax, rays, components, title=title,
                     ray_color="gold",  # ignored when ray_colors is set
                     ray_alpha=0.85,
+                    # R5.5d: neutral optics. Everywhere else the mirrors are
+                    # steel-blue, but here blue MEANS "ray from below the
+                    # axis" — a steel-blue mirror would put a second meaning
+                    # on the same hue in the one figure where it matters.
+                    mirror_color="#444444",
                     show_tube=True,
                     ray_colors=colors,
                     show_focal_marker=False)
@@ -1199,10 +1315,11 @@ def plot_ray_trace_pupil_colored(telescope: Telescope,
     else:
         _handles = _labels = None
 
-    # Add pupil-zone colorbar — matches the ray-fan panel
+    # Add pupil-height colorbar — matches the ray-fan panel
     cbar = fig.colorbar(sm, ax=ax, shrink=0.7, pad=0.02,
-                        label="|Pupil zone| (mm)")
+                        label=PUPIL_SIGNED_CBAR_LABEL)
     cbar.ax.tick_params(labelsize=8)
+    cbar.ax.yaxis.label.set_size(8)
 
     plt.tight_layout()
     # Figure-level legend added AFTER tight_layout so it isn't squeezed into
@@ -1543,8 +1660,8 @@ def _draw_focal_image(ax: plt.Axes, telescope: Telescope,
     ax.imshow(image, extent=[-half_size, half_size, -half_size, half_size],
               origin="lower", cmap=colormap, vmin=0, vmax=1)
 
-    ax.set_xlabel("Position (mm)")
-    ax.set_ylabel("Position (mm)")
+    ax.set_xlabel("x on focal plane (mm)")
+    ax.set_ylabel("y on focal plane (mm)")
     ax.set_title(title)
 
     method_label = ("Analytical" if info["method"] == "analytical"
@@ -2710,8 +2827,9 @@ def _draw_focal_region_zoom(ax, telescope, focus_wavelength_nm=None,
                 transform=ax.get_yaxis_transform(),
                 verticalalignment="bottom", alpha=0.95, zorder=5)
 
-    ax.set_xlabel("x (mm)", fontsize=8)
-    ax.set_ylabel("y (mm)", fontsize=8)
+    # R5.5c: side view — z is the optical axis (see `_draw_ray_trace`).
+    ax.set_xlabel("x, transverse (mm)", fontsize=8)
+    ax.set_ylabel("z, along optical axis (mm)", fontsize=8)
     ax.tick_params(labelsize=7)
     # Make explicit that this is a magnified view of the focal region marked
     # by the dashed box on the ray-trace plot on the LEFT (R3.6c).
@@ -3520,8 +3638,8 @@ def plot_psf_2d(
                               linewidth=1.0, alpha=0.6)
     ax.add_patch(airy_circle)
 
-    ax.set_xlabel("Position (mm)")
-    ax.set_ylabel("Position (mm)")
+    ax.set_xlabel("x on focal plane (mm)")
+    ax.set_ylabel("y on focal plane (mm)")
     vane_info = (f", {telescope.spider_vanes} spider vanes"
                  if telescope.spider_vanes > 0 else "")
     ax.set_title(f"2D PSF ({scale_label}) — \u03bb={wavelength_nm:.0f}nm, "
@@ -3623,8 +3741,8 @@ def plot_psf_2d_comparison(
                                   color="white", linestyle="--",
                                   linewidth=1.0, alpha=0.6)
         ax.add_patch(airy_circle)
-        ax.set_xlabel("Position (mm)")
-        ax.set_ylabel("Position (mm)")
+        ax.set_xlabel("x on focal plane (mm)")
+        ax.set_ylabel("y on focal plane (mm)")
 
         vane_info = (f", {telescope.spider_vanes} vanes"
                      if telescope.spider_vanes > 0 else ", no vanes")
@@ -3722,8 +3840,8 @@ def plot_coma_spot(
                                     f"{airy_radius * 1000:.2f} \u00b5m")
     ax.add_patch(airy_circle)
 
-    ax.set_xlabel("Position (mm)")
-    ax.set_ylabel("Position (mm)")
+    ax.set_xlabel("x on focal plane (mm)")
+    ax.set_ylabel("y on focal plane (mm)")
     ax.set_title(f"Coma Spot — {field_angle_arcsec:.1f}\" off-axis, "
                  f"f/{f_ratio:.1f}")
     ax.legend(loc="upper right", fontsize=8)
@@ -3765,7 +3883,7 @@ def _draw_coma_rms_panel(ax, angles, rms_values, airy_radius_mm, cff,
                    label=f"Coma-free field: {cff:.1f}\"")
     ax.set_xlabel("Off-axis angle (arcsec)")
     ax.set_ylabel("RMS coma (µm)")
-    ax.set_title("RMS Coma vs Field Angle")
+    ax.set_title("RMS coma vs field angle", fontsize=10)
     ax.legend(fontsize=8)
     ax.grid(True, alpha=0.3)
     # Fixed range so changing f-ratio rescales the curve, not the axes.
@@ -3782,8 +3900,8 @@ def _draw_coma_ray_fan_panel(ax, telescope, field_angle_arcsec, obs_ratio,
     the pupil bend the same way, unlike spherical aberration's odd cubic
     (S-shape) or defocus's straight line.  This panel uses the SAME Seidel
     coma coefficient C_s = θ·h²/(4f) as the spot grid, so the two views tell
-    one consistent story, and the SAME viridis-on-|h| pupil colours as the
-    companion ray-fan / ray-trace plots.
+    one consistent story, and the SAME signed pupil colours (blue below the
+    axis, orange above) as the companion ray-fan / ray-trace plots.
 
     NOTE: Seidel 3rd-order approximation, tangential section — valid for
     small field angles.
@@ -3821,24 +3939,28 @@ def _draw_coma_ray_fan_panel(ax, telescope, field_angle_arcsec, obs_ratio,
 
     ax.set_xlabel("Pupil entry height h (mm)")
     ax.set_ylabel("Transverse ray error at focal plane, Δx (µm)")
-    ax.set_title(f"Coma ray fan @ {field_angle_arcsec:.0f}″ off-axis")
+    ax.set_title(f"Coma ray fan @ {field_angle_arcsec:.0f}″ off-axis",
+                 fontsize=10)
     ax.grid(True, alpha=0.3)
     ax.legend(fontsize=7, loc="upper center")
     # One-line reading guide anchored in the panel.
     inside = dx_max <= airy_um
-    verdict = ("coma ≤ Airy radius → diffraction-limited here"
-               if inside else "parabola = coma; both pupil edges bend the "
-               "same way")
-    ax.text(0.5, -0.22, verdict, transform=ax.transAxes, fontsize=7,
-            ha="center", va="top", style="italic", color="gray")
+    verdict = ("coma ≤ Airy radius: diffraction-limited"
+               if inside else "parabola ⇒ coma (both edges bend alike)")
+    # Inside the axes: at y = -0.22 this sat in the same band as the
+    # figure-level caption below and the two overprinted each other.
+    ax.text(0.5, 0.015, verdict, transform=ax.transAxes, fontsize=7,
+            ha="center", va="bottom", style="italic", color="dimgray",
+            bbox=dict(boxstyle="round,pad=0.25", facecolor="white",
+                      alpha=0.8, edgecolor="none"))
     return sm
 
 
 def _draw_coma_spot_grid(fig, subspec, spot_data, airy_radius_mm,
                          shared_lim_um, pupil_cmap, pupil_norm, pupil_sm):
     """Spot-diagram grid: one small 2D spot per sampled field angle, dots
-    coloured by pupil zone (dark = central, bright = marginal rays).  The
-    comet tail is visibly built from the bright marginal rays.
+    coloured by pupil zone (pale = central, deep = marginal rays).  The
+    comet tail is visibly built from the deep marginal rays.
     """
     n_spots = len(spot_data)
     cols = 2 if n_spots <= 4 else min(n_spots, 3)
@@ -3861,23 +3983,28 @@ def _draw_coma_spot_grid(fig, subspec, spot_data, airy_radius_mm,
         ax_spot.set_xlim(-shared_lim_um, shared_lim_um)
         ax_spot.set_ylim(-shared_lim_um, shared_lim_um)
         airy_c = plt.Circle((0, 0), airy_radius_mm * 1000, fill=False,
-                            color="white", linestyle="--",
+                            color="#333333", linestyle="--",
                             linewidth=0.9, alpha=0.9)
         ax_spot.add_patch(airy_c)
-        ax_spot.set_facecolor("#101010")
+        # R5.5d: light panel. These used to be near-black with a bright-yellow
+        # marginal end (viridis); the shared pupil ramp deepens toward the
+        # mirror edge, and a deep brown on near-black would have hidden the
+        # very rays the caption points at.
+        ax_spot.set_facecolor("#fbfbfb")
         ax_spot.set_aspect("equal")
         ax_spot.set_title(f"{angle:.0f}\"", fontsize=9)
         ax_spot.tick_params(labelsize=6)
+        # R5.5c: name the axes (x/y transverse, z is the optical axis and is
+        # out of the page here) rather than leaving bare units.
         if r == rows - 1:
-            ax_spot.set_xlabel("µm", fontsize=7)
+            ax_spot.set_xlabel("x (µm)", fontsize=7)
         if c == 0:
-            ax_spot.set_ylabel("µm", fontsize=7)
+            ax_spot.set_ylabel("y (µm)", fontsize=7)
 
     if spot_axes:
         cbar = fig.colorbar(pupil_sm, ax=spot_axes, fraction=0.046,
                             pad=0.04, shrink=0.85)
-        cbar.set_label("Pupil zone  (0 = centre, 1 = mirror edge)",
-                       fontsize=7)
+        cbar.set_label(PUPIL_ZONE_CBAR_LABEL, fontsize=7)
         cbar.ax.tick_params(labelsize=6)
 
 
@@ -3961,7 +4088,9 @@ def plot_coma_field_analysis(
     # Leave a bottom band free for the grey caption text (R4.10: the two
     # panels' x-axis labels were overlapping it — shrink the panels' vertical
     # extent to make room). top leaves space for the suptitle.
-    gs = fig.add_gridspec(1, 2, width_ratios=[1, 1.2], wspace=0.3,
+    # wspace: the right panel's y-label lives in this gap; 0.3 pressed it
+    # against the left panel at GUI render sizes.
+    gs = fig.add_gridspec(1, 2, width_ratios=[1, 1.2], wspace=0.38,
                           bottom=0.22, top=0.9)
 
     if view_mode == "ray_fan":
@@ -3975,14 +4104,15 @@ def plot_coma_field_analysis(
                              max_field_arcsec)
         fig.text(
             0.5, 0.015,
-            "Left: coma's optical-design signature — a PARABOLA "
-            "(Δx ∝ h²), both pupil edges bending the same way "
-            "(vs spherical aberration's S-cubic). Dots coloured by pupil zone "
-            "(dark = centre, bright = marginal). Right: how RMS coma grows with "
-            "field angle for this f-ratio. Slow the scope (raise focal length) "
-            "and the parabola flattens into the Airy band.",
+            "Left: coma's signature — a PARABOLA (Δx ∝ h²), both pupil edges "
+            "bending the SAME way (spherical aberration's S-cubic bends them "
+            "opposite ways).\n"
+            "Colour = signed pupil height: blue below the axis, orange above, "
+            "deepening toward the mirror edge.\n"
+            "Right: how RMS coma grows with field angle. Slow the scope (raise "
+            "focal length) and the parabola flattens into the Airy band.",
             fontsize=7, ha="center", va="bottom", style="italic",
-            color="gray", wrap=True)
+            color="gray")
     else:
         # LEFT: RMS-vs-field context curve.
         ax_rms = fig.add_subplot(gs[0])
@@ -3990,8 +4120,13 @@ def plot_coma_field_analysis(
                              max_field_arcsec)
 
         # RIGHT: spot-diagram grid.  Pre-compute every spot pattern, colouring
-        # each ray by its pupil zone on the shared viridis-on-|h| scale so the
-        # comet tail visibly grows out of the marginal rays.
+        # each ray by its pupil ZONE so the comet tail visibly grows out of the
+        # marginal rays. Unsigned on purpose (R5.5d): these spots replicate
+        # every pupil zone around all 36 azimuths, so a ray here has no single
+        # "above/below the axis" — only a radius. It therefore uses the
+        # POSITIVE WING of the signed meridional map (pale → deep orange), so
+        # the two families still read as one colour language even though only
+        # the meridional plots can carry a sign.
         spot_data = []
         for angle in spot_angles:
             x_off, y_off, pupil_r = compute_coma_spot(
@@ -4005,7 +4140,7 @@ def plot_coma_field_analysis(
         # mirror edge regardless of aperture (colours mean the same zone in
         # every panel and match the ray-fan colorbar).
         pupil_norm = plt.Normalize(vmin=0.0, vmax=1.0)
-        pupil_cmap = plt.get_cmap("viridis")
+        pupil_cmap = _pupil_magnitude_cmap()
         pupil_sm = plt.cm.ScalarMappable(cmap=pupil_cmap, norm=pupil_norm)
         pupil_sm.set_array([])
         # Fixed spot window (independent of f-ratio) so the SAME field angle's
@@ -4021,11 +4156,13 @@ def plot_coma_field_analysis(
         fig.text(
             0.72, 0.015,
             "Dots: ray intersections over a grid of pupil zones and azimuths, "
-            "coloured by pupil zone\n"
-            "(dark = central rays, bright = marginal/edge rays — same scale "
-            "as the ray fan).\n"
-            "The comet tail is built almost entirely from the bright marginal "
-            "rays. White circle = Airy disk.",
+            "coloured by pupil ZONE\n"
+            "(pale = central rays, deep orange = marginal/edge rays). Unsigned "
+            "here — every azimuth is drawn, so\n"
+            "\"above/below the axis\" has no meaning; only the meridional ray "
+            "fan carries the blue half.\n"
+            "The comet tail is built almost entirely from the deep marginal "
+            "rays. Dashed circle = Airy disk.",
             fontsize=7, ha="center", va="bottom", style="italic", color="gray")
 
     fig.suptitle(f"Coma Field Analysis — {telescope.primary_diameter:.0f}mm "
@@ -5782,8 +5919,8 @@ def plot_source_image(telescope: Telescope,
     _draw_source_on_axes(ax, display_image, display_rgb,
                          display_half_fov, log_scale, colormap, fig)
 
-    ax.set_xlabel("Field angle (arcsec)")
-    ax.set_ylabel("Field angle (arcsec)")
+    ax.set_xlabel("Field angle, x (arcsec)")
+    ax.set_ylabel("Field angle, y (arcsec)")
 
     fig_title = title
     if eyepiece is not None:

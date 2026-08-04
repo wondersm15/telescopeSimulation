@@ -628,3 +628,274 @@ class TestLearnMoreDeepLink:
         qapp.processEvents()
         assert win.tab_widget.count() == 2
         win.close()
+
+
+# ------------------------------------------------------------------
+# R5.5b/c/d — figure conventions: axis naming and pupil colour language
+# ------------------------------------------------------------------
+
+class TestPupilColourLanguage:
+    """The pupil colour scale must distinguish which SIDE of the pupil a ray
+    entered from (R5.5d). Colouring on |h| made a ray at -80 mm and one at
+    +80 mm identical, on a figure whose whole point is that those two rays
+    land on opposite sides of the focus.
+    """
+
+    def test_opposite_pupil_halves_get_different_colours(self):
+        import numpy as np
+        from telescope_sim.plotting.ray_trace_plot import _pupil_colormap_colors
+        colors, _ = _pupil_colormap_colors(np.array([-80.0, 80.0]))
+        assert colors[0] != colors[1]
+
+    def test_colour_depends_only_on_signed_height(self):
+        import numpy as np
+        from telescope_sim.plotting.ray_trace_plot import _pupil_colormap_colors
+        colors, _ = _pupil_colormap_colors(np.array([-40.0, 40.0, -40.0]))
+        assert colors[0] == colors[2]      # same ray height -> same colour
+        assert colors[0] != colors[1]      # mirrored ray    -> different
+
+    def test_scale_is_centred_on_the_optical_axis(self):
+        """h = 0 must sit at the middle of the colourbar, so the two wings are
+        readable as 'below' and 'above' rather than an arbitrary split."""
+        import numpy as np
+        from telescope_sim.plotting.ray_trace_plot import _pupil_colormap_colors
+        _, sm = _pupil_colormap_colors(np.array([-95.0, -10.0, 0.0, 95.0]))
+        assert sm.norm.vmin == pytest.approx(-sm.norm.vmax)
+        assert sm.norm.vmax == pytest.approx(95.0)
+
+    def test_near_axis_rays_are_not_washed_out(self):
+        """Both wings start part-way up their ramp; a paraxial ray must stay
+        visible against the white panel background."""
+        import numpy as np
+        from telescope_sim.plotting.ray_trace_plot import _pupil_diverging_cmap
+        cmap = _pupil_diverging_cmap()
+        for v in (0.49, 0.51):
+            r, g, b, _ = cmap(v)
+            assert min(r, g, b) < 0.90     # not near-white
+
+    def test_blue_wing_is_below_axis_and_orange_above(self):
+        import numpy as np
+        from telescope_sim.plotting.ray_trace_plot import _pupil_colormap_colors
+        colors, _ = _pupil_colormap_colors(np.array([-95.0, 95.0]))
+        neg_r, neg_g, neg_b, _ = colors[0]
+        pos_r, pos_g, pos_b, _ = colors[1]
+        assert neg_b > neg_r               # negative h reads blue
+        assert pos_r > pos_b               # positive h reads orange
+
+    def test_2d_spot_scale_stays_unsigned_and_shares_the_hue(self):
+        """A 2D spot replicates every azimuth, so 'above/below' is undefined
+        there — it keeps a magnitude ramp, deliberately the positive (orange)
+        wing so both families speak one colour language."""
+        from telescope_sim.plotting.ray_trace_plot import (
+            _pupil_magnitude_cmap, _pupil_diverging_cmap)
+        mag = _pupil_magnitude_cmap()
+        div = _pupil_diverging_cmap()
+        assert mag(0.0)[:3] == pytest.approx(div(0.5)[:3], abs=0.02)
+        assert mag(1.0)[:3] == pytest.approx(div(1.0)[:3], abs=0.02)
+        # Monotonically darkening, so "deep = edge" holds.
+        assert sum(mag(1.0)[:3]) < sum(mag(0.0)[:3])
+
+    def test_no_figure_still_advertises_an_unsigned_meridional_scale(self):
+        """The old '|Pupil zone| (mm)' colourbar label claimed a magnitude
+        scale on plots that are now signed."""
+        from pathlib import Path
+        src = Path("telescope_sim/plotting/ray_trace_plot.py").read_text()
+        assert "|Pupil zone| (mm)" not in src
+
+
+class TestFigureAxisConventions:
+    """R5.5c: z is the optical axis, x/y are transverse — in every figure."""
+
+    def _fig_labels(self, fig):
+        return [(ax.get_xlabel(), ax.get_ylabel()) for ax in fig.axes]
+
+    def test_side_views_name_the_optical_axis_z(self):
+        import matplotlib.pyplot as plt
+        from telescope_sim.plotting.ray_trace_plot import (
+            plot_ray_trace_pupil_colored)
+        from telescope_gui.telescope_builder import build_telescope
+        t = build_telescope(telescope_type="Newtonian", diameter=200,
+                            focal_length=800, primary_type="spherical",
+                            enable_obstruction=False, spider_vanes=0)
+        fig = plot_ray_trace_pupil_colored(t)
+        xl, yl = self._fig_labels(fig)[0]
+        assert xl == "x, transverse (mm)"
+        assert "z" in yl and "optical axis" in yl
+        plt.close(fig)
+
+    def test_focal_plane_views_name_both_transverse_axes(self):
+        """They used to read 'Position (mm)' on both axes, which named
+        neither."""
+        from pathlib import Path
+        src = Path("telescope_sim/plotting/ray_trace_plot.py").read_text()
+        assert 'set_xlabel("Position (mm)")' not in src
+        assert 'set_ylabel("Position (mm)")' not in src
+        assert 'set_xlabel("Position on focal plane (mm)")' not in src
+
+    def test_no_side_view_calls_the_optical_axis_y(self):
+        """'y (mm)' for the optical axis collided with the transverse y of the
+        focal-plane views — the ambiguity R5.5c was raised about."""
+        from pathlib import Path
+        src = Path("telescope_sim/plotting/ray_trace_plot.py").read_text()
+        assert '_ylabel("y (mm)")' not in src
+        assert '_ylabel("y (mm)", fontsize=8)' not in src
+
+
+class TestSphericalCausticOrientation:
+    """R5.5b: the caustic used to be drawn with the optical axis HORIZONTAL,
+    next to a ray trace drawn with it VERTICAL — the same picture rotated 90°,
+    which is what read as 'on its side'.
+    """
+
+    def _analysis_fig(self):
+        from telescope_sim.plotting.ray_trace_plot import (
+            plot_spherical_focal_analysis)
+        from telescope_gui.telescope_builder import build_telescope
+        t = build_telescope(telescope_type="Newtonian", diameter=200,
+                            focal_length=800, primary_type="spherical",
+                            enable_obstruction=False, spider_vanes=0)
+        return plot_spherical_focal_analysis(t)
+
+    def test_caustic_optical_axis_is_vertical(self):
+        import matplotlib.pyplot as plt
+        fig = self._analysis_fig()
+        ax_caustic = fig.axes[0]
+        assert "Δz" in ax_caustic.get_ylabel()
+        assert ax_caustic.get_xlabel().startswith("Transverse x")
+        plt.close(fig)
+
+    def test_caustic_and_ray_trace_agree_on_which_axis_is_optical(self):
+        """Both panels the reader compares must put z on the same screen
+        axis, or the comparison silently transposes."""
+        import matplotlib.pyplot as plt
+        from telescope_sim.plotting.ray_trace_plot import (
+            plot_ray_trace_pupil_colored)
+        from telescope_gui.telescope_builder import build_telescope
+        t = build_telescope(telescope_type="Newtonian", diameter=200,
+                            focal_length=800, primary_type="spherical",
+                            enable_obstruction=False, spider_vanes=0)
+        trace = plot_ray_trace_pupil_colored(t)
+        analysis = self._analysis_fig()
+        trace_y = trace.axes[0].get_ylabel()
+        caustic_y = analysis.axes[0].get_ylabel()
+        assert "z" in trace_y and "z" in caustic_y
+        assert "x" in trace.axes[0].get_xlabel()
+        assert "x" in analysis.axes[0].get_xlabel()
+        plt.close(trace)
+        plt.close(analysis)
+
+    def test_marginal_rays_cross_below_the_paraxial_focus(self):
+        """The physics the rotation has to preserve: with z up the page and
+        light climbing, edge rays cross SHORT of the star, i.e. at Δz < 0."""
+        import numpy as np
+        import matplotlib.pyplot as plt
+        from telescope_sim.plotting.ray_trace_plot import _trace_ray_fan
+        from telescope_gui.telescope_builder import build_telescope
+        t = build_telescope(telescope_type="Newtonian", diameter=200,
+                            focal_length=800, primary_type="spherical",
+                            enable_obstruction=False, spider_vanes=0)
+        h, dx = _trace_ray_fan(t, 550.0, 21)
+        marginal = int(np.argmax(np.abs(h)))
+        z_cross = dx[marginal] * t.focal_length / h[marginal]
+        assert z_cross < 0
+        fig = self._analysis_fig()
+        lo, hi = fig.axes[0].get_ylim()
+        assert lo < z_cross < 0 < hi        # visible, below the star
+        # And the vertical axis really is the Δz axis (mm, a few times the
+        # marginal crossing), not the transverse one (µm, ~100× larger). This
+        # is what fails if the panel is ever rotated back on its side.
+        assert hi < 5.0 * abs(z_cross)
+        plt.close(fig)
+
+
+class TestCausticInTheCorrectedState:
+    """The primary_type dropdown's OTHER value. With a parabolic primary
+    every ray crosses at Δz = 0, and the panel used to collapse: the axis
+    floored at ±1 µm of numerical noise and every ray was drawn as the same
+    vertical line, under a title that still claimed a caustic existed.
+    """
+
+    def _fig(self, primary_type):
+        from telescope_sim.plotting.ray_trace_plot import (
+            plot_spherical_focal_analysis)
+        from telescope_gui.telescope_builder import build_telescope
+        t = build_telescope(telescope_type="Newtonian", diameter=200,
+                            focal_length=800, primary_type=primary_type,
+                            enable_obstruction=False, spider_vanes=0)
+        return plot_spherical_focal_analysis(t), t
+
+    def test_corrected_panel_is_scaled_to_the_depth_of_focus(self):
+        """Not to numerical noise: the visible Δz range must be a physical
+        tolerance the reader can compare the crossing against."""
+        import matplotlib.pyplot as plt
+        fig, t = self._fig("parabolic")
+        lo, hi = fig.axes[0].get_ylim()
+        dof_half = 2.0 * (550.0 * 1e-6) * t.focal_ratio ** 2
+        assert hi >= dof_half          # the band itself has to fit
+        assert hi <= 10.0 * dof_half   # but not be lost in a huge window
+        plt.close(fig)
+
+    def test_corrected_panel_draws_a_converging_cone_not_one_line(self):
+        """Every ray crosses at Δz = 0, but they still ARRIVE at different
+        angles — the cone must be visible, not collapsed onto the axis."""
+        import matplotlib.pyplot as plt
+        fig, _t = self._fig("parabolic")
+        ax = fig.axes[0]
+        spans = [abs(ln.get_xdata()[1] - ln.get_xdata()[0])
+                 for ln in ax.lines if len(ln.get_xdata()) == 2]
+        assert max(spans) > 1.0        # µm of transverse travel across the box
+        plt.close(fig)
+
+    def test_corrected_title_does_not_claim_a_caustic(self):
+        import matplotlib.pyplot as plt
+        fig, _t = self._fig("parabolic")
+        title = fig.axes[0].get_title().lower()
+        assert "no caustic" in title
+        assert "marginal rays cross below" not in title
+        plt.close(fig)
+
+    def test_aberrated_title_quantifies_the_error_against_that_tolerance(self):
+        import matplotlib.pyplot as plt
+        fig, _t = self._fig("spherical")
+        title = fig.axes[0].get_title().lower()
+        assert "marginal rays cross below" in title
+        assert "depth of focus" in title   # the yardstick, not a bare mm
+        plt.close(fig)
+
+    def test_depth_of_focus_band_is_drawn_in_both_states(self):
+        import matplotlib.pyplot as plt
+        for primary_type in ("spherical", "parabolic"):
+            fig, _t = self._fig(primary_type)
+            labels = [t.get_text() for t in fig.axes[0].get_legend().get_texts()]
+            assert any("depth of focus" in s.lower() for s in labels), \
+                primary_type
+            plt.close(fig)
+
+
+class TestSphericalNarrativeMatchesTheFigures:
+    """R5.5a: the description still described a single right-hand plot and an
+    inset that R4.7 had already removed."""
+
+    def _scenario(self):
+        from telescope_gui.tutorial_mode.scenario_registry import (
+            get_scenario_by_id)
+        return get_scenario_by_id("spherical_aberration")
+
+    def test_narrative_describes_both_right_hand_panels(self):
+        desc = self._scenario().description.lower()
+        assert "caustic" in desc
+        assert "ray fan" in desc
+        assert "top" in desc and "bottom" in desc
+
+    def test_narrative_does_not_promise_a_removed_inset(self):
+        desc = self._scenario().description.lower()
+        assert "inset" not in desc
+
+    def test_narrative_states_the_axis_and_colour_conventions(self):
+        desc = self._scenario().description.lower()
+        assert "optical axis" in desc
+        assert "blue" in desc and "orange" in desc
+
+    def test_side_label_mentions_both_panels(self):
+        label = self._scenario().after_label.lower()
+        assert "caustic" in label and "fan" in label
