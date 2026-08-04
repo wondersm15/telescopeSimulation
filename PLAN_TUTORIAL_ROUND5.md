@@ -506,3 +506,106 @@ belts are dim in eye mode and were chroma-preserved through the asinh stretch.
 Measured post-fix disk saturation is now p90 = 0.18 in eye mode vs 0.25 linear.
 Whether that fully answers R5.8 needs its own visual check; the aperture-
 brightness half of R5.8 is untouched and still open.
+
+---
+
+## R5.3 — BATCH N: FIX APPLIED AND VERIFIED THROUGH THE GUI
+
+### R5.3a — legends and readouts enlarged (`plot_polychromatic_ray_trace`)
+
+Now that R4 moved the legend out of the plot canvas, there is room for it:
+
+| Element | Before | After |
+|---|---|---|
+| Left-panel legend | `fontsize="small"` (≈8.3 pt) | **11 pt** |
+| Focal-offsets readout box | 7 pt | **9 pt** |
+| "Idealised SA removed" note | 7 pt | **9 pt** |
+| Focal-region zoom label (right panel) | 7 pt, alpha 0.9 | **9 pt**, alpha 0.95 |
+| "zoomed → (focal-plane view)" box marker | 6.5 pt | **8 pt** |
+
+The last one was not in the user's list — it was the *smallest* text in the same figure
+and unreadable at the tutorial's canvas size. It is anchored `ha="left"` from the zoom
+box's **right edge**, so growing it does not re-occlude the focal region R5.3b just cleared.
+
+### R5.3b — left-plot focal-plane label removed
+
+The `axhline` marking the chosen focal plane stays (its colour still encodes the
+wavelength); only the text that sat across the focal region is gone. The paired
+zoom panel on the right carries the label, reworded `"focal plane (550 nm)"` →
+**`"focused at 550 nm"`** so the single remaining instance reads as a statement of
+which plane the after-side plots were taken at.
+
+### R5.3c — the third attempt: RELOCATE + LINK, not more prose
+
+Two failed rounds wrote glass content the user never saw, because it lived under
+*Telescope Types → Refractor* near the top of the page while the module's "Learn more"
+line named **Chromatic Aberration**, ~4000 px further down. Both halves are now fixed.
+
+**Half 1 — the content moved to where the link points.** The 71-line block (design
+comparison table + cost/performance ladder + the "APOs stay ≤150 mm" paragraph) now sits
+in §4 Chromatic Aberration under `<h4>The glasses, and what each design class buys you</h4>`.
+The Refractor entry keeps a two-sentence summary and a pointer. Three cross-references that
+the move made stale or circular were rewritten (§4's opening no longer sends the reader
+*back* to Telescope Types; the block no longer cites "see Implemented Physics → Chromatic
+aberration" from inside that very section).
+
+The tutorial module's own description also gained the cost/performance sentence R5.3
+asked for ("each rung buys 3–5× less colour error for a similar jump in price"), so the
+answer is present *in the module* as well as behind the link.
+
+**Half 2 — "Learn more" is now a working deep link.**
+
+| Piece | Change |
+|---|---|
+| `reference_tab.py` | `_make_section` splits each body at top-level `<h3>` into one QLabel per subsection, so every heading is an addressable widget |
+| `reference_tab.py` | `_section_tokens` / `_match_anchor` / `_register_anchor` — 46 anchors registered |
+| `reference_tab.py` | `ParametersPhysicsTab.resolve_section()` / `.scroll_to_section()` |
+| `tutorial_tab.py` | label is now `<a href='reference:<section>'>`, emits `learn_more_requested` |
+| `main_window.py` | `_show_reference_section` adds Reference **beside** Tutorial and jumps to the heading |
+
+**Why token matching rather than an alias table.** The hints are human strings
+("Coma", "Spider Vanes") and the headings are numbered and longer
+("5. Coma & Seidel Aberrations", "3. Spider Vane Diffraction"). An alias table rots
+silently the moment a heading is edited. Matching normalises both sides (strip markup,
+drop leading numbering, lowercase, crude de-pluralise) and ranks candidates by
+*exact → heading-starts-with-hint → numbered physics section → fewest extra words*.
+That ordering is load-bearing:
+
+- **"Diffraction"** → `1. Diffraction (Wave Optics)`, not `3. Spider Vane Diffraction`
+  (decided by the prefix rule)
+- **"Coma"** → `5. Coma & Seidel Aberrations`, not the `Coma Field Analysis` plot
+  description (decided by the numbered rule)
+- **"Vignetting"** → `7. Vignetting`, not `Vignetting (diagram)` (exact match)
+
+Deleting those two tie-break terms makes `test_ambiguous_hints_pick_the_physics_heading`
+fail — checked, not assumed.
+
+**Navigation preserves state.** Following the link adds Reference as a second tab in
+Tutorial mode instead of switching the mode radio, so the scenario the reader is in the
+middle of is not destroyed. The tab is built lazily (constructing it renders the
+vignetting diagram) and reused on later clicks.
+
+**One registry hint upgraded.** `spherical_aberration` pointed at the whole
+`"Implemented Physics"` section; it now points at `"Spherical Aberration"` →
+`6. Spherical Aberration`. `saturn_rings` legitimately has no single heading and keeps
+the section-level hint.
+
+### Verification
+
+- **All 17 implemented scenarios navigated via the sidebar**, link activated on each:
+  0 failures, 0 unmatched hints, Reference tab opened and brought to front every time.
+- **11 distinct hints → 11 distinct scroll positions, in document order**
+  (Diffraction 3711 < Central Obstruction 3918 < Spider Vane 4260 < Chromatic 4425 <
+  Coma 5190 < Spherical 5427 < Vignetting 5760 < Seeing 5937 < Photometry 6156).
+  Monotonicity is the evidence the anchors point at the right places, not merely at
+  *some* widget.
+- **Rendering unchanged by the split.** Splitting one QLabel into many costs each `<h3>`
+  its top margin (Qt drops a leading block margin at the start of a document): the page
+  measured 8630 px before, 8251 px after. `layout.setSpacing(10)` restores it to 8601 px
+  — within 0.3%. Verified by rendering the full page both ways and comparing crops.
+- **489 tests pass** (8 new in `TestLearnMoreDeepLink`), up from 481.
+
+### Carried forward
+
+The left-hand ray-trace panel labels its x-axis but not its y-axis. That is R5.5c's
+"consistent axis labelling (x, y, z) across all figures" — logged here, fixed in **Batch O**.

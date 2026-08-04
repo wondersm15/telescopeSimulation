@@ -2,6 +2,68 @@
 
 ---
 
+## Tutorial Tab — Round 5, Batch N (chromatic presentation + reachable glass docs): COMPLETE
+
+Ledger: `PLAN_TUTORIAL_ROUND5.md`. Closes R5.3a/b/c. **489 tests pass** (was 481);
+committed on `feature/tutorial-testing-tab`, not merged.
+
+**R5.3a — legends enlarged.** Now that R4 moved the legend out of the plot canvas
+there is room for it: left-panel legend `"small"` → 11 pt, focal-offsets readout
+and the idealised-SA note 7 → 9 pt, focal-region zoom label 7 → 9 pt. Also caught
+the *smallest* text in the same figure, the "zoomed → (focal-plane view)" box
+marker at 6.5 pt → 8 pt; it is anchored outside the zoom box so growing it does
+not re-occlude the region R5.3b clears.
+
+**R5.3b — left-plot focal-plane label removed.** The dashed `axhline` stays (its
+colour still encodes the wavelength); only the text that sat across the focal
+region is gone. The right-hand zoom panel keeps the label, reworded
+`"focal plane (550 nm)"` → `"focused at 550 nm"`.
+
+**R5.3c — the glass docs, third attempt: RELOCATE + LINK.**
+
+Two earlier rounds wrote glass content the user never found, because it lived
+under *Telescope Types → Refractor* near the top of the reference while the
+module's "Learn more" line named **Chromatic Aberration** ~4000 px further down.
+Writing a third copy would have failed the same way. Both halves fixed:
+
+1. **Content moved to where the link points.** The design-comparison table, the
+   cost/performance ladder and the "APOs stay ≤150 mm" paragraph now sit in
+   §4 Chromatic Aberration under *"The glasses, and what each design class buys
+   you"*. Refractor keeps a summary + pointer. Three cross-references the move
+   made stale or circular were rewritten. The tutorial module description also
+   gained the cost/performance sentence, so the answer is in the module too.
+2. **"Learn more" is now a working deep link.** `_make_section` splits each body
+   at top-level `<h3>` into one QLabel per subsection (46 anchors registered);
+   `ParametersPhysicsTab` gains `resolve_section()` / `scroll_to_section()`;
+   the tutorial label became an `<a href>` emitting `learn_more_requested`; and
+   `MainWindow._show_reference_section` adds Reference **beside** Tutorial (not
+   a mode switch, so the reader's scenario survives) and scrolls to the heading.
+
+Hints are matched by normalised tokens rather than an alias table, which would rot
+the moment a heading is edited: strip markup, drop leading numbering, lowercase,
+crudely de-pluralise, then rank *exact → heading-starts-with-hint → numbered
+physics section → fewest extra words*. Those tie-breaks are what send "Diffraction"
+to `1. Diffraction (Wave Optics)` rather than `3. Spider Vane Diffraction`, and
+"Coma" to `5. Coma & Seidel Aberrations` rather than the `Coma Field Analysis` plot
+description. Removing them makes the disambiguation test fail — checked, not assumed.
+
+**Verified through the GUI**, per the standing rule: all 17 implemented scenarios
+navigated via the sidebar with the link activated on each — 0 failures, 0 unmatched
+hints; 11 distinct hints produced 11 distinct scroll positions **in document order**.
+Splitting the QLabel costs each `<h3>` the top margin Qt drops at the start of a
+document (page 8630 → 8251 px); `layout.setSpacing(10)` restores it to 8601 px,
+confirmed by rendering the whole page both ways and comparing crops.
+
+Also upgraded one registry hint: `spherical_aberration` pointed at the whole
+"Implemented Physics" section and now points at `6. Spherical Aberration`.
+
+**Files:** `telescope_gui/reference_tab.py`, `telescope_gui/main_window.py`,
+`telescope_gui/tutorial_mode/tutorial_tab.py`,
+`telescope_gui/tutorial_mode/scenario_registry.py`,
+`telescope_sim/plotting/ray_trace_plot.py`, `tests/test_gui_controls.py`.
+
+---
+
 ## Tutorial Tab — Round 5, Batch M (star colour realism + dynamic range): COMPLETE
 
 Ledger: `PLAN_TUTORIAL_ROUND5.md`. Closes R5.1 and R5.2. **481 tests pass**

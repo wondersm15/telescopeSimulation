@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import traceback
 from dataclasses import replace
+from html import escape
 
 import matplotlib
 matplotlib.use("Agg")
@@ -19,7 +20,7 @@ from PyQt6.QtWidgets import (
     QScrollArea, QGroupBox, QSizePolicy, QDoubleSpinBox,
     QSpinBox, QComboBox, QFrame, QCheckBox, QSlider,
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, pyqtSignal
 
 from telescope_gui.tutorial_mode.scenario_registry import (
     ScenarioDefinition, TelescopeConfig, SourceConfig,
@@ -60,6 +61,11 @@ class TutorialTab(QWidget):
                                      - Effect toggles (Act 3 only)
                                      - Terminal panel
     """
+
+    # Emitted with the current scenario's learn_more_section when the user
+    # clicks the "Learn more →" line. MainWindow turns that into a jump to
+    # the matching heading of the Parameters & Physics reference.
+    learn_more_requested = pyqtSignal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -170,9 +176,18 @@ class TutorialTab(QWidget):
         self.description_label.setStyleSheet("font-size: 10pt; color: #444; padding: 2px 0;")
         self.main_layout.addWidget(self.description_label)
 
+        # Clickable deep link into the Parameters & Physics reference. It used
+        # to be plain blue text that only *looked* like a link, which left the
+        # reader to hunt for the section by hand.
         self.learn_more_label = QLabel("")
+        self.learn_more_label.setTextFormat(Qt.TextFormat.RichText)
         self.learn_more_label.setStyleSheet(
             "font-size: 9pt; color: #2255cc; font-style: italic;")
+        self.learn_more_label.setOpenExternalLinks(False)
+        self.learn_more_label.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.learn_more_label.setToolTip(
+            "Open the Parameters & Physics reference at this section")
+        self.learn_more_label.linkActivated.connect(self._on_learn_more_clicked)
         self.main_layout.addWidget(self.learn_more_label)
 
         # Before / After canvases
@@ -266,6 +281,18 @@ class TutorialTab(QWidget):
         if scenario:
             self._load_scenario(scenario)
 
+    def _on_learn_more_clicked(self, link: str):
+        """Relay a "Learn more →" click as the section hint to jump to.
+
+        The href carries the hint (``reference:<section>``) so the handler
+        works even if the label text and the current scenario ever diverge.
+        """
+        section = link.split(":", 1)[1] if ":" in link else ""
+        if not section and self._current_scenario is not None:
+            section = self._current_scenario.learn_more_section
+        if section:
+            self.learn_more_requested.emit(section)
+
     def _load_scenario(self, scenario: ScenarioDefinition):
         self._current_scenario = scenario
         self._current_after_config = scenario.after_telescope
@@ -281,8 +308,10 @@ class TutorialTab(QWidget):
         self.description_label.setText(
             f"{applies_label}\n\n{scenario.description}"
         )
+        section = escape(scenario.learn_more_section)
         self.learn_more_label.setText(
-            f"Learn more → Parameters & Physics: {scenario.learn_more_section}"
+            f"<a href='reference:{section}' style='color:#2255cc;'>"
+            f"Learn more &rarr; Parameters &amp; Physics: {section}</a>"
         )
 
         # Rebuild tweakable controls for this scenario

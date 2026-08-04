@@ -580,6 +580,14 @@ SCENARIOS: list[ScenarioDefinition] = [
             "coincident; ~80\u00d7 smaller than a singlet.\n"
             " \u2022 APO triplet (ED + flint + ED, air-spaced): full apochromatic "
             "correction across the visible band; ~200\u00d7 smaller residual.\n"
+            "What it costs (R5.3): each rung up that ladder buys roughly 3\u20135\u00d7 "
+            "less colour error for a similar jump in price, because exotic glass and "
+            "extra elements dominate what you pay. The achromat is the value choice; "
+            "the ED doublet costs several times as much for the same aperture; the "
+            "air-spaced triplet is dearest of all and you pay steeply for that last "
+            "factor of a few. Click \u201cLearn more\u201d above for the full glass "
+            "table \u2014 which glass each design uses, how it cancels colour, and the "
+            "price/performance ladder.\n"
             "Try changing the f-ratio (focal length) \u2014 chromatic blur scales as 1/F, "
             "so a slow scope tames the same glass.\n"
             "Note: to isolate the chromatic lesson, the ray trace is idealised "
@@ -696,7 +704,7 @@ SCENARIOS: list[ScenarioDefinition] = [
             "Toggle to a parabolic primary to see both the inset spread vanish "
             "and the ray-fan curve collapse to ≈ 0 (diffraction-limited)."
         ),
-        learn_more_section="Implemented Physics",
+        learn_more_section="Spherical Aberration",
         before_telescope=TelescopeConfig(
             telescope_type="Newtonian", diameter=200.0, focal_length=800.0,
             primary_type="spherical",

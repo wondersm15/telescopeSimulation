@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (
     QTabWidget, QRadioButton, QButtonGroup, QLabel, QStatusBar,
     QMenuBar, QMenu
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QAction
 
 from telescope_gui.single_mode.design_tab import DesignTab
@@ -29,6 +29,10 @@ class MainWindow(QMainWindow):
 
         self.setWindowTitle("Telescope Simulator")
         self.setGeometry(100, 100, 1400, 900)
+
+        # Reference tab shown alongside Tutorial mode, built on first use of a
+        # scenario's "Learn more →" link (see _show_reference_section).
+        self._tutorial_reference_tab = None
 
         self.init_ui()
 
@@ -132,8 +136,9 @@ class MainWindow(QMainWindow):
 
     def switch_mode(self):
         """Switch between Single Telescope and Comparison modes."""
-        # Clear existing tabs
+        # Clear existing tabs. Any lazily-built reference tab goes with them.
         self.tab_widget.clear()
+        self._tutorial_reference_tab = None
 
         if self.single_mode_radio.isChecked():
             # Single telescope mode
@@ -169,4 +174,24 @@ class MainWindow(QMainWindow):
             self.status_bar.showMessage("Tutorial & Testing Mode")
 
             tutorial_tab = TutorialTab()
+            tutorial_tab.learn_more_requested.connect(
+                self._show_reference_section)
             self.tab_widget.addTab(tutorial_tab, "Tutorial")
+
+    def _show_reference_section(self, section: str):
+        """Open the Parameters & Physics reference at `section`.
+
+        Adds the reference as a second tab *beside* Tutorial rather than
+        switching modes, so following a link never discards the scenario the
+        reader is in the middle of. The tab is built on first use because
+        constructing it renders the vignetting diagram and most sessions never
+        follow a link.
+        """
+        if self._tutorial_reference_tab is None:
+            self._tutorial_reference_tab = ParametersPhysicsTab()
+            self.tab_widget.addTab(self._tutorial_reference_tab, "Reference")
+        tab = self._tutorial_reference_tab
+        self.tab_widget.setCurrentWidget(tab)
+        # Defer the scroll by one event-loop turn: the scroll area only knows
+        # where a heading sits once the newly-current tab has been laid out.
+        QTimer.singleShot(0, lambda: tab.scroll_to_section(section))

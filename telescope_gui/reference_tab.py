@@ -5,12 +5,14 @@ A read-only, scrollable guide covering telescope types, GUI parameters,
 plot descriptions, and implemented physics.
 """
 
+import html as html_lib
 import io
+import re
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QScrollArea, QGroupBox, QLabel
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QPoint
 from PyQt6.QtGui import QPixmap
 
 
@@ -43,81 +45,14 @@ eyepiece at the rear.</p>
 
 <h3>Refractor</h3>
 <p>Uses a <b>glass objective lens</b> at the front of the tube to bring light
-to focus at the rear. Four objective designs are modelled, each attacking
-chromatic aberration with progressively more glass elements and more exotic
-materials:</p>
-
-<table cellpadding="4" cellspacing="0" style="border-collapse:collapse; margin-top:6px;">
-<tr style="background:#e0e0e0;">
-  <th align="left" style="padding:4px 8px;">Design</th>
-  <th align="left" style="padding:4px 8px;">Construction</th>
-  <th align="left" style="padding:4px 8px;">How it reduces chromatic</th>
-  <th align="left" style="padding:4px 8px;">Residual focal-shift</th>
-</tr>
-<tr>
-  <td style="padding:4px 8px;"><i>Singlet</i></td>
-  <td style="padding:4px 8px;">Single lens, typically BK7 crown glass.</td>
-  <td style="padding:4px 8px;">No correction. The Cauchy dispersion of BK7 sends
-    red light to a longer focus than blue.</td>
-  <td style="padding:4px 8px;">~f / 100 between F (486 nm) and C (656 nm).</td>
-</tr>
-<tr style="background:#f5f5f5;">
-  <td style="padding:4px 8px;"><i>Achromat</i></td>
-  <td style="padding:4px 8px;">Cemented doublet: BK7 crown + F2 flint. The two
-    glasses have opposite dispersion slopes.</td>
-  <td style="padding:4px 8px;">Surface curvatures are chosen so the F-line and
-    C-line meet at a common focus. The middle (d-line, 587 nm) sits at a slightly
-    different focus &mdash; the <i>secondary spectrum</i>.</td>
-  <td style="padding:4px 8px;">~f / 2500 residual secondary spectrum.</td>
-</tr>
-<tr>
-  <td style="padding:4px 8px;"><i>APO doublet</i></td>
-  <td style="padding:4px 8px;">FPL51 ED (extra-low-dispersion) glass + matching
-    crown, cemented.</td>
-  <td style="padding:4px 8px;">The ED glass has anomalous partial dispersion that
-    flattens the focal curve. F, d, and C meet within a much tighter envelope.</td>
-  <td style="padding:4px 8px;">~f / 16000 residual (~1.5&times; Airy: a faint
-    halo only on the brightest stars).</td>
-</tr>
-<tr style="background:#f5f5f5;">
-  <td style="padding:4px 8px;"><i>APO triplet</i></td>
-  <td style="padding:4px 8px;">Three elements (ED + flint + ED) in an air-spaced
-    cell, with synthetic-fluorite or higher-grade ED glass.</td>
-  <td style="padding:4px 8px;">Three free design degrees of freedom let the
-    designer flatten the focal curve across the entire visible band. Approaches
-    a diffraction-limited image at all wavelengths.</td>
-  <td style="padding:4px 8px;">~f / 45000 residual (below the Airy radius:
-    colour-free).</td>
-</tr>
-</table>
-
-<p style="margin-top:8px;">The chromatic-aberration tutorial scenario uses these
-same residual focal-shift coefficients (see <i>Implemented Physics</i>
-&rarr; Chromatic aberration) so the rendered halo sizes match the textbook
-performance of each design class. In the module, switch the <b>Objective</b>
-between these four designs (and use <b>Focal zoom &rarr; Close</b> to resolve the
-tiny achromat/APO residuals that are invisible at the wide singlet scale).</p>
-
-<p><b>Cost vs. performance.</b> Each step up the ladder buys a roughly 3&ndash;5&times;
-reduction in the colour error for a similar jump in price (exotic glass and extra
-elements dominate the cost):</p>
-<ul>
-  <li><b>Singlet</b> &mdash; cheapest glass, but the colour error is so large it is
-      essentially never sold for astronomy today.</li>
-  <li><b>Achromat</b> &mdash; the value choice: ordinary crown+flint, inexpensive,
-      and colour is well controlled at slow focal ratios (an f/10&ndash;f/12
-      &ldquo;achro&rdquo; shows little false colour). Most beginner refractors.</li>
-  <li><b>APO doublet (ED)</b> &mdash; typically several times the price of an achromat
-      of the same aperture; ED glass removes almost all visible colour and allows
-      much faster focal ratios (f/6&ndash;f/7).</li>
-  <li><b>APO triplet (ED/fluorite)</b> &mdash; the most expensive (three exotic
-      air-spaced elements); essentially colour-free and the imager's choice, but you
-      pay steeply for that last factor of a few &mdash; diminishing returns for
-      visual use.</li>
-</ul>
-<p>Because glass gets heavy and dear with aperture, APOs are usually small
-(&le;150 mm) &mdash; for big apertures a mirror (no chromatic aberration at all) is
-far cheaper, which is why large scopes are reflectors.</p>
+to focus at the rear.</p>
+<p>Four objective designs are modelled, each attacking chromatic aberration
+with progressively more glass elements and more exotic materials: <i>singlet</i>,
+<i>achromat</i>, <i>APO doublet</i> and <i>APO triplet</i>. The glass types, how
+each design cancels colour, the residual focal shift it leaves, and what the
+extra performance costs are all set out under
+<b>Implemented Physics &rarr; 4. Chromatic Aberration</b> &mdash; which is
+where the tutorial's <i>Chromatic Aberration</i> module links to.</p>
 
 <ul>
   <li><b>Pros:</b> No central obstruction or diffraction spikes from a spider, sharp
@@ -405,9 +340,10 @@ vanes as half-strip obstructions.</i></p>
 <h3>4. Chromatic Aberration</h3>
 <p>Glass dispersion (wavelength-dependent refractive index) causes different
 wavelengths to focus at different distances. Severity depends on the objective
-design &mdash; see <i>Telescope Types &rarr; Refractor</i> for the construction
-of each design class. The simulation models each with a different magnitude of
-residual focal shift:</p>
+design &mdash; the glass types and construction of each class are set out
+under <i>The glasses, and what each design class buys you</i> further down this
+section. The simulation models each with a different magnitude of residual
+focal shift:</p>
 <ul>
   <li><b>Singlet:</b> severe; focal shift follows the Cauchy index curve of BK7
       directly (no correction). F&ndash;C span ≈ f / 100.</li>
@@ -438,6 +374,85 @@ n(&lambda;) = A + B/&lambda;&sup2; for tractability &mdash; a good
 approximation over the visible band but not as accurate as Sellmeier.</p>
 <p><i>Accuracy: Accurate for implemented lens types using Cauchy
 dispersion.</i></p>
+
+<h4>The glasses, and what each design class buys you</h4>
+<p>The four <b>Objective</b> settings in the tutorial's <i>Chromatic
+Aberration</i> module are not arbitrary labels &mdash; each names a real
+construction built from specific glass types, and the residual focal shifts
+tabulated above are what those glasses actually achieve. What follows is the
+glass behind each design, and what the extra elements cost you.</p>
+
+<table cellpadding="4" cellspacing="0" style="border-collapse:collapse; margin-top:6px;">
+<tr style="background:#e0e0e0;">
+  <th align="left" style="padding:4px 8px;">Design</th>
+  <th align="left" style="padding:4px 8px;">Construction</th>
+  <th align="left" style="padding:4px 8px;">How it reduces chromatic</th>
+  <th align="left" style="padding:4px 8px;">Residual focal-shift</th>
+</tr>
+<tr>
+  <td style="padding:4px 8px;"><i>Singlet</i></td>
+  <td style="padding:4px 8px;">Single lens, typically BK7 crown glass.</td>
+  <td style="padding:4px 8px;">No correction. The Cauchy dispersion of BK7 sends
+    red light to a longer focus than blue.</td>
+  <td style="padding:4px 8px;">~f / 100 between F (486 nm) and C (656 nm).</td>
+</tr>
+<tr style="background:#f5f5f5;">
+  <td style="padding:4px 8px;"><i>Achromat</i></td>
+  <td style="padding:4px 8px;">Cemented doublet: BK7 crown + F2 flint. The two
+    glasses have opposite dispersion slopes.</td>
+  <td style="padding:4px 8px;">Surface curvatures are chosen so the F-line and
+    C-line meet at a common focus. The middle (d-line, 587 nm) sits at a slightly
+    different focus &mdash; the <i>secondary spectrum</i>.</td>
+  <td style="padding:4px 8px;">~f / 2500 residual secondary spectrum.</td>
+</tr>
+<tr>
+  <td style="padding:4px 8px;"><i>APO doublet</i></td>
+  <td style="padding:4px 8px;">FPL51 ED (extra-low-dispersion) glass + matching
+    crown, cemented.</td>
+  <td style="padding:4px 8px;">The ED glass has anomalous partial dispersion that
+    flattens the focal curve. F, d, and C meet within a much tighter envelope.</td>
+  <td style="padding:4px 8px;">~f / 16000 residual (~1.5&times; Airy: a faint
+    halo only on the brightest stars).</td>
+</tr>
+<tr style="background:#f5f5f5;">
+  <td style="padding:4px 8px;"><i>APO triplet</i></td>
+  <td style="padding:4px 8px;">Three elements (ED + flint + ED) in an air-spaced
+    cell, with synthetic-fluorite or higher-grade ED glass.</td>
+  <td style="padding:4px 8px;">Three free design degrees of freedom let the
+    designer flatten the focal curve across the entire visible band. Approaches
+    a diffraction-limited image at all wavelengths.</td>
+  <td style="padding:4px 8px;">~f / 45000 residual (below the Airy radius:
+    colour-free).</td>
+</tr>
+</table>
+
+<p style="margin-top:8px;">The chromatic-aberration tutorial scenario uses the
+residual focal-shift coefficients in the right-hand column above, so the
+rendered halo sizes match the textbook performance of each design class. In the
+module, switch the <b>Objective</b>
+between these four designs (and use <b>Focal zoom &rarr; Close</b> to resolve the
+tiny achromat/APO residuals that are invisible at the wide singlet scale).</p>
+
+<p><b>Cost vs. performance.</b> Each step up the ladder buys a roughly 3&ndash;5&times;
+reduction in the colour error for a similar jump in price (exotic glass and extra
+elements dominate the cost):</p>
+<ul>
+  <li><b>Singlet</b> &mdash; cheapest glass, but the colour error is so large it is
+      essentially never sold for astronomy today.</li>
+  <li><b>Achromat</b> &mdash; the value choice: ordinary crown+flint, inexpensive,
+      and colour is well controlled at slow focal ratios (an f/10&ndash;f/12
+      &ldquo;achro&rdquo; shows little false colour). Most beginner refractors.</li>
+  <li><b>APO doublet (ED)</b> &mdash; typically several times the price of an achromat
+      of the same aperture; ED glass removes almost all visible colour and allows
+      much faster focal ratios (f/6&ndash;f/7).</li>
+  <li><b>APO triplet (ED/fluorite)</b> &mdash; the most expensive (three exotic
+      air-spaced elements); essentially colour-free and the imager's choice, but you
+      pay steeply for that last factor of a few &mdash; diminishing returns for
+      visual use.</li>
+</ul>
+<p>Because glass gets heavy and dear with aperture, APOs are usually small
+(&le;150 mm) &mdash; for big apertures a mirror (no chromatic aberration at all) is
+far cheaper, which is why large scopes are reflectors.</p>
 
 <h3>5. Coma &amp; Seidel Aberrations</h3>
 <p>Classical aberration theory (Seidel, 1856) expands the wavefront error
@@ -1001,45 +1016,91 @@ def _figure_to_pixmap(fig, dpi: int = 110) -> QPixmap:
     return pix
 
 
-def _make_figure_section(title: str, fig, caption_html: str) -> QGroupBox:
-    """Section with a rendered matplotlib figure above a rich-text caption."""
-    box = QGroupBox(title)
-    box.setStyleSheet(
-        "QGroupBox { font-weight: bold; font-size: 13px; "
-        "margin-top: 18px; padding: 24px 8px 8px 8px; "
-        "border: 1px solid palette(mid); border-radius: 4px; }"
-        "QGroupBox::title { subcontrol-origin: margin; "
-        "subcontrol-position: top left; padding: 4px 8px; "
-        "background: palette(window); }"
-    )
-    layout = QVBoxLayout()
-    img = QLabel()
-    img.setPixmap(_figure_to_pixmap(fig))
-    img.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-    layout.addWidget(img)
-    caption = QLabel(caption_html)
-    caption.setWordWrap(True)
-    caption.setTextFormat(Qt.TextFormat.RichText)
-    caption.setStyleSheet("QLabel { font-weight: normal; }")
-    caption.setTextInteractionFlags(
-        Qt.TextInteractionFlag.TextSelectableByMouse)
-    layout.addWidget(caption)
-    box.setLayout(layout)
-    return box
+# ---------------------------------------------------------------------------
+# Section anchors — deep links from the Tutorial tab's "Learn more" line
+# ---------------------------------------------------------------------------
+# Every tutorial scenario carries a `learn_more_section` hint ("Coma",
+# "Spider Vanes", "Photometry & Filters", ...). Those strings are written for
+# humans, so they rarely match a heading character-for-character: reference
+# headings are numbered ("5. Coma & Seidel Aberrations") and often shift
+# number ("Spider Vanes" vs "Spider Vane Diffraction"). Instead of a
+# hand-written alias table that silently rots as headings are edited, each
+# heading is normalised to a token tuple and matched by token overlap.
+# tests/test_gui_controls.py asserts that *every* learn_more_section in the
+# scenario registry resolves to a real anchor, so an unmatched hint fails the
+# suite rather than producing a dead link.
+
+_H3_SPLIT_RE = re.compile(r"(?=^<h3>)", re.MULTILINE)
+_H3_TITLE_RE = re.compile(r"\A<h3>(.*?)</h3>", re.DOTALL)
+_TAG_RE = re.compile(r"<[^>]+>")
+_LEADING_NUMBER_RE = re.compile(r"^\s*\d+[.)]\s*")
 
 
-def _make_section(title: str, html: str) -> QGroupBox:
-    """Create a styled QGroupBox with rich-text content."""
-    box = QGroupBox(title)
-    box.setStyleSheet(
-        "QGroupBox { font-weight: bold; font-size: 13px; "
-        "margin-top: 18px; padding: 24px 8px 8px 8px; "
-        "border: 1px solid palette(mid); border-radius: 4px; }"
-        "QGroupBox::title { subcontrol-origin: margin; "
-        "subcontrol-position: top left; padding: 4px 8px; "
-        "background: palette(window); }"
+def _section_tokens(name: str) -> tuple[str, ...]:
+    """Normalise a section name (or heading) to comparable tokens.
+
+    Strips markup and entities, drops any leading "4." numbering, lowercases,
+    and crudely de-pluralises so "Spider Vanes" and "Spider Vane Diffraction"
+    share tokens. Both sides of a comparison go through this, so the
+    de-pluralisation only has to be *consistent*, not linguistically right.
+    """
+    text = html_lib.unescape(_TAG_RE.sub("", name))
+    text = _LEADING_NUMBER_RE.sub("", text).lower()
+    return tuple(
+        tok[:-1] if len(tok) > 3 and tok.endswith("s") else tok
+        for tok in re.findall(r"[a-z0-9]+", text)
     )
-    layout = QVBoxLayout()
+
+
+def _match_anchor(name: str, anchors: list) -> QWidget | None:
+    """Pick the anchor widget that best matches a `learn_more_section` hint.
+
+    `anchors` holds (tokens, is_numbered, widget) records. Candidates must
+    contain every query token; among those the ranking prefers, in order:
+    an exact heading match, a match at the *start* of the heading, then a
+    numbered physics heading. That ordering is what makes "Diffraction" land
+    on "1. Diffraction (Wave Optics)" rather than "3. Spider Vane
+    Diffraction" (prefix), and "Coma" land on "5. Coma & Seidel Aberrations"
+    rather than the "Coma Field Analysis" plot description (numbered).
+    """
+    query = _section_tokens(name)
+    if not query:
+        return None
+    best, best_score = None, None
+    for tokens, is_numbered, widget in anchors:
+        if not all(tok in tokens for tok in query):
+            continue
+        score = (
+            tokens == query,                       # exact heading
+            tokens[:len(query)] == query,          # heading starts with hint
+            is_numbered,                           # numbered physics section
+            -len(tokens),                          # fewest extra words
+        )
+        if best_score is None or score > best_score:
+            best, best_score = widget, score
+    return best
+
+
+def _register_anchor(anchors, name: str, widget: QWidget) -> None:
+    """Record `widget` as the scroll target for a heading/section name."""
+    if anchors is None:
+        return
+    is_numbered = bool(_LEADING_NUMBER_RE.match(_TAG_RE.sub("", name).strip()))
+    anchors.append((_section_tokens(name), is_numbered, widget))
+
+
+_GROUPBOX_STYLE = (
+    "QGroupBox { font-weight: bold; font-size: 13px; "
+    "margin-top: 18px; padding: 24px 8px 8px 8px; "
+    "border: 1px solid palette(mid); border-radius: 4px; }"
+    "QGroupBox::title { subcontrol-origin: margin; "
+    "subcontrol-position: top left; padding: 4px 8px; "
+    "background: palette(window); }"
+)
+
+
+def _make_rich_label(html: str) -> QLabel:
+    """A word-wrapped, selectable rich-text label in the body style."""
     label = QLabel(html)
     label.setWordWrap(True)
     label.setTextFormat(Qt.TextFormat.RichText)
@@ -1047,7 +1108,50 @@ def _make_section(title: str, html: str) -> QGroupBox:
     label.setTextInteractionFlags(
         Qt.TextInteractionFlag.TextSelectableByMouse
     )
-    layout.addWidget(label)
+    return label
+
+
+def _make_figure_section(title: str, fig, caption_html: str,
+                         anchors: list | None = None) -> QGroupBox:
+    """Section with a rendered matplotlib figure above a rich-text caption."""
+    box = QGroupBox(title)
+    box.setStyleSheet(_GROUPBOX_STYLE)
+    _register_anchor(anchors, title, box)
+    layout = QVBoxLayout()
+    img = QLabel()
+    img.setPixmap(_figure_to_pixmap(fig))
+    img.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+    layout.addWidget(img)
+    layout.addWidget(_make_rich_label(caption_html))
+    box.setLayout(layout)
+    return box
+
+
+def _make_section(title: str, html: str,
+                  anchors: list | None = None) -> QGroupBox:
+    """Create a styled QGroupBox with rich-text content.
+
+    The body is split at each top-level ``<h3>`` into its own QLabel so every
+    subsection is an addressable widget the tutorial's "Learn more" link can
+    scroll to; rendering is otherwise identical to one monolithic label.
+    """
+    box = QGroupBox(title)
+    box.setStyleSheet(_GROUPBOX_STYLE)
+    _register_anchor(anchors, title, box)
+
+    layout = QVBoxLayout()
+    # Qt drops a block's top margin when it starts a rich-text document, so
+    # splitting costs each <h3> its leading gap; the layout spacing puts it
+    # back (measured: restores the pre-split page height to within 0.3%).
+    layout.setSpacing(10)
+    for chunk in _H3_SPLIT_RE.split(html):
+        if not chunk.strip():
+            continue
+        label = _make_rich_label(chunk)
+        layout.addWidget(label)
+        heading = _H3_TITLE_RE.match(chunk)
+        if heading:
+            _register_anchor(anchors, heading.group(1), label)
     box.setLayout(layout)
     return box
 
@@ -1057,6 +1161,10 @@ class ParametersPhysicsTab(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        # (tokens, is_numbered, widget) per addressable heading; see
+        # _match_anchor / scroll_to_section.
+        self._anchors: list = []
+        self._scroll = None
         self._init_ui()
 
     def _init_ui(self):
@@ -1065,6 +1173,7 @@ class ParametersPhysicsTab(QWidget):
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
+        self._scroll = scroll
 
         container = QWidget()
         layout = QVBoxLayout()
@@ -1080,23 +1189,28 @@ class ParametersPhysicsTab(QWidget):
         layout.addWidget(header)
 
         # Sections
-        layout.addWidget(_make_section("Telescope Types", TELESCOPE_TYPES_HTML))
-        layout.addWidget(_make_section("Telescope Parameters", PARAMETERS_HTML))
-        layout.addWidget(_make_section("Understanding the Plots", PLOTS_HTML))
+        anchors = self._anchors
         layout.addWidget(_make_section(
-            "Detector vs Eye (linear vs logarithmic)", DETECTOR_VS_EYE_HTML))
+            "Telescope Types", TELESCOPE_TYPES_HTML, anchors))
+        layout.addWidget(_make_section(
+            "Telescope Parameters", PARAMETERS_HTML, anchors))
+        layout.addWidget(_make_section(
+            "Understanding the Plots", PLOTS_HTML, anchors))
+        layout.addWidget(_make_section(
+            "Detector vs Eye (linear vs logarithmic)", DETECTOR_VS_EYE_HTML,
+            anchors))
         layout.addWidget(_make_figure_section(
             "Vignetting (diagram)", _build_vignetting_diagram(),
-            VIGNETTING_DIAGRAM_CAPTION_HTML))
+            VIGNETTING_DIAGRAM_CAPTION_HTML, anchors))
         layout.addWidget(_make_section(
-            "Implemented Physics", PHYSICS_HTML
+            "Implemented Physics", PHYSICS_HTML, anchors
         ))
         layout.addWidget(_make_section(
             "Realism audit — approximations & how to improve them",
-            REALISM_AUDIT_HTML
+            REALISM_AUDIT_HTML, anchors
         ))
         layout.addWidget(_make_section(
-            "Not Yet Implemented", NOT_IMPLEMENTED_HTML
+            "Not Yet Implemented", NOT_IMPLEMENTED_HTML, anchors
         ))
 
         layout.addStretch()
@@ -1105,3 +1219,28 @@ class ParametersPhysicsTab(QWidget):
 
         outer.addWidget(scroll)
         self.setLayout(outer)
+
+    # ------------------------------------------------------------------
+    # Deep linking (Tutorial tab "Learn more →" line)
+    # ------------------------------------------------------------------
+
+    def resolve_section(self, name: str) -> QWidget | None:
+        """Widget a `learn_more_section` hint points at, or None if unmatched."""
+        return _match_anchor(name, self._anchors)
+
+    def scroll_to_section(self, name: str) -> bool:
+        """Scroll the reference so `name`'s heading sits at the top of view.
+
+        Returns False (leaving the view alone) when the hint matches nothing,
+        so a caller can tell a dead link from a successful jump.
+        """
+        widget = self.resolve_section(name)
+        container = self._scroll.widget() if self._scroll else None
+        if widget is None or container is None:
+            return False
+        top = widget.mapTo(container, QPoint(0, 0)).y()
+        bar = self._scroll.verticalScrollBar()
+        # Back off a little so the heading isn't flush against the viewport
+        # edge (and clamp: short sections near the end can't scroll that far).
+        bar.setValue(max(0, min(top - 8, bar.maximum())))
+        return True

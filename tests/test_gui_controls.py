@@ -504,3 +504,127 @@ class TestRealtimeBothSides:
             assert all(not kw.get("use_realtime") for kw in calls)
         finally:
             tt.run_scenario_side = orig
+
+
+# ------------------------------------------------------------------
+# R5.3c: the Tutorial "Learn more →" line is a working deep link into
+# the Parameters & Physics reference, not decorative blue text.
+# ------------------------------------------------------------------
+
+class TestLearnMoreDeepLink:
+    """Every scenario's learn_more_section must land on a real heading."""
+
+    def _ref(self):
+        from telescope_gui.reference_tab import ParametersPhysicsTab
+        return ParametersPhysicsTab()
+
+    @staticmethod
+    def _heading_of(widget):
+        """Readable heading for an anchor widget (group-box title or <h3>)."""
+        import re
+        from PyQt6.QtWidgets import QGroupBox
+        if isinstance(widget, QGroupBox):
+            return widget.title()
+        m = re.match(r"\A<h3>(.*?)</h3>", widget.text(), re.DOTALL)
+        return re.sub(r"<[^>]+>", "", m.group(1)) if m else ""
+
+    def test_every_scenario_hint_resolves(self, qapp):
+        """A new scenario with an unmatched hint fails here, not silently."""
+        from telescope_gui.tutorial_mode.scenario_registry import SCENARIOS
+        ref = self._ref()
+        unmatched = [s.learn_more_section for s in SCENARIOS
+                     if ref.resolve_section(s.learn_more_section) is None]
+        assert unmatched == []
+
+    def test_ambiguous_hints_pick_the_physics_heading(self, qapp):
+        """The two hints with more than one plausible target.
+
+        "Diffraction" must not land on "3. Spider Vane Diffraction", and
+        "Coma" must not land on the "Coma Field Analysis" plot description.
+        """
+        ref = self._ref()
+        assert "1. Diffraction" in self._heading_of(
+            ref.resolve_section("Diffraction"))
+        assert "5. Coma" in self._heading_of(ref.resolve_section("Coma"))
+
+    def test_plural_and_partial_hints_resolve(self, qapp):
+        """Hints that differ from the heading in number or extra words."""
+        ref = self._ref()
+        assert "Spider Vane" in self._heading_of(
+            ref.resolve_section("Spider Vanes"))
+        assert "Photometry" in self._heading_of(
+            ref.resolve_section("Photometry & Filters"))
+        # Exact match beats the "Vignetting (diagram)" figure section.
+        assert self._heading_of(ref.resolve_section("Vignetting")) \
+            == "7. Vignetting"
+
+    def test_unknown_hint_is_reported_not_guessed(self, qapp):
+        ref = self._ref()
+        assert ref.resolve_section("Quantum Chromodynamics") is None
+        assert ref.scroll_to_section("Quantum Chromodynamics") is False
+
+    def test_sections_scroll_to_distinct_places_in_document_order(self, qapp):
+        """The link actually moves the view, and later sections scroll further."""
+        ref = self._ref()
+        ref.resize(1000, 800)
+        ref.show()
+        qapp.processEvents()
+        ordered = ["Diffraction", "Central Obstruction", "Spider Vanes",
+                   "Chromatic Aberration", "Coma", "Vignetting",
+                   "Atmospheric Seeing", "Photometry & Filters"]
+        positions = []
+        for name in ordered:
+            assert ref.scroll_to_section(name) is True
+            positions.append(ref._scroll.verticalScrollBar().value())
+        assert positions[0] > 0, "first jump did not move the scroll area"
+        assert positions == sorted(positions), positions
+        assert len(set(positions)) == len(positions), positions
+        ref.hide()
+
+    def test_split_registers_one_anchor_per_h3(self, qapp):
+        """Splitting the body at <h3> is what makes subsections addressable."""
+        from telescope_gui.reference_tab import PHYSICS_HTML
+        ref = self._ref()
+        assert len(ref._anchors) >= PHYSICS_HTML.count("\n<h3>")
+
+    def test_tutorial_label_is_a_clickable_link_carrying_the_section(self, qapp):
+        """The label renders an <a href> and emits the hint when activated."""
+        from telescope_gui.tutorial_mode.tutorial_tab import TutorialTab
+        from telescope_gui.tutorial_mode.scenario_registry import get_scenario_by_id
+        tab = TutorialTab()
+        scenario = get_scenario_by_id("fratio_coma")
+        tab._load_scenario(scenario)
+        text = tab.learn_more_label.text()
+        assert "<a href='reference:Coma'" in text
+
+        emitted = []
+        tab.learn_more_requested.connect(emitted.append)
+        tab.learn_more_label.linkActivated.emit("reference:Coma")
+        assert emitted == ["Coma"]
+
+    def test_click_opens_reference_tab_beside_tutorial(self, qapp):
+        """The jump must not destroy the scenario the reader is working in."""
+        from telescope_gui.main_window import MainWindow
+        from telescope_gui.reference_tab import ParametersPhysicsTab
+        win = MainWindow()
+        win.tutorial_mode_radio.setChecked(True)
+        tutorial = win.tab_widget.widget(0)
+        assert win.tab_widget.count() == 1          # built lazily
+
+        tutorial.learn_more_requested.emit("Central Obstruction")
+        qapp.processEvents()
+
+        titles = [win.tab_widget.tabText(i)
+                  for i in range(win.tab_widget.count())]
+        assert titles == ["Tutorial", "Reference"]
+        ref = win.tab_widget.widget(1)
+        assert isinstance(ref, ParametersPhysicsTab)
+        assert win.tab_widget.currentWidget() is ref
+        # Tutorial tab survives, still holding its scenario.
+        assert win.tab_widget.widget(0) is tutorial
+
+        # A second click reuses the same tab rather than stacking duplicates.
+        tutorial.learn_more_requested.emit("Vignetting")
+        qapp.processEvents()
+        assert win.tab_widget.count() == 2
+        win.close()

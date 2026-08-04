@@ -2246,7 +2246,9 @@ def plot_polychromatic_ray_trace(
     # Legend OUT of the ray trace, below the plot (R3.6a) — it previously sat
     # upper-right on top of the lens/rays. The plot is tall and narrow, so a
     # horizontal legend under the axes uses otherwise-empty canvas.
-    ax.legend(fontsize="small", loc="upper center",
+    # R5.3a: sized up now that it no longer competes with the rays for space
+    # — nothing is occluded by a bigger legend out here.
+    ax.legend(fontsize=11, loc="upper center",
               bbox_to_anchor=(0.5, -0.06), ncol=4, frameon=True,
               fancybox=True, framealpha=0.9)
 
@@ -2264,8 +2266,10 @@ def plot_polychromatic_ray_trace(
         # trace is a tall, narrow equal-aspect bundle, so an in-axes box at the
         # right edge still sat on the rays — R4.5a). x>1 is in the figure
         # margin; text isn't axes-clipped.
+        # R5.3a: enlarged along with the legend — it lives in the margin, so
+        # a bigger box costs nothing.
         ax.text(1.03, 0.62, "\n".join(readout_lines),
-                transform=ax.transAxes, fontsize=7,
+                transform=ax.transAxes, fontsize=9,
                 verticalalignment="center", horizontalalignment="left",
                 fontfamily="monospace",
                 bbox=dict(boxstyle="round,pad=0.3", facecolor="white",
@@ -2285,7 +2289,7 @@ def plot_polychromatic_ray_trace(
                 "to a point so only the\n"
                 "chromatic focal shift\n"
                 "is shown.",
-                transform=ax.transAxes, fontsize=7,
+                transform=ax.transAxes, fontsize=9,
                 verticalalignment="center", horizontalalignment="right",
                 style="italic", color="#444",
                 bbox=dict(boxstyle="round,pad=0.3", facecolor="#fffbe6",
@@ -2295,6 +2299,13 @@ def plot_polychromatic_ray_trace(
     # the user can see WHICH plane the AFTER-side plots are taken at.
     # Only added when focus_wavelength_nm is supplied (the tutorial
     # passes this from the focal-plane combo).
+    #
+    # R5.3b: the line is drawn, but NOT labelled here. The label used to read
+    # "Focal plane (focus at NNN nm)" and sat directly across the focal
+    # region — the one part of this plot the user needs to see. The zoomed
+    # focal-region panel on the right carries the same dashed line WITH its
+    # label, in a view where there is room for it, so the text here was
+    # redundant occlusion. The line's colour still encodes the wavelength.
     if (focus_wavelength_nm is not None
             and g_focal_y is not None):
         focus_defocus = chromatic_defocus(telescope, focus_wavelength_nm)
@@ -2304,10 +2315,6 @@ def plot_polychromatic_ray_trace(
         focus_color = wavelength_to_color(focus_wavelength_nm)
         ax.axhline(focus_plane_y, color=focus_color, linestyle="--",
                    linewidth=1.5, alpha=0.6, zorder=4)
-        ax.text(0.02, focus_plane_y, f"  Focal plane (focus at {focus_wavelength_nm:.0f} nm)",
-                color=focus_color, fontsize=8, fontweight="bold",
-                transform=ax.get_yaxis_transform(),
-                verticalalignment="bottom", alpha=0.9, zorder=5)
 
     # Dashed box marking the focal region that the after-side "Zoomed view of
     # the focal region" panel magnifies (R3.6c). Its extent matches
@@ -2324,9 +2331,12 @@ def plot_polychromatic_ray_trace(
             2 * box_half_x, 2 * box_half_y,
             fill=False, edgecolor="0.35", linestyle="--", linewidth=1.2,
             alpha=0.8, zorder=6))
+        # R5.3a: 6.5 pt was unreadable at the canvas size the tutorial uses.
+        # Anchored outside the box (ha="left" from its right edge) so growing
+        # it does not re-occlude the focal region R5.3b just cleared.
         ax.text(box_half_x, g_focal_y + box_half_y,
                 " zoomed →\n (focal-plane\n  view)",
-                fontsize=6.5, color="0.35", ha="left", va="top", zorder=6)
+                fontsize=8, color="0.35", ha="left", va="top", zorder=6)
 
     # Focal-region inset embedded inside the main axes (wider, shorter so
     # the colour separation is readable; horizontal layout matches the
@@ -2691,10 +2701,14 @@ def _draw_focal_region_zoom(ax, telescope, focus_wavelength_nm=None,
         focus_color = wavelength_to_color(fwl)
         ax.axhline(focus_plane_y, color=focus_color, linestyle="--",
                    linewidth=1.2, alpha=0.6, zorder=4)
-        ax.text(0.02, focus_plane_y, f"  focal plane ({fwl:.0f} nm)",
-                color=focus_color, fontsize=7, fontweight="bold",
+        # R5.3b: this is now the ONLY place the chosen focal plane is named
+        # (the label was removed from the ray trace on the left, where it
+        # covered the focal region), so give it a little more weight.
+        ax.text(0.02, focus_plane_y,
+                f"  focused at {fwl:.0f} nm",
+                color=focus_color, fontsize=9, fontweight="bold",
                 transform=ax.get_yaxis_transform(),
-                verticalalignment="bottom", alpha=0.9, zorder=5)
+                verticalalignment="bottom", alpha=0.95, zorder=5)
 
     ax.set_xlabel("x (mm)", fontsize=8)
     ax.set_ylabel("y (mm)", fontsize=8)
