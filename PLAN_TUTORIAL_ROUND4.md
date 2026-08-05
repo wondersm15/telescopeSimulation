@@ -55,10 +55,13 @@ Status: ⬜ open · 🔧 in progress · ✅ done+verified · ❓ needs decision/
 > example Airy disc seems to have Strehl/obstruction formulas that don't belong
 > there."
 - ✅ (a) Added variable keys to formulas (Airy: λ,D,N; obstruction: ε,S).
-- ❓ (b) COULD NOT REPRODUCE: the Airy module's plot/overlay/theory show only
-  θ=1.22λ/D and r=1.22λN; all Strehl code is scoped to central_obstruction and the
-  theory readout updates correctly on navigation (verified central_obstruction →
-  airy_disk). Likely a stale build on the user's side — flag for confirmation.
+- ✅ (b) **FIXED in Round 5, Batch P.** The earlier "could not reproduce" was wrong,
+  not stale: it checked the overlay and the theory readout, where Strehl *is*
+  correctly scoped to central_obstruction. The offending text is in the figure's own
+  metrics/formula panel — `plot_psf_profile` printed `Strehl ≈ {strehl:.3f}` and the
+  Marechal formula `Strehl ≈ 1/(1+(πσ/2r₁)²)` unconditionally, so a perfect parabola
+  with obstruction off read "Strehl ≈ 1.000" plus a formula in σ and r₁ the module
+  never introduces. Both now gated on `strehl < 0.9995`. See PLAN_TUTORIAL_ROUND5.md.
 
 ### R4.5 — Chromatic aberration
 > "We still don't have the legends in the left ray trace pulled outside of the plot

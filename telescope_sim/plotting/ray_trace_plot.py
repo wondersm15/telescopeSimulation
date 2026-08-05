@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import textwrap
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -1601,6 +1602,16 @@ def _compute_focal_image(telescope: Telescope,
             kr = np.sqrt(kxx ** 2 + kyy ** 2)
             airy_kernel = compute_psf(kr, aperture_diameter, focal_length,
                                       wavelength_mm, obs_ratio)
+            # R5.7 (defensive): the kernel is a SQUARE crop of an Airy pattern
+            # only 5 Airy radii wide, and the wings fall as r⁻³, so it is
+            # still ~1e-4 of peak where it stops. Measured, no box is visible
+            # in this figure today — the geometric spot it is convolved with
+            # is ~10x wider than the kernel and smears the square edge out —
+            # but taper it anyway so the sizing above can change safely.
+            # Analytic branch only: the FFT branch exists because spider vanes
+            # are present, and their spikes intentionally reach the kernel edge
+            # (the exception in _apply_circular_taper's docstring).
+            airy_kernel = _apply_circular_taper(airy_kernel)
             airy_kernel = airy_kernel / airy_kernel.sum()
         image = fftconvolve(geometric_image, airy_kernel, mode="same")
 
@@ -1689,7 +1700,9 @@ def _draw_focal_image(ax: plt.Axes, telescope: Telescope,
         info_lines.append(f"Seeing: {info['seeing_arcsec']:.1f}\"")
     approx_lines.append("Monochromatic")
 
-    info_text = "\n".join(info_lines)
+    # Same wrap as the source-image info box, at the narrower width fontsize 9
+    # allows, so this box can't grow out over the axes edge either.
+    info_text = _wrap_annotation(info_lines, width=48)
     approx_text = "Approx: " + "; ".join(approx_lines)
 
     ax.text(0.02, 0.02, info_text,
@@ -1879,7 +1892,14 @@ def plot_psf_profile(telescope: Telescope,
         ax2 = fig.add_subplot(gs[1])
         ax3 = fig.add_subplot(gs[2])
     else:
-        gs = fig.add_gridspec(1, 2, width_ratios=[1, 0.6], wspace=0.35)
+        # The metrics/formula panel used to get width_ratios 0.6 at wspace
+        # 0.35 — 124 px of a 500 px tutorial canvas, against a metrics block
+        # 218 px wide, so its right-hand 50 px fell off the FIGURE and was
+        # clipped away entirely. The panel is `axis("off")`, so unlike the
+        # plot beside it it needs no gutter for ticks and labels: dropping
+        # wspace to 0.10 pays for almost all of the extra width (panel
+        # 124 → 170 px) and costs the plot only ~7 px.
+        gs = fig.add_gridspec(1, 2, width_ratios=[1, 0.85], wspace=0.10)
         if log_scale:
             ax1 = None
             ax2 = fig.add_subplot(gs[0])
@@ -1913,7 +1933,13 @@ def plot_psf_profile(telescope: Telescope,
                     label=f"Airy radius: {airy_radius * 1000:.2f} \u00b5m")
         ax1.set_xlabel("Radial distance (\u00b5m)")
         ax1.set_ylabel("Normalized intensity")
-        ax1.set_title("Linear scale")
+        # Only in dual-panel mode, where the pair of titles IS the contrast.
+        # Alone it is both redundant (the y-label already says which scale)
+        # and harmful: the secondary top axis pushes the axes title up into
+        # the suptitle, and the two overprint — visible on the Airy-disc
+        # module as "Log scale" written through "Point Spread Function".
+        if log_scale is None:
+            ax1.set_title("Linear scale")
         ax1.legend(fontsize=7)
         ax1.grid(True, alpha=0.3)
         ax1.set_ylim(-0.05, 1.05)
@@ -1938,7 +1964,8 @@ def plot_psf_profile(telescope: Telescope,
                     alpha=0.6)
         ax2.set_xlabel("Radial distance (\u00b5m)")
         ax2.set_ylabel("Normalized intensity (log)")
-        ax2.set_title("Log scale")
+        if log_scale is None:      # see the note on the linear panel above
+            ax2.set_title("Log scale")
         ax2.legend(fontsize=7)
         ax2.grid(True, alpha=0.3)
         ax2.set_ylim(1e-4, 1.5)
@@ -1965,27 +1992,47 @@ def plot_psf_profile(telescope: Telescope,
     plate_scale_arcsec_per_mm = 206265.0 / focal_length
     airy_radius_arcsec = airy_radius * plate_scale_arcsec_per_mm
 
-    # Metrics block
+    # Metrics block. Built as a list of short lines \u2014 a line starting with
+    # spaces is a sub-note of the one above \u2014 so `_wrap_annotation` can fold
+    # anything still too long onto a continuation line instead of letting it
+    # run off the panel.
+    # R4.4b \u2014 "Airy disc seems to have Strehl/obstruction formulas that don't
+    # belong there." It did: the Strehl metric and the Marechal formula were
+    # printed unconditionally, so a perfect parabola with no obstruction
+    # reported "Strehl \u2248 1.000" and a formula in \u03c3 and r\u2081 that the Airy module
+    # never introduces. Show them only when something is actually costing
+    # Strehl \u2014 which is also the only case where they teach anything. (The
+    # earlier "could not reproduce" checked the theory readout and the
+    # scenario overlays; the offending text is inside this figure's own
+    # metrics/formula panel.)
+    shows_strehl = strehl < 0.9995
+
     if include_obstruction:
-        obs_line = (f"\u03b5 = {obs_ratio:.2f} ({obs_ratio:.0%} obstruction)\n"
-                    f"  geo Strehl = {strehl_geo:.3f}\n"
-                    f"  obs Strehl = {strehl_obs:.3f}  (1-\u03b5\u00b2)\u00b2")
+        obs_lines = [f"\u03b5 = {obs_ratio:.2f} ({obs_ratio:.0%} obstr.)"]
+        if shows_strehl:
+            obs_lines += [f"  geo Strehl = {strehl_geo:.3f}",
+                          f"  obs Strehl = {strehl_obs:.3f}",
+                          f"    = (1-\u03b5\u00b2)\u00b2"]
     else:
-        obs_line = "Obstruction: disabled"
-    metrics_text = (
-        f"D = {aperture_diameter:.0f} mm,  f/{f_ratio:.1f}\n"
-        f"\u03bb = {wavelength_nm:.0f} nm\n"
-        f"{obs_line}\n"
-        f"Airy radius: {airy_radius_arcsec:.3f}\" "
-        f"({airy_radius * 1000:.2f} \u00b5m)\n"
-        f"Rayleigh limit: {rayleigh_arcsec:.3f}\"\n"
-        f"RMS geo spot: {rms_spot * 1000:.2f} \u00b5m\n"
-        f"Strehl \u2248 {strehl:.3f}  (geo \u00d7 obs)\n"
-        f"Method: {method_label}"
-    )
+        obs_lines = ["Obstruction: disabled"]
+    metrics_lines = [
+        f"D = {aperture_diameter:.0f} mm,  f/{f_ratio:.1f}",
+        f"\u03bb = {wavelength_nm:.0f} nm",
+        *obs_lines,
+        f"Airy radius: {airy_radius_arcsec:.3f}\"",
+        f"  ({airy_radius * 1000:.2f} \u00b5m)",
+        f"Rayleigh: {rayleigh_arcsec:.3f}\"",
+        f"RMS geo spot: {rms_spot * 1000:.2f} \u00b5m",
+        *([f"Strehl \u2248 {strehl:.3f}", "  (geo \u00d7 obs)"] if shows_strehl else []),
+        f"Method: {method_label}",
+    ]
+    _METRICS_FONTSIZE = 8.0
+    metrics_text = _wrap_annotation(
+        metrics_lines,
+        width=_panel_char_budget(ax3, _METRICS_FONTSIZE))
     ax3.text(0.05, 0.97, "Metrics", fontsize=10, fontweight="bold",
              transform=ax3.transAxes, va="top")
-    ax3.text(0.05, 0.90, metrics_text, fontsize=9,
+    ax3.text(0.05, 0.90, metrics_text, fontsize=_METRICS_FONTSIZE,
              transform=ax3.transAxes, va="top", family="monospace",
              bbox=dict(boxstyle="round", facecolor="lightyellow", alpha=0.9))
 
@@ -2014,9 +2061,12 @@ def plot_psf_profile(telescope: Telescope,
         formulas.append(
             r"TSA (3rd order):  $\varepsilon(h) \approx \frac{-h^3}{8f^2}$"
         )
-    formulas.append(
-        r"Strehl $\approx \frac{1}{1+(\pi\sigma/2r_1)^2}$"
-    )
+    # Gated with the metric above (R4.4b): on a module with nothing degrading
+    # the Strehl this formula introduces σ and r₁ for no reason.
+    if shows_strehl:
+        formulas.append(
+            r"Strehl $\approx \frac{1}{1+(\pi\sigma/2r_1)^2}$"
+        )
 
     # Draw background box sized to content
     line_step = 0.065
@@ -2035,7 +2085,10 @@ def plot_psf_profile(telescope: Telescope,
 
     y = box_top - 0.02
     for formula in formulas:
-        ax3.text(0.06, y, formula, fontsize=8.5,
+        # 8.5 pt overran the aliceblue background box (and the panel) by up to
+        # 13 px at tutorial figure sizes. Mathtext cannot be wrapped the way
+        # the metrics block is, so this one shrinks instead.
+        ax3.text(0.06, y, formula, fontsize=8.0,
                  transform=ax3.transAxes, va="top", zorder=1)
         y -= line_step
 
@@ -3823,6 +3876,12 @@ def plot_coma_spot(
     airy_kernel = compute_psf(kr, telescope.primary_diameter,
                               telescope.focal_length, wavelength_mm,
                               obs_ratio)
+    # R5.7 (defensive): same square-support risk as the star paths, since the
+    # kernel's boundary lands inside the frame. Measured, no box is visible
+    # here today — the geometric coma comet this is convolved with is far
+    # wider than the kernel, so it smears the square edge out — but the taper
+    # costs nothing and holds if the kernel sizing above ever tightens.
+    airy_kernel = _apply_circular_taper(airy_kernel)
     airy_kernel = airy_kernel / airy_kernel.sum()
     image = fftconvolve(coma_image, airy_kernel, mode="same")
     if image.max() > 0:
@@ -3949,6 +4008,9 @@ def _draw_coma_ray_fan_panel(ax, telescope, field_angle_arcsec, obs_ratio,
                if inside else "parabola ⇒ coma (both edges bend alike)")
     # Inside the axes: at y = -0.22 this sat in the same band as the
     # figure-level caption below and the two overprinted each other.
+    # One line is ~204 px wide in a 148 px panel — centred, so it hung 28 px
+    # out of BOTH sides over the neighbouring panels. Two lines fit.
+    verdict = textwrap.fill(verdict, 24)
     ax.text(0.5, 0.015, verdict, transform=ax.transAxes, fontsize=7,
             ha="center", va="bottom", style="italic", color="dimgray",
             bbox=dict(boxstyle="round,pad=0.25", facecolor="white",
@@ -4633,6 +4695,17 @@ def _compute_psf_at_field_angle(telescope: Telescope,
             kernel = compute_psf(kr, telescope.primary_diameter,
                                  telescope.focal_length, wavelength_mm,
                                  obs_ratio)
+        # R5.7: this is the source of the "rectangular outline" around
+        # off-axis stars. The kernel is a SQUARE crop of an Airy pattern
+        # 5 Airy radii wide, and the Airy wings fall only as r⁻³ — measured
+        # here, the kernel is still at 7e-5 of its peak at the edge midpoint
+        # and 3e-4 in the corners, where it stops DISCONTINUOUSLY. Convolution
+        # stamps that support onto every star, and an asinh display stretch
+        # lifts 1e-4 into visible grey, so each star gained a faint square
+        # halo. `_apply_circular_taper` further down the star path could never
+        # catch it: that one masks the whole PSF array, whose inscribed circle
+        # is far outside this much smaller inner square.
+        kernel = _apply_circular_taper(kernel)
         kernel = kernel / kernel.sum()
 
         # Convolve coma with diffraction
@@ -4666,9 +4739,19 @@ def _apply_circular_taper(kernel: np.ndarray) -> np.ndarray:
     (and the geometric defocus disk in the polychromatic path fills its
     square support outright). Masking to the inscribed circle removes the
     square boundary; a short cosine taper over the outer rim avoids a hard
-    circular edge. Applied only on the star paths (point/double/field) —
-    extended-source spider spikes intentionally reach the kernel edge and
-    must not be tapered.
+    circular edge.
+
+    Apply this to EVERY square kernel whose convolution output is displayed as
+    a 2D image and whose support boundary falls inside the frame — the star
+    paths (point/double/field), the off-axis coma kernel inside
+    `_compute_psf_at_field_angle`, `_compute_focal_image`, and
+    `plot_coma_spot_2d`. Two deliberate exceptions:
+
+    * spider-vane kernels (the FFT branches), whose spikes are meant to reach
+      the kernel edge, and the extended-source path that uses them;
+    * kernels whose output is only sampled as a 1D radial cut along the axis
+      (the `combined_2d[center, center:]` profiles) — there is no box to
+      remove there, and the taper would suppress the plotted wings.
     """
     n = kernel.shape[0]
     if n < 4:
@@ -5651,6 +5734,68 @@ def _apply_exit_pupil_washout(image, image_rgb, exit_pupil_mm):
     return image, image_rgb, washout
 
 
+#: Character width the info-box annotation is wrapped to. The box is drawn in
+#: axes coordinates at fontsize 7 starting at x=0.02, so ~62 characters is the
+#: widest line that still ends inside the axes at the figure sizes the tutorial
+#: uses. Longer lines used to run out over the colourbar and collide with the
+#: title.
+_ANNOTATION_WIDTH = 62
+
+#: Character width the source-image title is wrapped to. Narrower than the
+#: annotation width because the title is fontsize 12, not 7.
+_TITLE_WIDTH = 42
+
+
+def _wrap_annotation(lines: list[str], width: int = _ANNOTATION_WIDTH) -> str:
+    """Wrap annotation lines to `width` chars, preserving the indent style.
+
+    Callers build annotation text as a list of short lines, where a line
+    beginning with spaces is a continuation/sub-note of the line above it.
+    Wrapping has to keep that structure: a wrapped line's own continuations
+    are indented two spaces past its original indent, so a long sub-note stays
+    visually subordinate instead of flattening into the parent line.
+    """
+    out: list[str] = []
+    for line in lines:
+        indent = line[:len(line) - len(line.lstrip(" "))]
+        body = line.strip()
+        if not body:
+            out.append("")
+            continue
+        wrapped = textwrap.wrap(
+            body, width=max(width - len(indent), 20),
+            initial_indent=indent, subsequent_indent=indent + "  ",
+            break_long_words=False, break_on_hyphens=False,
+        )
+        out.extend(wrapped or [line])
+    return "\n".join(out)
+
+
+#: Advance width of DejaVu Sans Mono, in em. Every glyph in a monospace font
+#: is exactly this wide, so a line's rendered width is
+#: `len(line) * fontsize * _MONO_ADVANCE_EM` points — which is what makes the
+#: character budget below an exact calculation rather than a guess.
+_MONO_ADVANCE_EM = 0.602
+
+
+def _panel_char_budget(ax: plt.Axes, fontsize: float,
+                       x_start: float = 0.05, right_pad: float = 0.05,
+                       box_pad_px: float = 8.0) -> int:
+    """Monospace characters that fit across `ax` at `fontsize`.
+
+    The metrics block lives in a narrow, axis-off side panel whose width is
+    whatever the caller's `figsize` and the gridspec give it. A hard-coded
+    wrap width would fit one figure size and be clipped at every other, so
+    measure the panel instead. `get_position()` is the gridspec-assigned
+    subplot rectangle, available before the first draw.
+    """
+    fig = ax.get_figure()
+    panel_px = ax.get_position().width * fig.get_figwidth() * fig.dpi
+    usable_px = panel_px * (1.0 - x_start - right_pad) - box_pad_px
+    char_px = fontsize / 72.0 * fig.dpi * _MONO_ADVANCE_EM
+    return max(int(usable_px / char_px), 12)
+
+
 def plot_source_image(telescope: Telescope,
                       source,
                       wavelength_nm: float = 550.0,
@@ -5925,9 +6070,13 @@ def plot_source_image(telescope: Telescope,
     fig_title = title
     if eyepiece is not None:
         fig_title += f" \u2014 {mag:.0f}\u00d7 (enhanced view)"
-    ax.set_title(fig_title, fontsize=12)
+    # A title is centred on the AXES, but this figure gives its right-hand
+    # margin to a colourbar, so a one-line title long enough to overflow runs
+    # visibly UNDER the colourbar ("...f/3.0 Para|bolic"). Wrap it instead.
+    ax.set_title(_wrap_annotation([fig_title], width=_TITLE_WIDTH),
+                 fontsize=12)
 
-    ax.text(0.02, 0.98, "\n".join(ann_lines),
+    ax.text(0.02, 0.98, _wrap_annotation(ann_lines),
             transform=ax.transAxes, fontsize=7,
             verticalalignment="top",
             bbox=dict(boxstyle="round,pad=0.3", facecolor="black",
@@ -6038,7 +6187,7 @@ def plot_source_image(telescope: Telescope,
         f"Exit pupil: {exit_pupil:.1f}mm",
         "Assumes 50cm viewing distance, 96 DPI",
     ]
-    ax2.text(0.02, 0.98, "\n".join(true_ann),
+    ax2.text(0.02, 0.98, _wrap_annotation(true_ann),
              transform=ax2.transAxes, fontsize=7,
              verticalalignment="top",
              bbox=dict(boxstyle="round,pad=0.3", facecolor="black",
@@ -6104,7 +6253,7 @@ def plot_source_image(telescope: Telescope,
         if washout_strength > 0.01:
             ev_ann.append(f"Washout: {washout_strength:.0%}")
 
-        ax3.text(0.02, 0.98, "\n".join(ev_ann),
+        ax3.text(0.02, 0.98, _wrap_annotation(ev_ann),
                  transform=ax3.transAxes, fontsize=7,
                  verticalalignment="top",
                  bbox=dict(boxstyle="round,pad=0.3", facecolor="black",

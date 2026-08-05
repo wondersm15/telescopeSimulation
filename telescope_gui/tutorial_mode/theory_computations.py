@@ -419,12 +419,6 @@ def _coma_starfield_overlay(fig: Figure, theory_result: dict, telescope) -> None
                              edgecolor='cyan', linewidth=1.2,
                              linestyle='-', alpha=0.7, zorder=4)
     ax.add_patch(cff_circle)
-    # Place label just outside the cff circle at NE direction
-    label_r = cff_arcsec * 1.05
-    ax.annotate(f"cff = {cff_arcsec:.1f}″",
-                xy=(cff_arcsec * 0.71, cff_arcsec * 0.71),
-                xytext=(8, 8), textcoords='offset points',
-                fontsize=7, color='cyan')
 
     # 10× cff
     cff10 = 10.0 * cff_arcsec
@@ -432,14 +426,31 @@ def _coma_starfield_overlay(fig: Figure, theory_result: dict, telescope) -> None
                               edgecolor='orange', linewidth=1.2,
                               linestyle='--', alpha=0.7, zorder=4)
     ax.add_patch(cff10_circle)
-    ax.annotate(f"10× cff = {cff10:.1f}″",
-                xy=(cff10 * 0.71, cff10 * 0.71),
-                xytext=(8, 8), textcoords='offset points',
-                fontsize=7, color='orange')
+
+    # The stars sit along y = 0 and carry their own angle labels ABOVE them,
+    # so both circle labels go BELOW the axis. The old placement was on each
+    # circle's NE diagonal: at f/3 cff is 2.1″ in a ±150″ frame, so "cff = 2.1″"
+    # landed on top of the "0″" and "30″" star labels (visible in the GUI).
+    #
+    # Below the axis is the free band, but NOT at each circle's own radius:
+    # a 2.1″ circle in a ±150″ frame puts its label 2.1″ from the origin,
+    # i.e. on top of the very central star it describes, and 10× cff is only
+    # 18″ further down so the two labels then collide with each other. Each
+    # label therefore sits at whichever is LOWER — its own radius, or a fixed
+    # row — which follows a large circle outward and keeps a small one clear.
+    # Colour still ties each label to its circle.
+    ylim = ax.get_ylim()
+    y_span = ylim[1] - ylim[0]
+    y_offset = y_span * 0.04
+    for radius, row, text, color in (
+            (cff_arcsec, 0.07, f"cff = {cff_arcsec:.1f}″", 'cyan'),
+            (cff10, 0.13, f"10× cff = {cff10:.1f}″", 'orange')):
+        y = max(min(-radius, -y_span * row), ylim[0] + y_span * 0.03)
+        ax.annotate(text, xy=(0, y), xytext=(0, -4),
+                    textcoords='offset points', fontsize=7, color=color,
+                    ha='center', va='top', zorder=6)
 
     # Minimal angle labels above each star
-    ylim = ax.get_ylim()
-    y_offset = (ylim[1] - ylim[0]) * 0.04
     for ang in ComaDemoField.DEMO_ANGLES_ARCSEC:
         ax.text(ang, y_offset, f"{int(ang)}″",
                 fontsize=8, color="yellow", ha="center", va="bottom",

@@ -90,8 +90,8 @@ Follow-up detail (same session):
 > rectangular outlines when coma is enhanced. Go through everywhere and make sure
 > we don't have these box artifacts anywhere."
 
-- ⬜ (a) Box artifact still present at enhanced coma.
-- ⬜ (b) Sweep EVERYWHERE for box artifacts (explicit cross-cutting instruction).
+- ✅ (a) Box artifact still present at enhanced coma.
+- ✅ (b) Sweep EVERYWHERE for box artifacts (explicit cross-cutting instruction).
 
 ### R5.8 — Colour filters on Jupiter
 > "with detector view as you vary exposure you can get what appears to be a high
@@ -373,7 +373,7 @@ User (2026-08-02): **order doesn't matter.**
 - **Batch O — pupil colour scale + spherical:** R5.5d (signed diverging colormap across ALL
   ray-fan/spot figures), R5.5a/b/c (narrative, inset orientation, x/y/z consistency).
 - **Batch P — box-artifact sweep:** R5.7a/b — render every star path at extreme
-  coma/defocus, find what escapes `_apply_circular_taper`.
+  coma/defocus, find what escapes `_apply_circular_taper`. **DONE.**
 - **Batch Q — chromatic colour correctness:** R5.6a–d. Fix the `n // 2` centring in
   `chromatic_psf_kernel`, audit all five sibling sites, add a regression test asserting
   per-channel centroid alignment.
@@ -765,3 +765,177 @@ opposite sign — which is what bends the fan into an S). The side label went fr
   conforming to the z-is-the-optical-axis convention. The spherical module was swept
   again on its own after the depth-of-focus fix landed (40 renders across both
   primaries and both slider extremes, same clean audit).
+
+---
+
+## R5.7 — BATCH P: FIX APPLIED AND VERIFIED THROUGH THE GUI
+
+### The root cause: a square kernel, not a clipped spot
+
+The pre-batch hypothesis (above) was that the `if 0 <= ix < num_pixels` guard was
+clipping an oversized geometric spot square. **That was wrong.** Reproducing it first —
+zoomed, asinh ×3000 crops of individual stars from a real `ComaDemoField` render —
+showed the tell: **on-axis stars were round, off-axis stars were square.** The only
+thing that differs between them is that the off-axis branch convolves.
+
+`_compute_psf_at_field_angle`'s off-axis branch builds its Airy kernel as a **square
+crop** `kernel_half = 5 × airy_radius` wide. The Airy wings fall only as r⁻³, so the
+kernel does not reach zero there — measured on the 200 mm f/3 case:
+
+| position on the kernel | value / peak |
+|---|---|
+| edge midpoint | 7.5 × 10⁻⁵ |
+| corner | 2.7 × 10⁻⁴ |
+| fraction of kernel *sum* outside the inscribed circle | 0.37 % |
+
+An asinh display stretch lifts anything above ~10⁻⁴ into visible grey, and the kernel
+**stops discontinuously** at that boundary. Convolution stamps the kernel's support onto
+every star it touches. The fix is one line: `kernel = _apply_circular_taper(kernel)`
+before the normalisation.
+
+`_apply_circular_taper` already existed and was already applied on the star paths — but
+to the *whole* PSF array, whose inscribed circle is far outside this much smaller inner
+square, so it could never have caught it.
+
+### The sibling audit — every square convolution kernel
+
+Per the standing "check elsewhere for the same error" instruction, all seven `fftconvolve`
+kernel sites were classified by **whether the convolution output is displayed as a 2D
+image with the kernel's support boundary inside the frame**:
+
+| site | disposition |
+|---|---|
+| `_compute_psf_at_field_angle` off-axis coma kernel | **the bug — now tapered** |
+| star path whole-PSF (×3, pre-existing) | already tapered |
+| `_compute_focal_image` analytic Airy kernel | tapered (defensive) |
+| `plot_coma_spot` Airy kernel | tapered (defensive) |
+| three 1-D radial-profile kernels (`combined_2d[center, center:]`) | **deliberately not** |
+| spider-vane FFT kernels + extended-source path | **deliberately not** |
+
+The two "defensive" ones are labelled honestly in the code and in their tests: **measured,
+no box is visible in either figure with the taper on or off**, because the geometric spot
+each is convolved with is far wider than the kernel and smears the square edge out. The
+1-D sites are sampled only along the axis, where the square and the inscribed circle
+coincide — there is no box there, and tapering would suppress the plotted wings. The
+spider exception is the pre-existing one: those spikes are real and must reach the edge.
+
+### The detector, and what it does and does not prove
+
+A first detector (corner-vs-axis intensity ratio) **fired on every Airy pattern** — 171×
+on a plain `PointSource` — because it picked ring maxima as star centres. The working
+discriminator is *which metric the feature is constant along*: a square support is flat
+along a **Chebyshev** ring and cliffs to the next one out; an Airy ring is flat along a
+**Euclidean** ring and varies wildly along a Chebyshev one. Score = step ÷ coefficient of
+variation.
+
+**Scope limit, stated plainly:** that detector only fires on a **hard** square edge (it
+requires a >2× cliff between adjacent rings). Measured, it scores the coma field at
+**5.4 with the inner kernel taper both on and off** — the inner square is softened by the
+convolution, so the numeric sweep cannot see the very defect this batch fixed. The
+evidence for that fix is (a) the zoomed montages, square before and round after, and
+(b) a kernel-level test. The sweep's value is as a guard against hard squares anywhere
+else, which is what R5.7b actually asked for.
+
+### The sweep
+
+Calibrated first (taper disabled → score 1.1 × 10²⁷; taper enabled → 5.4), then run over
+**6 telescopes × 8 star sources × linear/asinh × seeing on/off × poly on/off, plus
+4 telescopes × 3 extended sources × 2 stretches**. Four hits, all the same frame: a
+300 mm f/2 `DynamicRangeField` centre star at score **9.2**. Inspected pixel-by-pixel and
+as a magnified image: **perfectly round concentric Airy rings** — at r = 4 px a
+well-sampled Airy ring is round enough to read as "flat along a Chebyshev ring", and the
+corner/edge ratio is 0.07, the *opposite* of a square. False positive; threshold set to
+100 accordingly.
+
+### Found while verifying through the GUI (none visible in the source)
+
+- **The info box overran the axes.** `ax.text(..., "\n".join(ann_lines))` does not wrap,
+  so lines like *"Eye view (perceptual): exposure N/A — star brightness ∝ aperture²
+  (until it saturates)"* ran out past the right axis edge into the colourbar. New
+  `_wrap_annotation` helper wraps to a bounded width with a **hanging indent**, so a
+  wrapped sub-note stays visually subordinate instead of flattening into its parent.
+  Applied at all four annotation sites (source image, true-size view, eyepiece view,
+  focal-plane info box).
+- **The title ran under the colourbar.** A title is centred on the *axes*, but this
+  figure gives its right margin to a colourbar, so *"…200 mm f/3.0 Para|bolic"* was
+  literally cut by it. Now wrapped to two lines.
+- **The coma reference-circle labels collided with the star labels.** They were placed on
+  each circle's NE diagonal; at f/3, cff = 2.1″ in a ±150″ frame, so *"cff = 2.1″"* landed
+  on top of the *"0″"* and *"30″"* star labels. Both circle labels now go **below** the
+  axis, where the stars (which label upward) are not — and not at each circle's *own*
+  radius, which for a 2.1″ circle in a ±150″ frame put the label back on top of the very
+  star it describes. Each sits at whichever is lower, its radius or a fixed row.
+- **The whole metrics panel ran off the FIGURE.** `plot_psf_profile`'s metrics block is
+  monospace at 9 pt and 218 px wide; the panel holding it was 124 px of the 500 px
+  tutorial canvas, so **50 px fell off the right edge of the figure and were clipped
+  away** — the user lost the right ~23 % of every metrics line on `airy_disk` and
+  `central_obstruction`, two Act-1 modules. All four formula lines overran the panel too
+  (4–13 px), spilling past their own background box. Fixed on three fronts: the panel is
+  `axis("off")` and so needs no gutter for ticks, so `wspace` 0.35 → 0.10 buys it
+  124 → 170 px at a cost of 7 px to the plot; the metrics text is now built as short
+  lines and wrapped to a **measured** character budget (new `_panel_char_budget`, exact
+  because monospace advance is a constant) rather than a hard-coded width that fits one
+  figsize and clips at every other; and the mathtext formulas, which cannot be wrapped,
+  drop 8.5 → 8 pt.
+- **"Log scale" was written through the suptitle.** In single-panel mode the panel title
+  is redundant — the y-label already names the scale — and the secondary top axis pushes
+  it up into `fig.suptitle`. Titled only in dual-panel mode now, where the *pair* is the
+  contrast. A sweep of all 17 scenarios × every control found exactly 3 overprints, all
+  this one figure.
+
+### R4.4b — the open Round-4 flag, reproduced and fixed
+
+> "we have the appropriate formulas (only) for the module in question. For example Airy
+> disc seems to have Strehl/obstruction formulas that don't belong there."
+
+Round 4 closed this as ❓ *"could not reproduce — likely a stale build on the user's
+side."* **That was wrong, and the screenshot above shows why:** Round 4 checked the
+theory readout and the scenario overlays, where all Strehl code is indeed scoped to
+`central_obstruction`. The offending text is in the *figure's own* metrics/formula panel,
+which appended `Strehl ≈ {strehl:.3f} (geo × obs)` and the Marechal formula
+`Strehl ≈ 1/(1+(πσ/2r₁)²)` **unconditionally** — so a perfect parabola with obstruction
+disabled reported "Strehl ≈ 1.000" plus a formula in σ and r₁ that the Airy module never
+introduces. Both are now gated on `strehl < 0.9995`: shown exactly when something is
+actually costing Strehl, which is the only case where they teach anything. Verified in
+both directions — a 30 % obstruction and a spherical primary each bring them back.
+
+**Lesson:** "could not reproduce" needs to name *where it looked*. Grepping for the
+feature found every place Strehl was *computed* and none of the place it was *printed*.
+
+### Verification
+
+- **532 tests pass**, up from 511. 23 new across five classes:
+  `TestCircularTaperRemovesSquareKernelSupport` (8, of which 2 are
+  detector-calibration tests), `TestAnnotationBoxesStayInsideTheirAxes` (3),
+  `TestComaReferenceCircleLabelsDoNotCollide` (3),
+  `TestMetricsPanelFitsItsAxes` (4), `TestStrehlOnlyWhereItApplies` (3),
+  plus 2 kernel-level guards.
+- **Load-bearing, checked by reverting to the true pre-batch state.** With the one-line
+  taper removed, `test_offaxis_kernel_corners_are_zeroed` fails on a corner value of
+  2.1 × 10⁻⁶. Five more were confirmed the same way — and doing it properly caught **two
+  weak tests of my own**: `test_metrics_block_stays_inside_the_figure` passed against a
+  partial revert (I had restored the panel width but not the original long-line
+  f-strings, so the lines were still short) and only failed once the revert was complete;
+  and `test_circle_labels_clear_the_stars_themselves` asserted a 4 px clearance when the
+  buggy placement already gave 8 px, so it now requires 4 % of the axes height. Two
+  further tests exist *only* to prove the box detectors fire on the artifact, so no
+  threshold assertion in that class can pass vacuously.
+- **Rendered through the real GUI**, sidebar navigation, `widget.grab()` on the actual
+  canvas widget — that is how every knock-on defect above was found.
+- **Full control sweep, post-fix.** All 17 scenarios × every combo value, checkbox state
+  and slider position, navigated through the sidebar — **2475 renders**:
+
+  | counter | before Batch P | after |
+  |---|---|---|
+  | null figures | 0 | **0** |
+  | 2D images box-scanned | 1897 | **1897** |
+  | box artifacts (score > 100) | 0 | **0** |
+  | banned axis / colourbar labels | 0 | **0** |
+  | annotation boxes overrunning their axes | 114 (3 distinct) | **0** |
+  | suptitle / axes-title overprints | 3 | **0** |
+
+  The box-artifact counter reads 0 both before and after **by design** — see the stated
+  scope limit above: that detector fires on a *hard* square edge, and the coma field's
+  softened inner square is invisible to it. Its job in this sweep is to prove no *other*
+  instance exists anywhere in the tutorial, which is what R5.7b asked for. The evidence
+  for the fix itself is the kernel-level test that fails on revert.

@@ -899,3 +899,590 @@ class TestSphericalNarrativeMatchesTheFigures:
     def test_side_label_mentions_both_panels(self):
         label = self._scenario().after_label.lower()
         assert "caustic" in label and "fan" in label
+
+
+
+# ------------------------------------------------------------------
+# R5.7: square kernel-support ("box around every star") artifacts
+# ------------------------------------------------------------------
+
+def _chebyshev_ring(img, cy, cx, r):
+    """Values on the square ring max(|dy|, |dx|) == r, or None if off-frame."""
+    import numpy as np
+    h, w = img.shape
+    if cy - r < 0 or cx - r < 0 or cy + r >= h or cx + r >= w:
+        return None
+    return np.concatenate([
+        img[cy - r, cx - r:cx + r + 1],
+        img[cy + r, cx - r:cx + r + 1],
+        img[cy - r + 1:cy + r, cx - r],
+        img[cy - r + 1:cy + r, cx + r],
+    ])
+
+
+def box_score_at(img, cy, cx, r_min=4, floor_frac=3e-5):
+    """Score how strongly a SQUARE outline is present around (cy, cx).
+
+    The discriminator is which metric the feature is constant along. A square
+    kernel support is flat along a CHEBYSHEV ring and then cliffs to the next
+    ring out; an Airy ring is flat along a EUCLIDEAN ring and varies wildly
+    along a Chebyshev one, because the corners sit 1.41x further from centre.
+    So score = (drop from ring r to ring r+1) / (variation around ring r):
+    only a square support scores both terms at once. An earlier attempt that
+    compared corner brightness to axis brightness fired on every Airy pattern.
+    """
+    import numpy as np
+    peak = float(img.max())
+    if peak <= 0:
+        return 0.0
+    r_max = min(cy, cx, img.shape[0] - cy - 2, img.shape[1] - cx - 2)
+    best = 0.0
+    for r in range(r_min, max(r_min + 1, r_max - 1)):
+        a = _chebyshev_ring(img, cy, cx, r)
+        b = _chebyshev_ring(img, cy, cx, r + 1)
+        if a is None or b is None:
+            continue
+        ma, mb = float(a.mean()), float(b.mean())
+        if ma < floor_frac * peak:      # below display visibility
+            continue
+        cv = float(a.std()) / max(ma, 1e-30)
+        if cv > 0.6:                    # not flat -> a ring, not a box edge
+            continue
+        step = ma / max(mb, 1e-30)
+        if step < 2.0:                  # no cliff -> smooth falloff
+            continue
+        best = max(best, step / max(cv, 0.02))
+    return best
+
+
+def worst_box_score(img, n_peaks=6, min_sep=30):
+    """Worst box score over the brightest sources plus the frame centre."""
+    import numpy as np
+    from scipy.ndimage import maximum_filter
+    mx = maximum_filter(img, size=min_sep)
+    cand = np.argwhere((img == mx) & (img > 0.05 * img.max()))
+    order = np.argsort(img[cand[:, 0], cand[:, 1]])[::-1]
+    centres, worst = [], 0.0
+    for i in order:
+        y, x = int(cand[i, 0]), int(cand[i, 1])
+        if any(abs(y - py) < min_sep and abs(x - px) < min_sep
+               for py, px in centres):
+            continue
+        centres.append((y, x))
+        if len(centres) >= n_peaks:
+            break
+    centres.append((img.shape[0] // 2, img.shape[1] // 2))
+    for cy, cx in centres:
+        worst = max(worst, box_score_at(img, cy, cx))
+    return worst
+
+
+BOX_THRESHOLD = 100.0
+"""Above this a square outline is unambiguously present.
+
+Calibrated by `test_detector_fires_on_the_untapered_star_field`: with the taper
+removed the coma field scores ~1e27, while the same field rendered with it
+scores single digits. A well-sampled Airy ring can reach ~9 (measured on a
+300mm f/2 with no seeing), so the threshold sits an order of magnitude above
+the worst legitimate feature and far below the artifact.
+"""
+
+
+@pytest.fixture(scope="module")
+def _coma_telescope():
+    from telescope_gui.telescope_builder import build_telescope
+    return build_telescope(telescope_type="Newtonian", diameter=200,
+                           focal_length=600, primary_type="parabolic",
+                           enable_obstruction=True, obstruction_ratio=0.2,
+                           spider_vanes=0)
+
+
+def _capture_source_image(monkeypatch, telescope, source, **kwargs):
+    """Render through plot_source_image and return the array actually drawn."""
+    import numpy as np
+    import matplotlib.pyplot as plt
+    import telescope_sim.plotting.ray_trace_plot as rtp
+
+    captured = {}
+    original = rtp._draw_source_on_axes
+
+    def spy(ax, display_image, display_rgb, half_fov, log_scale, colormap,
+            fig):
+        if "img" not in captured:
+            captured["img"] = (None if display_image is None
+                               else np.array(display_image))
+            captured["rgb"] = (None if display_rgb is None
+                               else np.array(display_rgb))
+        return original(ax, display_image, display_rgb, half_fov, log_scale,
+                        colormap, fig)
+
+    monkeypatch.setattr(rtp, "_draw_source_on_axes", spy)
+    figures = rtp.plot_source_image(telescope, source, **kwargs)
+    for fig in (figures if isinstance(figures, list) else [figures]):
+        plt.close(fig)
+    img = captured.get("img")
+    if img is None and captured.get("rgb") is not None:
+        img = captured["rgb"].max(axis=2)
+    return img
+
+
+class TestCircularTaperRemovesSquareKernelSupport:
+    """R5.7: "the stars again seem like they have clear rectangular outlines".
+
+    Root cause: an Airy convolution kernel is a SQUARE crop only ~5 Airy radii
+    wide, and the Airy wings fall as r^-3, so the kernel is still ~1e-4 of its
+    peak where it stops DISCONTINUOUSLY. Convolution stamps that support onto
+    every star and an asinh stretch lifts 1e-4 into visible grey.
+
+    Each pair of tests below first shows the detector FIRING with the taper
+    disabled, so the passing assertion is load-bearing rather than vacuous.
+    """
+
+    def test_taper_zeroes_the_corners_and_keeps_the_core(self):
+        import numpy as np
+        from telescope_sim.plotting.ray_trace_plot import _apply_circular_taper
+        flat = np.ones((65, 65))
+        out = _apply_circular_taper(flat)
+        assert out[0, 0] == 0.0 and out[0, -1] == 0.0
+        assert out[-1, 0] == 0.0 and out[-1, -1] == 0.0
+        # Everything inside 85% of the inscribed radius is untouched.
+        assert out[32, 32] == 1.0
+        assert out[32, 32 + 20] == 1.0        # 20 < 0.85 * 32
+        assert out.min() >= 0.0 and out.max() <= 1.0
+
+    def test_detector_fires_on_the_untapered_star_field(
+            self, monkeypatch, _coma_telescope):
+        import telescope_sim.plotting.ray_trace_plot as rtp
+        from telescope_sim.source.sources import ComaDemoField
+        monkeypatch.setattr(rtp, "_apply_circular_taper", lambda k: k)
+        img = _capture_source_image(
+            monkeypatch, _coma_telescope,
+            ComaDemoField(field_radius_arcsec=150.0),
+            display_stretch="asinh", apply_coma=True, seeing_arcsec=None)
+        assert worst_box_score(img) > BOX_THRESHOLD
+
+    def test_stars_have_no_square_outline(self, monkeypatch, _coma_telescope):
+        """Guards the whole-PSF taper on the star path.
+
+        Scope note: this pair is only sensitive to a HARD square edge — it
+        needs a >2x cliff between adjacent Chebyshev rings. Measured, it scores
+        the same 5.4 with and without the *inner* kernel taper, because that
+        square is softened by the convolution. So it does NOT cover the
+        off-axis kernel; `test_offaxis_kernel_corners_are_zeroed` does.
+        """
+        from telescope_sim.source.sources import ComaDemoField
+        img = _capture_source_image(
+            monkeypatch, _coma_telescope,
+            ComaDemoField(field_radius_arcsec=150.0),
+            display_stretch="asinh", apply_coma=True, seeing_arcsec=None)
+        assert worst_box_score(img) < BOX_THRESHOLD
+
+    @staticmethod
+    def _capture_offaxis_kernel(monkeypatch, telescope):
+        """The kernel `_compute_psf_at_field_angle` actually convolves with."""
+        import scipy.signal
+        import telescope_sim.plotting.ray_trace_plot as rtp
+        captured = []
+        original = scipy.signal.fftconvolve
+
+        def spy(a, b, *args, **kwargs):
+            captured.append(b)
+            return original(a, b, *args, **kwargs)
+
+        # The function imports fftconvolve locally, so patch it at the source.
+        monkeypatch.setattr(scipy.signal, "fftconvolve", spy)
+        rtp._compute_psf_at_field_angle(telescope, 60.0, 550.0, 121, 0.05,
+                                        True, True)
+        assert captured, "no convolution happened on the off-axis path"
+        return captured[0]
+
+    def test_untapered_offaxis_kernel_stops_while_still_visible(
+            self, monkeypatch, _coma_telescope):
+        """Calibration: the square support is real and above visibility.
+
+        An asinh display stretch lifts anything above ~1e-4 of peak into
+        visible grey, so a kernel that is still that bright where it stops
+        stamps its square outline onto every star it is convolved with.
+        """
+        import telescope_sim.plotting.ray_trace_plot as rtp
+        monkeypatch.setattr(rtp, "_apply_circular_taper", lambda k: k)
+        kernel = self._capture_offaxis_kernel(monkeypatch, _coma_telescope)
+        peak = kernel.max()
+        assert kernel[0, 0] / peak > 1e-4          # corner
+        assert kernel[kernel.shape[0] // 2, 0] / peak > 1e-5   # edge midpoint
+
+    def test_offaxis_kernel_corners_are_zeroed(self, monkeypatch,
+                                               _coma_telescope):
+        """R5.7's actual fix: the off-axis Airy kernel is tapered.
+
+        Verified visually as well — zoomed montages of the coma-demo field
+        show square-cornered halos before this and round stars after.
+        """
+        import numpy as np
+        kernel = self._capture_offaxis_kernel(monkeypatch, _coma_telescope)
+        n = kernel.shape[0]
+        for corner in ((0, 0), (0, n - 1), (n - 1, 0), (n - 1, n - 1)):
+            assert kernel[corner] == 0.0
+        # The core survives: still normalised, still peaked at the centre.
+        assert kernel[n // 2, n // 2] == kernel.max()
+        assert np.isclose(kernel.sum(), 1.0)
+
+    @staticmethod
+    def _taper_spy(monkeypatch):
+        """Record every kernel that goes through the taper, still tapering."""
+        import telescope_sim.plotting.ray_trace_plot as rtp
+        calls = []
+        original = rtp._apply_circular_taper
+
+        def spy(kernel):
+            calls.append(kernel.shape)
+            return original(kernel)
+
+        monkeypatch.setattr(rtp, "_apply_circular_taper", spy)
+        return calls
+
+    def test_coma_spot_diagram_tapers_its_kernel(self, monkeypatch,
+                                                 _coma_telescope):
+        """plot_coma_spot's kernel is tapered as defence-in-depth.
+
+        No box is VISIBLE in this figure: measured, the box score is 0 with
+        the taper both on and off, because the geometric coma comet is far
+        wider than the kernel and smears its square edge out. So the guard has
+        to be structural — assert the path tapers, not that a box vanished.
+        Claiming a behavioural fix here would overstate what was measured.
+        """
+        import matplotlib.pyplot as plt
+        import telescope_sim.plotting.ray_trace_plot as rtp
+        calls = self._taper_spy(monkeypatch)
+        plt.close(rtp.plot_coma_spot(_coma_telescope, 300.0))
+        assert calls, "plot_coma_spot did not taper its Airy kernel"
+
+    def test_focal_image_tapers_its_analytic_kernel(self, monkeypatch):
+        """Same situation as plot_coma_spot: structural guard, no visible box.
+
+        Here the geometric spot is ~10x wider than the kernel (measured: RMS
+        25.5 um against an 8.5 px kernel half-width), so the square edge never
+        survives the convolution.
+        """
+        import telescope_sim.plotting.ray_trace_plot as rtp
+        from telescope_gui.telescope_builder import build_telescope
+        spherical = build_telescope(telescope_type="Newtonian", diameter=200,
+                                    focal_length=800, primary_type="spherical",
+                                    enable_obstruction=False, spider_vanes=0)
+        calls = self._taper_spy(monkeypatch)
+        rtp._compute_focal_image(spherical, num_pixels=256,
+                                 method="analytical")
+        assert calls, "_compute_focal_image did not taper its Airy kernel"
+
+    def test_extended_sources_keep_their_spider_spikes(self):
+        """The documented exception: tapering the extended-source kernel would
+        clip diffraction spikes, which are real and must reach the frame."""
+        import numpy as np
+        from telescope_gui.telescope_builder import build_telescope
+        from telescope_sim.source.sources import Jupiter
+        import telescope_sim.plotting.ray_trace_plot as rtp
+        spider = build_telescope(telescope_type="Newtonian", diameter=200,
+                                 focal_length=1200, primary_type="parabolic",
+                                 enable_obstruction=True,
+                                 obstruction_ratio=0.25, spider_vanes=4,
+                                 spider_vane_width=2.0)
+        image, _rgb, info = rtp._render_source_through_telescope(
+            Jupiter(), spider, seeing_arcsec=None)
+        assert np.isfinite(image).all() and image.max() > 0
+
+
+class TestAnnotationBoxesStayInsideTheirAxes:
+    """Batch P: the source-image info box and title both overran the axes.
+
+    Seen in a real GUI capture of the coma module: the info box's long lines
+    ("Display: asinh stretch (boosts dim features; data unchanged)") ran out
+    past the right axis edge, and the one-line title ran under the colourbar
+    ("...f/3.0 Para|bolic"). Both are now wrapped.
+    """
+
+    def _figure(self, **kwargs):
+        import matplotlib.pyplot as plt
+        from telescope_gui.telescope_builder import build_telescope
+        from telescope_sim.plotting.ray_trace_plot import plot_source_image
+        from telescope_sim.source.sources import ComaDemoField
+        telescope = build_telescope(telescope_type="Newtonian", diameter=200,
+                                    focal_length=600, primary_type="parabolic",
+                                    enable_obstruction=True,
+                                    obstruction_ratio=0.2, spider_vanes=0)
+        fig = plot_source_image(telescope,
+                                ComaDemoField(field_radius_arcsec=150.0),
+                                seeing_arcsec=1.5, **kwargs)
+        fig.canvas.draw()
+        try:
+            yield_fig = fig
+            return yield_fig
+        finally:
+            pass
+
+    def test_wrap_preserves_content_and_bounds_the_width(self):
+        from telescope_sim.plotting.ray_trace_plot import (
+            _wrap_annotation, _ANNOTATION_WIDTH)
+        lines = [
+            "FOV: 300\" x 300\"",
+            "Eye view (perceptual): exposure N/A - star brightness is "
+            "proportional to aperture squared (until it saturates)",
+            "  (concentric rings = Airy diffraction pattern; atmosphere "
+            "normally blurs them)",
+        ]
+        out = _wrap_annotation(lines)
+        assert all(len(ln) <= _ANNOTATION_WIDTH for ln in out.split("\n"))
+        # No word is lost or mangled.
+        assert " ".join(out.split()) == " ".join(" ".join(lines).split())
+        # A sub-note stays visually subordinate to the line above it.
+        wrapped_sub = [ln for ln in out.split("\n") if "concentric" in ln][0]
+        assert wrapped_sub.startswith("  ")
+
+    def test_info_box_does_not_overrun_the_axes(self):
+        import matplotlib.pyplot as plt
+        fig = self._figure(display_stretch="log_integrated")
+        ax = fig.axes[0]
+        boxes = [t for t in ax.texts if t.get_bbox_patch() is not None]
+        assert boxes, "the source image lost its info box"
+        ax_bb = ax.get_window_extent()
+        for t in boxes:
+            assert t.get_window_extent().x1 <= ax_bb.x1 + 2.0
+        plt.close(fig)
+
+    def test_title_does_not_overrun_the_axes(self):
+        import matplotlib.pyplot as plt
+        fig = self._figure()
+        ax = fig.axes[0]
+        title = ax.title
+        assert title.get_text()
+        ax_bb = ax.get_window_extent()
+        tb = title.get_window_extent()
+        assert tb.x0 >= ax_bb.x0 - 2.0 and tb.x1 <= ax_bb.x1 + 2.0
+        plt.close(fig)
+
+
+class TestComaReferenceCircleLabelsDoNotCollide:
+    """Batch P: at f/3, cff is 2.1" in a +/-150" frame, so the old NE-diagonal
+    placement dropped "cff = 2.1"" straight onto the "0"" and "30"" star
+    labels. Both circle labels now go below the axis, where the stars aren't.
+    """
+
+    def _overlay_figure(self):
+        import matplotlib.pyplot as plt
+        from telescope_gui.telescope_builder import build_telescope
+        from telescope_gui.tutorial_mode.theory_computations import (
+            _coma_starfield_overlay)
+        from telescope_sim.plotting.ray_trace_plot import plot_source_image
+        from telescope_sim.source.sources import ComaDemoField
+        telescope = build_telescope(telescope_type="Newtonian", diameter=200,
+                                    focal_length=600, primary_type="parabolic",
+                                    enable_obstruction=True,
+                                    obstruction_ratio=0.2, spider_vanes=0)
+        fig = plot_source_image(telescope,
+                                ComaDemoField(field_radius_arcsec=150.0),
+                                seeing_arcsec=1.5)
+        _coma_starfield_overlay(fig, {}, telescope)
+        fig.canvas.draw()
+        return fig, plt
+
+    def test_circle_labels_do_not_overlap_the_star_labels(self):
+        fig, plt = self._overlay_figure()
+        ax = fig.axes[0]
+        circle_labels, star_labels = [], []
+        for t in ax.texts:
+            text = t.get_text()
+            if "cff" in text:
+                circle_labels.append(t)
+            elif text.endswith("″"):
+                star_labels.append(t)
+        assert len(circle_labels) == 2 and star_labels
+        for c in circle_labels:
+            for s in star_labels:
+                assert not c.get_window_extent().overlaps(
+                    s.get_window_extent()), (
+                    f"{c.get_text()!r} overlaps {s.get_text()!r}")
+        plt.close(fig)
+
+    def test_circle_labels_stay_inside_the_axes(self):
+        fig, plt = self._overlay_figure()
+        ax = fig.axes[0]
+        ax_bb = ax.get_window_extent()
+        for t in ax.texts:
+            if "cff" not in t.get_text():
+                continue
+            tb = t.get_window_extent()
+            assert tb.y0 >= ax_bb.y0 - 2.0 and tb.x0 >= ax_bb.x0 - 2.0
+        plt.close(fig)
+
+    def test_circle_labels_clear_the_stars_themselves(self):
+        """The stars, not just their text labels.
+
+        The first below-axis placement put each label at its own circle's
+        radius. At f/3 the cff circle is 2.1″ inside a ±150″ frame, so
+        "cff = 2.1″" landed on top of the central star it describes — and
+        10× cff, only 18″ further down, landed on top of *that*.
+        """
+        fig, plt = self._overlay_figure()
+        ax = fig.axes[0]
+        circle_labels = [t for t in ax.texts if "cff" in t.get_text()]
+        assert len(circle_labels) == 2
+        # The stars all sit on y = 0 in data coordinates, and their own
+        # labels stand 4 % of the y-span above them. Require at least that
+        # much clearance below — a label 2″ under the axis is nominally
+        # "below the stars" and still drawn on top of them.
+        star_row_px = ax.transData.transform((0.0, 0.0))[1]
+        clearance = 0.04 * ax.get_window_extent().height
+        for t in circle_labels:
+            tb = t.get_window_extent()
+            assert tb.y1 < star_row_px - clearance, (
+                f"{t.get_text()!r} is drawn on the stars "
+                f"(top {tb.y1:.1f} px, needs to clear "
+                f"{star_row_px - clearance:.1f} px)")
+        a, b = (t.get_window_extent() for t in circle_labels)
+        assert not a.overlaps(b), "the two circle labels overlap each other"
+        plt.close(fig)
+
+
+class TestMetricsPanelFitsItsAxes:
+    """R5.7 sweep fallout: the PSF-profile side panel overran the FIGURE.
+
+    `plot_psf_profile`'s metrics block is monospace at fontsize 9 and ~218 px
+    wide; the panel it sits in was 124 px of a 500 px tutorial canvas, so 50 px
+    fell off the right-hand edge of the figure and was clipped away — the user
+    lost the right ~23 % of every metrics line on the two Act-1 modules that
+    use this figure. All four formula lines overran the panel too.
+    """
+
+    @staticmethod
+    def _profile_figure(**kwargs):
+        import matplotlib.pyplot as plt
+        from telescope_gui.telescope_builder import build_telescope
+        from telescope_sim.plotting.ray_trace_plot import plot_psf_profile
+        params = dict(telescope_type="Newtonian", diameter=200,
+                      focal_length=1000, primary_type="parabolic",
+                      enable_obstruction=True, obstruction_ratio=0.3,
+                      spider_vanes=0)
+        params.update(kwargs)
+        telescope = build_telescope(**params)
+        # figsize/log_scale as the tutorial tab drives it.
+        fig = plot_psf_profile(telescope, figsize=(5, 5), log_scale=True)
+        fig.canvas.draw()
+        return fig, plt
+
+    @staticmethod
+    def _panel(fig):
+        """The axis-off metrics/formula panel."""
+        for ax in fig.axes:
+            if not ax.axison and ax.texts:
+                return ax
+        raise AssertionError("no metrics panel found")
+
+    def test_metrics_block_stays_inside_the_figure(self):
+        fig, plt = self._profile_figure()
+        fig_right = fig.get_window_extent().x1
+        panel = self._panel(fig)
+        boxed = [t for t in panel.texts if t.get_bbox_patch() is not None]
+        assert boxed, "metrics box not found"
+        for t in boxed:
+            tb = t.get_window_extent()
+            assert tb.x1 <= fig_right, (
+                f"metrics box is clipped by the figure edge "
+                f"({tb.x1 - fig_right:.0f} px lost)")
+        plt.close(fig)
+
+    def test_every_panel_text_stays_inside_the_panel(self):
+        fig, plt = self._profile_figure()
+        panel = self._panel(fig)
+        panel_bb = panel.get_window_extent()
+        for t in panel.texts:
+            tb = t.get_window_extent()
+            assert tb.x1 <= panel_bb.x1 + 1.0, (
+                f"{t.get_text().splitlines()[0]!r} overruns the panel by "
+                f"{tb.x1 - panel_bb.x1:.0f} px")
+        plt.close(fig)
+
+    def test_char_budget_tracks_the_panel_width(self):
+        """The wrap width is measured, not hard-coded.
+
+        A hard-coded width fits one figsize and clips at every other, which
+        is how the original box came to be 218 px wide in a 124 px panel.
+        """
+        import matplotlib.pyplot as plt
+        from telescope_sim.plotting.ray_trace_plot import _panel_char_budget
+        fig = plt.figure(figsize=(5, 5))
+        narrow = fig.add_axes((0.0, 0.0, 0.2, 1.0))
+        wide = fig.add_axes((0.0, 0.0, 0.6, 1.0))
+        assert (_panel_char_budget(wide, 8.0)
+                > 2 * _panel_char_budget(narrow, 8.0))
+        # Smaller type fits more characters in the same panel.
+        assert _panel_char_budget(wide, 6.0) > _panel_char_budget(wide, 8.0)
+        plt.close(fig)
+
+    def test_single_panel_mode_has_no_title_under_the_suptitle(self):
+        """The panel title is only meaningful as one of a contrasting pair.
+
+        Alone it is redundant (the y-label already names the scale) and the
+        secondary top axis pushes it up into the suptitle, where the two
+        overprinted — "Log scale" written through "Point Spread Function".
+        """
+        fig, plt = self._profile_figure()
+        sup = fig._suptitle
+        assert sup is not None and sup.get_text()
+        sup_bb = sup.get_window_extent()
+        for ax in fig.axes:
+            if not ax.title.get_text():
+                continue
+            assert not sup_bb.overlaps(ax.title.get_window_extent()), (
+                f"{ax.title.get_text()!r} overprints the suptitle")
+        plt.close(fig)
+
+
+class TestStrehlOnlyWhereItApplies:
+    """R4.4b — 'Airy disc seems to have Strehl/obstruction formulas that
+    don't belong there.'
+
+    It did. `plot_psf_profile` printed the Strehl metric and the Marechal
+    formula unconditionally, so a perfect parabola with obstruction disabled
+    reported "Strehl ≈ 1.000" and a formula in σ and r₁ that the Airy module
+    never introduces. The earlier round could not reproduce it because it
+    checked the theory readout and the scenario overlays — the offending text
+    is inside this figure's own metrics/formula panel.
+    """
+
+    @staticmethod
+    def _panel_text(**kwargs):
+        import matplotlib.pyplot as plt
+        from telescope_gui.telescope_builder import build_telescope
+        from telescope_sim.plotting.ray_trace_plot import plot_psf_profile
+        params = dict(telescope_type="Newtonian", diameter=200,
+                      focal_length=1000, primary_type="parabolic",
+                      enable_obstruction=False, obstruction_ratio=0.0,
+                      spider_vanes=0)
+        params.update(kwargs)
+        include = params.pop("include_obstruction", True)
+        fig = plot_psf_profile(build_telescope(**params), figsize=(5, 5),
+                               log_scale=True,
+                               include_obstruction=include)
+        text = "\n".join(t.get_text() for ax in fig.axes for t in ax.texts)
+        plt.close(fig)
+        return text
+
+    def test_perfect_unobstructed_optics_show_no_strehl(self):
+        text = self._panel_text(include_obstruction=False)
+        assert "Strehl" not in text, (
+            "Strehl has nothing to say about a perfect unobstructed "
+            f"aperture:\n{text}")
+        # The Airy content it SHOULD carry is still there.
+        assert "Airy radius" in text and "Rayleigh" in text
+
+    def test_obstruction_brings_strehl_back(self):
+        text = self._panel_text(enable_obstruction=True,
+                                obstruction_ratio=0.3)
+        assert "Strehl" in text, (
+            "a 30 % obstruction costs real Strehl — the metric belongs here")
+        assert "(1-ε²)²" in text
+
+    def test_an_aberrated_primary_brings_strehl_back(self):
+        text = self._panel_text(primary_type="spherical",
+                                include_obstruction=False)
+        assert "Strehl" in text, (
+            "a spherical primary has a real Strehl deficit")
