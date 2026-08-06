@@ -7,7 +7,9 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
 
+from telescope_sim.physics.colorimetry import srgb_encode, srgb_decode
 from telescope_sim.physics.ray import Ray
 from telescope_sim.physics.diffraction import compute_psf, rayleigh_criterion_arcsec
 from telescope_sim.physics.fft_psf import compute_fft_psf
@@ -1701,18 +1703,23 @@ def _draw_focal_image(ax: plt.Axes, telescope: Telescope,
     approx_lines.append("Monochromatic")
 
     # Same wrap as the source-image info box, at the narrower width fontsize 9
-    # allows, so this box can't grow out over the axes edge either.
-    info_text = _wrap_annotation(info_lines, width=48)
-    approx_text = "Approx: " + "; ".join(approx_lines)
+    # allows. The width is only a starting estimate — `_fit_annotation_to_axes`
+    # measures the box that results and narrows it if it still overruns, since
+    # a character count is not a width in a proportional font (R5.8b).
+    info_lines_wrapped = list(info_lines)
+    approx_lines_joined = ["Approx: " + "; ".join(approx_lines)]
 
-    ax.text(0.02, 0.02, info_text,
-            transform=ax.transAxes, fontsize=9,
-            verticalalignment="bottom", color="white",
-            bbox=dict(boxstyle="round", facecolor="black", alpha=0.6))
+    info_txt = ax.text(0.02, 0.02, _wrap_annotation(info_lines, width=48),
+                       transform=ax.transAxes, fontsize=9,
+                       verticalalignment="bottom", color="white",
+                       bbox=dict(boxstyle="round", facecolor="black",
+                                 alpha=0.6))
+    _fit_annotation_to_axes(info_txt, ax, info_lines_wrapped, width=48)
 
-    ax.text(0.02, 0.98, approx_text,
-            transform=ax.transAxes, fontsize=7,
-            verticalalignment="top", color="yellow", alpha=0.8)
+    approx_txt = ax.text(0.02, 0.98, _wrap_annotation(approx_lines_joined),
+                         transform=ax.transAxes, fontsize=7,
+                         verticalalignment="top", color="yellow", alpha=0.8)
+    _fit_annotation_to_axes(approx_txt, ax, approx_lines_joined)
 
 
 def plot_focal_image(telescope: Telescope,
@@ -4734,8 +4741,10 @@ def _apply_circular_taper(kernel: np.ndarray) -> np.ndarray:
     """Zero a square PSF kernel outside its inscribed circle, with a soft rim.
 
     A PSF kernel is a square array. The Airy/coma content falls to ~0 well
-    before the array edge, but an asinh/log display stretch lifts the tiny
-    residual in the *corners* into a faint square "box" around every star
+    before the array edge, but any display encode lifts the tiny residual in
+    the *corners* far more than its linear value suggests — the sRGB encode
+    alone takes 1 % of peak to a code value of 0.10 — turning it into a
+    faint square "box" around every star
     (and the geometric defocus disk in the polychromatic path fills its
     square support outright). Masking to the inscribed circle removes the
     square boundary; a short cosine taper over the outer rim avoids a hard
@@ -4838,6 +4847,15 @@ def _render_source_through_telescope(
     aperture_factor = (telescope.primary_diameter
                        / APERTURE_REFERENCE_MM) ** 2
 
+    # Brightest-to-faintest ratio this SOURCE spans, used to decide whether
+    # the scene fits the display (see the transfer-function block near the
+    # end of this function). It is a property of the source, deliberately not
+    # of the frame: deriving it per render would let it drift as the user
+    # moves a slider, and then a Before/After pair would no longer be on the
+    # same brightness scale — which is the whole premise of the two panels.
+    # 1.0 = "fits, no compression"; the star branch below overwrites it.
+    scene_contrast = 1.0
+
     # FOV is taken directly from the source. We do NOT auto-expand the
     # FOV for severe-chromatic cases (singlet) — that made the singlet
     # frame look different from achromat/apo at the same scenario,
@@ -4889,6 +4907,15 @@ def _render_source_through_telescope(
                 r = np.sqrt(x_as ** 2 + y_as ** 2)
                 pa = np.degrees(np.arctan2(y_as, x_as))
                 stars.append((r, pa, mag))
+
+        # Magnitude spread → linear flux ratio (Pogson: 2.5 dex per 5 mag).
+        # A single star spans nothing, so it stays at 1.0 and renders
+        # faithfully; the only structure in that frame is its own Airy
+        # pattern, whose first ring at 1.75 % of peak is well inside what a
+        # screen can show once the sRGB encode is applied.
+        if stars:
+            mags = [m for _, _, m in stars]
+            scene_contrast = 10.0 ** (0.4 * (max(mags) - min(mags)))
 
         # aperture_factor (photon-collection ∝ D²) is computed once above.
 
@@ -5475,19 +5502,25 @@ def _render_source_through_telescope(
     # Three display modes (all are display-only; the simulated data
     # is unchanged — the modes differ only in how pixel values are
     # mapped to screen brightness):
-    #   "linear"          (Detector view): raw per-pixel intensity.
-    #                     What a calibrated CCD records.
-    #   "log"             (Eye view): asinh stretch only. Matches the
-    #                     eye's logarithmic intensity response (Pogson
-    #                     magnitude scale). Dim features visible next
-    #                     to bright ones.
-    #   "log_integrated"  (Eye + integration): asinh + 1″ FWHM spatial
-    #                     Gaussian. Adds the eye's spatial resolution
-    #                     at ~60× eyepiece magnification — per-pixel
-    #                     channels mix near each star's core, so the
-    #                     perceived core color matches what an observer
-    #                     would see through an eyepiece rather than
-    #                     what a per-pixel detector would record.
+    #   "linear"          (Detector view): brightness ∝ collected photons ×
+    #                     exposure time. What a calibrated CCD records.
+    #   "log"             (Eye view): brightness set by the optics instead —
+    #                     exposure does not apply, and an extended object's
+    #                     surface brightness follows the exit pupil. Chroma
+    #                     is gated by the mesopic model below.
+    #   "log_integrated"  (Eye + integration): as "log", plus a 1″ FWHM
+    #                     spatial Gaussian for the eye's angular resolution
+    #                     at ~60× — per-pixel channels mix near each star's
+    #                     core, so the perceived core colour matches what an
+    #                     observer sees through an eyepiece rather than what
+    #                     a per-pixel detector records.
+    #
+    # The names "log"/"log_integrated" are historical API values kept so the
+    # scenario definitions do not all have to change. They no longer imply a
+    # log stretch: BOTH views now share one physically-correct transfer
+    # function (see the transfer block at the end of this function), and the
+    # difference between them is the physics — exposure vs exit pupil,
+    # cones vs silicon — not two different curves.
 
     # Optional eye spatial integration (mode 3 only)
     if display_stretch == "log_integrated":
@@ -5529,45 +5562,83 @@ def _render_source_through_telescope(
     # band-pass in luminance: rods alone below the cone threshold (no colour
     # at all), full chroma through the mesopic/photopic range, then bleaching
     # to white at the top. The renderer previously modelled only the BRIGHT
-    # end, so faint flux kept its full saturation — and because the asinh
-    # stretch below lifts faint flux to near-full display brightness while
-    # preserving chroma, a star's outer halo (a couple of % of the peak, far
-    # under any real cone threshold) was displayed as a large area of vivid
-    # colour that no observer could ever see. See
+    # end, so faint flux kept its full saturation, and a star's outer halo
+    # (a couple of % of the peak, far under any real cone threshold) was
+    # displayed as a large area of vivid colour no observer could see. See
     # `telescope_sim.physics.colorimetry.mesopic_chroma_gain` for the model
     # and its ⚠️ calibration caveat. Detector view deliberately skips this:
     # a camera has no cones and records the same chromaticity at any flux.
+    #
+    # This runs on LINEAR flux, before the transfer function below, which is
+    # the only place it is meaningful — the gate is a statement about how
+    # many photons reach a cone, not about a code value.
     if (display_stretch in ("log", "log_integrated")
             and image_rgb is not None):
         from telescope_sim.physics.colorimetry import (
             apply_mesopic_desaturation)
         image_rgb = apply_mesopic_desaturation(image_rgb)
 
-    if display_stretch in ("log", "log_integrated"):
-        a = 0.001
-        norm = np.arcsinh(1.0 / a)
-        image = np.arcsinh(image / a) / norm
-        if image_rgb is not None:
-            # Chroma-preserving asinh: stretch the LUMINANCE and scale the
-            # RGB triplet by the same factor, instead of stretching each
-            # channel independently. Per-channel asinh over-lifts the dim
-            # channels (a 2%-green leak becomes ~50% after asinh), collapsing
-            # every dim colour toward grey-green — which made the spectral
-            # stars render uniformly green and washed out colour-filtered
-            # planets. Preserving the RGB ratio keeps hue intact while still
-            # boosting dim features; bright pixels are already desaturated by
-            # the cone-desaturation step above.
-            lum = (0.2126 * image_rgb[..., 0]
-                   + 0.7152 * image_rgb[..., 1]
-                   + 0.0722 * image_rgb[..., 2])
-            lum_stretched = np.arcsinh(lum / a) / norm
-            with np.errstate(divide="ignore", invalid="ignore"):
-                scale = np.where(lum > 1e-9, lum_stretched / lum, 0.0)
-            image_rgb = image_rgb * scale[..., None]
+    # ---- Display transfer function (R5.8) ------------------------------
+    #
+    # Everything above this line is linear light. Everything below it is
+    # display code values. The two used to be conflated, and both views were
+    # wrong in opposite directions:
+    #
+    #   Detector: linear radiance was handed straight to `imshow`, which
+    #     treats its input as sRGB code values. The monitor then applied its
+    #     own ~2.2 decode, so the screen emitted radiance**2.2 — measured on
+    #     Jupiter, that EXAGGERATED real belt/zone contrast by 2.15×. It
+    #     looked punchy and photographic, which is exactly why it went
+    #     unnoticed.
+    #   Eye: an asinh stretch with a = 0.001 was applied first, justified as
+    #     "the eye's logarithmic response". But the observer's eye is already
+    #     in the loop — it is looking at the monitor — so that compressed the
+    #     scene twice. Measured on the same pixels it FLATTENED real contrast
+    #     by 2.1× and squashed the 12.25× exit-pupil surface-brightness range
+    #     down to 2.56× on screen, which is why changing aperture appeared to
+    #     do nothing at all (R5.8b).
+    #
+    # The fix is to encode, not to stretch. sRGB encoding cancels the
+    # monitor's decode, so screen luminance ∝ simulated radiance and the
+    # viewer's own visual system supplies the compression it would supply at
+    # the eyepiece. Measured on Jupiter this lands within ~10 % of the true
+    # contrast AND the true exit-pupil brightness ratio, in both views.
+    #
+    # Compression is applied only where it is unavoidable. A screen holds
+    # ~200:1 in a lit room; the Moon spans 2:1 and the planets 200–500:1, so
+    # they need none (γ = 1, exactly faithful). A star field spans 10⁴:1 or
+    # more and physically cannot be shown — there γ < 1 and the figure says
+    # so, rather than quietly pretending the range fits.
+    from telescope_sim.physics.colorimetry import (
+        tone_map_gamma, DISPLAY_USABLE_CONTRAST)
+    tone_gamma = tone_map_gamma(scene_contrast, DISPLAY_USABLE_CONTRAST)
 
+    # Only `image_rgb` is encoded here. The greyscale `image` stays LINEAR
+    # all the way out of this function, because it is drawn through a
+    # colormap with a numeric colorbar attached: encoding the array would
+    # silently turn ticks labelled "Normalized intensity" into code values.
+    # That path gets the identical transfer function at draw time instead,
+    # via `_DisplayNorm`, which keeps the picture photometric and the axis
+    # honest at once. `tone_gamma` travels to it through `info`.
     image = np.clip(image, 0.0, 1.0)
     if image_rgb is not None:
         image_rgb = np.clip(image_rgb, 0.0, 1.0)
+
+        if tone_gamma < 1.0:
+            # Power law on LUMINANCE, with the RGB triplet rescaled by the
+            # same factor. Applying it per channel would drag every dim
+            # colour toward grey (a 2 % green leak becomes 13 % at
+            # γ = 0.575) and collapse the spectral stars the chromatic
+            # modules exist to show.
+            lum = (0.2126 * image_rgb[..., 0]
+                   + 0.7152 * image_rgb[..., 1]
+                   + 0.0722 * image_rgb[..., 2])
+            with np.errstate(divide="ignore", invalid="ignore"):
+                scale = np.where(lum > 1e-9,
+                                 np.power(lum, tone_gamma) / lum, 0.0)
+            image_rgb = np.clip(image_rgb * scale[..., None], 0.0, 1.0)
+
+        image_rgb = srgb_encode(image_rgb)
 
     info = dict(
         wavelength_nm=wavelength_nm,
@@ -5586,12 +5657,56 @@ def _render_source_through_telescope(
         exposure_applied=(not is_eye_view),
         exit_pupil_mm=exit_pupil_mm,
         eye_surface_brightness_factor=eye_surface_brightness_factor,
+        # Display-transfer metadata (R5.8). tone_gamma == 1.0 means the
+        # render is photometric: screen luminance ∝ simulated radiance.
+        # Below 1.0 the scene did not fit the display and was compressed by
+        # that exponent — which the figure must disclose.
+        scene_contrast=scene_contrast,
+        tone_gamma=tone_gamma,
+        display_usable_contrast=DISPLAY_USABLE_CONTRAST,
     )
     return image, half_fov_arcsec, info
 
 
+class _DisplayNorm(mcolors.Normalize):
+    """Feed a colormap code values while its colorbar keeps intensity units.
+
+    The RGB path can be sRGB-encoded in place because it goes straight to
+    the display buffer with nothing but the monitor downstream. The
+    greyscale path cannot: it draws through a colormap and carries a numeric
+    colorbar, so the array must stay linear radiance for the ticks to mean
+    what their label says, while the numbers reaching the colormap must be
+    display code values or the monitor's ~2.2 decode lands on the picture
+    (see the transfer-function block in `_render_source_through_telescope`).
+
+    `Normalize` is exactly that seam. Matplotlib calls it on the way into
+    the colormap and calls `inverse` to place colorbar ticks, so one object
+    keeps the picture photometric and the axis honest at the same time \u2014
+    the same mechanism `LogNorm` uses.
+    """
+
+    def __init__(self, tone_gamma: float = 1.0, vmin: float = 0.0,
+                 vmax: float = 1.0):
+        super().__init__(vmin=vmin, vmax=vmax, clip=False)
+        self.tone_gamma = float(tone_gamma)
+
+    def __call__(self, value, clip=None):
+        span = max(self.vmax - self.vmin, 1e-12)
+        v = np.clip((np.asarray(value, dtype=float) - self.vmin) / span,
+                    0.0, 1.0)
+        if self.tone_gamma < 1.0:
+            v = np.power(v, self.tone_gamma)
+        return np.ma.masked_invalid(srgb_encode(v))
+
+    def inverse(self, value):
+        v = srgb_decode(np.clip(np.asarray(value, dtype=float), 0.0, 1.0))
+        if self.tone_gamma < 1.0:
+            v = np.power(v, 1.0 / self.tone_gamma)
+        return self.vmin + v * (self.vmax - self.vmin)
+
+
 def _draw_source_on_axes(ax, image, image_rgb, half_fov, log_scale,
-                         colormap, fig):
+                         colormap, fig, tone_gamma=1.0):
     """Draw a rendered source image onto the given axes.
 
     Returns the imshow artist.
@@ -5606,20 +5721,22 @@ def _draw_source_on_axes(ax, image, image_rgb, half_fov, log_scale,
             colormap = "gray"
 
         if log_scale and image.max() > 0:
+            # Deliberate quantitative false-colour display: the colorbar
+            # states the mapping, so it is self-describing and gets no
+            # display encode \u2014 same convention as any log-scaled scientific
+            # figure. The linear branch below is the one that is meant to
+            # look like the sky, so that is the one that gets encoded.
             display_image = np.log10(np.clip(image, 1e-4, None))
-            vmin = -4.0
-            vmax = 0.0
+            im = ax.imshow(display_image, extent=extent, origin="lower",
+                           cmap=colormap, vmin=-4.0, vmax=0.0,
+                           interpolation="bilinear")
+            cbar_label = "log\u2081\u2080(Intensity)"
         else:
-            display_image = image
-            vmin = 0.0
-            vmax = 1.0
+            im = ax.imshow(image, extent=extent, origin="lower",
+                           cmap=colormap, norm=_DisplayNorm(tone_gamma),
+                           interpolation="bilinear")
+            cbar_label = "Normalized intensity"
 
-        im = ax.imshow(display_image, extent=extent, origin="lower",
-                       cmap=colormap, vmin=vmin, vmax=vmax,
-                       interpolation="bilinear")
-
-        cbar_label = ("log\u2081\u2080(Intensity)" if log_scale
-                      else "Normalized intensity")
         fig.colorbar(im, ax=ax, label=cbar_label, shrink=0.85)
 
     return im
@@ -5697,11 +5814,19 @@ def _apply_exit_pupil_washout(image, image_rgb, exit_pupil_mm):
       the same as bright Jupiter at equal exit pupil.
     - No Purkinje shift: dark-adapted scotopic color sensitivity is not
       modeled (blue shift at low light levels).
+
+    Colour space (R5.8): `image` arrives as linear radiance but `image_rgb`
+    arrives sRGB-encoded, because that is what the renderer emits for the
+    display buffer. Blending toward a mean is an operation on LIGHT, and
+    doing it to code values in one argument and to radiance in the other
+    would apply two different effects under one name — so the RGB array is
+    decoded on the way in and re-encoded on the way out, leaving both
+    branches working in the same space.
     """
     # Work on copies so callers' arrays are not mutated in place
     image = image.copy()
     if image_rgb is not None:
-        image_rgb = image_rgb.copy()
+        image_rgb = srgb_decode(image_rgb)
 
     washout = 1.0 / (1.0 + np.exp(-1.5 * (exit_pupil_mm - 3.0)))
 
@@ -5729,7 +5854,7 @@ def _apply_exit_pupil_washout(image, image_rgb, exit_pupil_mm):
             image_rgb[..., c] = (luminance
                                  + saturation_factor
                                  * (image_rgb[..., c] - luminance))
-        image_rgb = np.clip(image_rgb, 0.0, 1.0)
+        image_rgb = srgb_encode(np.clip(image_rgb, 0.0, 1.0))
 
     return image, image_rgb, washout
 
@@ -5794,6 +5919,51 @@ def _panel_char_budget(ax: plt.Axes, fontsize: float,
     usable_px = panel_px * (1.0 - x_start - right_pad) - box_pad_px
     char_px = fontsize / 72.0 * fig.dpi * _MONO_ADVANCE_EM
     return max(int(usable_px / char_px), 12)
+
+
+def _fit_annotation_to_axes(txt, ax, lines: list[str],
+                            width: int = _ANNOTATION_WIDTH,
+                            min_width: int = 30, max_passes: int = 5) -> None:
+    """Re-wrap `txt` in place until its box fits inside `ax`.
+
+    A character count is not a width. `_ANNOTATION_WIDTH` was calibrated in
+    Batch P against the longest line that existed then (48 chars), so nothing
+    ever reached the limit and the limit itself was never checked against the
+    narrowest axes the annotation is drawn on. R5.8 added two 62-character
+    lines — exactly the wrap width — and they came out 324 px wide in a 311 px
+    axes on `aperture_vs_seeing`, 276 overruns across the sweep.
+
+    `_panel_char_budget` solves the sibling problem exactly, but that trick
+    does not transfer: it works because DejaVu Sans **Mono** has a constant
+    advance, and this annotation is set in proportional DejaVu Sans, where the
+    pixel width of N characters depends on which characters they are. So
+    measure the box that was actually produced and narrow the wrap until it
+    fits. The quantity being checked is then the one that actually matters,
+    for any figsize, font or content.
+    """
+    fig = ax.get_figure()
+    try:
+        renderer = fig.canvas.get_renderer()
+    except AttributeError:
+        # Non-raster backend: no renderer until draw time, so leave the
+        # character-count wrap as the best available estimate.
+        return
+
+    for _ in range(max_passes):
+        try:
+            over = (txt.get_window_extent(renderer).x1
+                    - ax.get_window_extent(renderer).x1)
+        except (ValueError, RuntimeError):
+            return
+        if over <= 0.0:
+            return
+        # Shrink by the measured excess plus a character of margin, rather
+        # than stepping down by one: a 4 % overrun should not cost 5 passes.
+        box_px = txt.get_window_extent(renderer).width
+        width = max(int(width * (1.0 - over / box_px)) - 1, min_width)
+        txt.set_text(_wrap_annotation(lines, width=width))
+        if width == min_width:
+            return
 
 
 def plot_source_image(telescope: Telescope,
@@ -5976,14 +6146,20 @@ def plot_source_image(telescope: Telescope,
     # why the exposure slider is (or isn't) doing anything. Flagged as a
     # perceptual approximation in the Eye views.
     if info.get("is_eye_view"):
+        # R5.8: this used to read "asinh stretch". That stretch is gone — it
+        # modelled the eye a second time on top of the observer who is
+        # already looking at the screen, and it was measurably flattening
+        # real contrast by 2.1×. What is left here is the one perceptual
+        # effect the screen genuinely cannot supply on its own: at eyepiece
+        # light levels the cones are near threshold, so colour desaturates.
         ann_lines.append(
-            "Display: asinh stretch (boosts dim features; data unchanged)"
+            "Eye: cones near threshold — dim areas desaturate (mesopic)"
         )
         sb = info.get("eye_surface_brightness_factor")
         if sb is not None:
             # Extended source: exit-pupil-driven surface brightness.
             ann_lines.append(
-                f"Eye view (perceptual): exposure N/A — surface brightness "
+                f"Eye view: exposure N/A — surface brightness "
                 f"≈ {sb:.2f}× naked-eye"
             )
             ann_lines.append(
@@ -5997,7 +6173,7 @@ def plot_source_image(telescope: Telescope,
             # same brightness at every aperture — the extra light widens the
             # visible disk, it doesn't brighten a clipped core).
             ann_lines.append(
-                "Eye view (perceptual): exposure N/A — "
+                "Eye view: exposure N/A — "
                 "star brightness ∝ aperture² (until it saturates)"
             )
         # Eye spatial integration (R4.2a): note it explicitly whenever the
@@ -6008,8 +6184,34 @@ def plot_source_image(telescope: Telescope,
             )
     else:
         ann_lines.append(
-            f"Detector view (linear): exposure "
+            f"Detector view: exposure "
             f"{exposure_level:.2f}× applied"
+        )
+
+    # ── Display transfer function (R5.8) ─────────────────────────────
+    # Both views now share one transfer function, so this line is outside
+    # the branch above: the renderer emits sRGB code values, the monitor's
+    # ~2.2 gamma decodes them, and what the screen emits is proportional to
+    # the simulated radiance. Say so, because the note this replaced
+    # claimed the opposite for the Eye view.
+    tone_gamma = info.get("tone_gamma", 1.0)
+    if tone_gamma < 1.0:
+        # Past this point the render is deliberately NOT photometric: the
+        # scene spans more contrast than a screen can emit, so it has been
+        # compressed. Flagging that is required by the project's physics
+        # policy — the alternative is quietly pretending the range fits.
+        ann_lines.append(
+            f"Approx: scene spans {info.get('scene_contrast', 1.0):,.0f}:1,"
+            f" screen only"
+            f" ~{info.get('display_usable_contrast', 200.0):.0f}:1"
+        )
+        ann_lines.append(
+            f"  → tone-mapped (screen ∝ radiance^{tone_gamma:.2f});"
+            f" brightness ratios compressed, not photometric"
+        )
+    else:
+        ann_lines.append(
+            "Display: sRGB encoded — screen brightness ∝ simulated radiance"
         )
 
     # ── Eyepiece calculations ────────────────────────────────────────
@@ -6054,15 +6256,21 @@ def plot_source_image(telescope: Telescope,
             if display_image.max() > 0:
                 display_image = display_image / display_image.max()
             if display_rgb is not None:
-                rgb_max = display_rgb.max()
-                if rgb_max > 0:
-                    display_rgb = display_rgb / rgb_max
-                display_rgb = np.clip(display_rgb, 0.0, 1.0)
+                # `display_rgb` is already sRGB-encoded, and rescaling
+                # brightness is an operation on LIGHT: dividing code values
+                # by their max is not the same operation and warps the
+                # ratios it is meant to preserve. Decode, rescale, re-encode.
+                lin = srgb_decode(display_rgb)
+                lin_max = lin.max()
+                if lin_max > 0:
+                    lin = lin / lin_max
+                display_rgb = srgb_encode(np.clip(lin, 0.0, 1.0))
 
     fig, ax = plt.subplots(figsize=figsize)
 
     _draw_source_on_axes(ax, display_image, display_rgb,
-                         display_half_fov, log_scale, colormap, fig)
+                         display_half_fov, log_scale, colormap, fig,
+                         tone_gamma=info.get("tone_gamma", 1.0))
 
     ax.set_xlabel("Field angle, x (arcsec)")
     ax.set_ylabel("Field angle, y (arcsec)")
@@ -6076,12 +6284,13 @@ def plot_source_image(telescope: Telescope,
     ax.set_title(_wrap_annotation([fig_title], width=_TITLE_WIDTH),
                  fontsize=12)
 
-    ax.text(0.02, 0.98, _wrap_annotation(ann_lines),
-            transform=ax.transAxes, fontsize=7,
-            verticalalignment="top",
-            bbox=dict(boxstyle="round,pad=0.3", facecolor="black",
-                      alpha=0.6),
-            color="white")
+    ann_txt = ax.text(0.02, 0.98, _wrap_annotation(ann_lines),
+                      transform=ax.transAxes, fontsize=7,
+                      verticalalignment="top",
+                      bbox=dict(boxstyle="round,pad=0.3", facecolor="black",
+                                alpha=0.6),
+                      color="white")
+    _fit_annotation_to_axes(ann_txt, ax, ann_lines)
 
     # NOTE: Obstruction overlay removed — the secondary obstruction effect
     # is already correctly modeled in the PSF computation. Drawing a black
@@ -6113,10 +6322,13 @@ def plot_source_image(telescope: Telescope,
     if tfov_image.max() > 0:
         tfov_image = tfov_image / tfov_image.max()
     if tfov_rgb is not None:
-        rgb_max = tfov_rgb.max()
-        if rgb_max > 0:
-            tfov_rgb = tfov_rgb / rgb_max
-        tfov_rgb = np.clip(tfov_rgb, 0.0, 1.0)
+        # Same reason as the crop above: rescale in linear light, not in
+        # code values (see the note at the display-crop renormalization).
+        lin = srgb_decode(tfov_rgb)
+        lin_max = lin.max()
+        if lin_max > 0:
+            lin = lin / lin_max
+        tfov_rgb = srgb_encode(np.clip(lin, 0.0, 1.0))
 
     viewing_distance_mm = 500.0  # 50cm standard
     mm_per_degree = viewing_distance_mm * np.tan(np.radians(1.0))
@@ -6147,7 +6359,8 @@ def plot_source_image(telescope: Telescope,
 
     # Draw the source image at TFOV scale
     _draw_source_on_axes(ax2, tfov_image, tfov_rgb,
-                         tfov_display_half, log_scale, colormap, fig2)
+                         tfov_display_half, log_scale, colormap, fig2,
+                         tone_gamma=info.get("tone_gamma", 1.0))
 
     # Draw circular eyepiece field stop
     theta = np.linspace(0, 2 * np.pi, 200)
@@ -6187,12 +6400,13 @@ def plot_source_image(telescope: Telescope,
         f"Exit pupil: {exit_pupil:.1f}mm",
         "Assumes 50cm viewing distance, 96 DPI",
     ]
-    ax2.text(0.02, 0.98, _wrap_annotation(true_ann),
-             transform=ax2.transAxes, fontsize=7,
-             verticalalignment="top",
-             bbox=dict(boxstyle="round,pad=0.3", facecolor="black",
-                       alpha=0.6),
-             color="white")
+    true_txt = ax2.text(0.02, 0.98, _wrap_annotation(true_ann),
+                        transform=ax2.transAxes, fontsize=7,
+                        verticalalignment="top",
+                        bbox=dict(boxstyle="round,pad=0.3", facecolor="black",
+                                  alpha=0.6),
+                        color="white")
+    _fit_annotation_to_axes(true_txt, ax2, true_ann)
 
     plt.tight_layout()
     figures.append(fig2)
@@ -6212,7 +6426,8 @@ def plot_source_image(telescope: Telescope,
 
         # Draw the source image at TFOV scale
         _draw_source_on_axes(ax3, tfov_image, tfov_rgb,
-                             tfov_display_half, log_scale, colormap, fig3)
+                             tfov_display_half, log_scale, colormap, fig3,
+                             tone_gamma=info.get("tone_gamma", 1.0))
 
         # Draw circular eyepiece field stop
         theta_ev = np.linspace(0, 2 * np.pi, 200)
@@ -6253,12 +6468,13 @@ def plot_source_image(telescope: Telescope,
         if washout_strength > 0.01:
             ev_ann.append(f"Washout: {washout_strength:.0%}")
 
-        ax3.text(0.02, 0.98, _wrap_annotation(ev_ann),
-                 transform=ax3.transAxes, fontsize=7,
-                 verticalalignment="top",
-                 bbox=dict(boxstyle="round,pad=0.3", facecolor="black",
-                           alpha=0.6),
-                 color="white")
+        ev_txt = ax3.text(0.02, 0.98, _wrap_annotation(ev_ann),
+                          transform=ax3.transAxes, fontsize=7,
+                          verticalalignment="top",
+                          bbox=dict(boxstyle="round,pad=0.3",
+                                    facecolor="black", alpha=0.6),
+                          color="white")
+        _fit_annotation_to_axes(ev_txt, ax3, ev_ann)
 
         plt.tight_layout()
         figures.append(fig3)

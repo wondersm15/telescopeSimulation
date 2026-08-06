@@ -2,6 +2,94 @@
 
 ---
 
+## Tutorial Tab — Round 5, Batch R (display transfer function): COMPLETE
+
+Ledger: `PLAN_TUTORIAL_ROUND5.md`. Closes R5.8a/b **and reopens-then-closes R5.2**,
+which Round 5 had twice diagnosed as "a narrative gap, not a code bug". It was a code
+bug. **555 tests pass** (was 532); committed on `feature/tutorial-testing-tab`, not
+merged.
+
+**My first hypothesis was wrong and measurement said so.** I predicted the eye view's
+"highlighter orange stripes" came from a chroma-preserving asinh stretch boosting
+saturation. Measured on the Jupiter disk, eye-view saturation was p50 = 0.002 against
+the detector's 0.147 — the eye view was the *less* saturated of the two. The defect was
+never saturation; it was **contrast**, and flattened belt/zone structure reads as flat
+bands of colour.
+
+**Root cause: both views were missing the display transfer function, in opposite
+directions.** `imshow` writes float RGB straight into the display buffer, so its input
+is an **sRGB code value**; the monitor then applies `luminance ∝ code^2.2`. The detector
+view handed it raw linear radiance, so the screen emitted `radiance^2.2` — real
+belt/zone contrast **exaggerated 2.15×**. The eye view applied `asinh(a = 0.001)` first,
+justified as "the eye's logarithmic response" — but the observer is already in the loop
+looking at the monitor, so that compressed the scene **twice**: contrast **flattened
+2.1×** and the 12.25× exit-pupil surface-brightness range squashed to **2.56×**, which
+is exactly why the aperture and exit-pupil controls appeared dead (R5.8b). The detector
+view looked punchy and photographic, which is why nobody questioned it — "appears to be
+a high quality original image" was the bug flattering itself.
+
+**The fix is to encode, not to stretch.** `srgb_encode`/`srgb_decode` (IEC 61966-2-1)
+cancel the monitor's decode, so screen luminance ∝ simulated radiance and the viewer's
+own visual system supplies the compression it would supply at the eyepiece. Where a
+scene genuinely exceeds what a screen can emit, `tone_map_gamma` returns
+γ = ln(D)/ln(S), mapping an S:1 scene onto exactly D:1 and degenerating to γ = 1 when it
+fits. Scene contrast comes from the **source's magnitude spread**, never the frame — a
+per-render value would drift as sliders move and break the shared Before/After
+brightness scale. Only `saturation_demo` compresses (1000:1 → γ = 0.767), and its figure
+now prints the exponent and the words "not photometric", as the physics policy requires.
+The user chose "both views faithful" over fixing the eye view alone, accepting that the
+detector view would look less punchy.
+
+**R5.2 was real.** The user had asked whether it seemed right that a 1%-of-peak feature
+was invisible, and was told twice that this was what "linear" costs you. That arithmetic
+assumed the array value *was* the displayed level. It was not: 1.75% of peak was emitted
+at **0.017%** of peak light. Encoded correctly, the 1st Airy ring lands at level 36 of
+255 and the 2nd at 13 — verified end-to-end on the real render (code 0.1397 detector,
+0.1342 eye). The 2D image and the 1D profile now agree, which is what the user was
+pointing at. Both narratives rewritten to say so, including that this simulator got it
+wrong.
+
+**Sibling audit** (standing "check elsewhere" rule) found three more instances of the
+same space confusion, one of them introduced by my own first fix. The greyscale path
+draws through a colormap with a **numeric colorbar**, so encoding that array turns ticks
+labelled "Normalized intensity" into code values — a third of source renders take that
+path. Fixed with `_DisplayNorm`, a `Normalize` subclass that feeds the colormap code
+values while `inverse` keeps the colorbar in intensity units, the same seam `LogNorm`
+uses; the array now stays linear out of the renderer. `_apply_exit_pupil_washout` was
+blending toward a mean — an operation on light — with a linear `image` and an encoded
+`image_rgb`, applying two different effects under one name. Two crop renormalizations
+divided code values by their max. The `log_scale=True` branch is deliberately untouched:
+its colorbar states its own mapping.
+
+**Verification.** 23 new tests across four classes. Reverting `ray_trace_plot.py` fails
+12 of them — and two more had to be *fixed* because the revert did **not** fail them.
+`test_detector_brightness_scales_as_aperture_squared` passed against broken code because
+at the probe exposure Jupiter's disk sits inside sRGB's **linear toe** (below 0.0031,
+where encode is merely ×12.92) and an unencoded pipeline scales identically; re-pinned
+above the toe it now reports 16.1× for a 2× aperture against broken code — the
+double-gamma signature. `test_renderer_leaves_the_greyscale_array_linear` asserted "an
+encoded array would look different", which is false — encoding twice moves values as
+much as encoding once, and it passed with the bug deliberately reintroduced; rewritten
+to assert **physics instead of shape** (a linear array must obey Pogson's law: slope
+1.00 correct, 0.54 with the bug). End-to-end, decoding renders back to screen luminance:
+contrast fidelity 1.00 both views, exit pupil 49.00× vs 49.00× true, aperture 16.01× vs
+D² = 16.00×.
+
+**Lessons.**
+- *A "not a bug, that's just the physics" verdict deserves the same scrutiny as a bug
+  report.* R5.2 was closed twice with confident arithmetic that was correct about the
+  array and silent about the screen. The user's naive instinct beat two rounds of
+  analysis. When a user says "does this seem right?", the cheapest check is to measure
+  what actually reaches the screen, not to re-derive what is in the buffer.
+- *A test that passes against broken code is not a test.* Two of mine did. Reverting the
+  fix is the only way to find out, and "it failed on revert" has to be checked per test,
+  not per suite.
+- *Assert physics, not shape.* "The array would look different if encoded" is a
+  statement about formatting and it was simply wrong. "The array must obey Pogson's law"
+  is a statement about the world and it fires immediately.
+
+---
+
 ## Tutorial Tab — Round 5, Batch P (box artifacts on stars): COMPLETE
 
 Ledger: `PLAN_TUTORIAL_ROUND5.md`. Closes R5.7a/b **and the open Round-4 flag R4.4b**.

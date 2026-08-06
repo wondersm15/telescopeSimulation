@@ -1007,14 +1007,27 @@ def _capture_source_image(monkeypatch, telescope, source, **kwargs):
     original = rtp._draw_source_on_axes
 
     def spy(ax, display_image, display_rgb, half_fov, log_scale, colormap,
-            fig):
+            fig, tone_gamma=1.0, **kw):
         if "img" not in captured:
-            captured["img"] = (None if display_image is None
-                               else np.array(display_image))
+            # Capture what the VIEWER sees, not what is stored. Since R5.8
+            # the greyscale array stays linear radiance and the display
+            # transfer function is applied at draw time by the colormap
+            # norm, so a box artifact that is glaring on screen sits at
+            # ~1e-4 in the array. Box detection has to run in the same
+            # space as the eye or these tests quietly stop detecting.
+            if display_image is None:
+                captured["img"] = None
+            elif log_scale and display_image.max() > 0:
+                lg = np.log10(np.clip(display_image, 1e-4, None))
+                captured["img"] = (lg + 4.0) / 4.0     # colormap input, 0-1
+            else:
+                captured["img"] = np.asarray(
+                    rtp._DisplayNorm(tone_gamma)(np.array(display_image)),
+                    dtype=float)
             captured["rgb"] = (None if display_rgb is None
                                else np.array(display_rgb))
         return original(ax, display_image, display_rgb, half_fov, log_scale,
-                        colormap, fig)
+                        colormap, fig, tone_gamma=tone_gamma, **kw)
 
     monkeypatch.setattr(rtp, "_draw_source_on_axes", spy)
     figures = rtp.plot_source_image(telescope, source, **kwargs)
@@ -1032,7 +1045,8 @@ class TestCircularTaperRemovesSquareKernelSupport:
     Root cause: an Airy convolution kernel is a SQUARE crop only ~5 Airy radii
     wide, and the Airy wings fall as r^-3, so the kernel is still ~1e-4 of its
     peak where it stops DISCONTINUOUSLY. Convolution stamps that support onto
-    every star and an asinh stretch lifts 1e-4 into visible grey.
+    every star, and the display encode lifts that residual far more than its
+    linear value suggests — enough to read as a visible grey box.
 
     Each pair of tests below first shows the detector FIRING with the taper
     disabled, so the passing assertion is load-bearing rather than vacuous.
@@ -1246,6 +1260,49 @@ class TestAnnotationBoxesStayInsideTheirAxes:
         ax_bb = ax.get_window_extent()
         for t in boxes:
             assert t.get_window_extent().x1 <= ax_bb.x1 + 2.0
+        plt.close(fig)
+
+    def test_info_box_fits_at_the_TUTORIAL_figsize(self):
+        """The size the box is actually drawn at, not the default.
+
+        R5.8b. `test_info_box_does_not_overrun_the_axes` above renders at
+        `plot_source_image`'s default figsize=(8,7) and passed happily while
+        a full GUI sweep was reporting 276 overruns, because the tutorial
+        draws every one of these at figsize=(5,5) — a 311 px axes, not 660 px.
+        A width that fits the widest caller proves nothing about the narrowest
+        one, which is the same standalone-render-vs-GUI trap that has bitten
+        this project before.
+
+        Pinned to (5,5) because that is `BeforeAfterPanel`'s canvas size and
+        therefore the geometry every tutorial user actually sees.
+        """
+        import matplotlib.pyplot as plt
+        from telescope_gui.telescope_builder import build_telescope
+        from telescope_sim.plotting.ray_trace_plot import plot_source_image
+        from telescope_sim.source.sources import PointSource
+
+        telescope = build_telescope(telescope_type="Newtonian", diameter=200,
+                                    focal_length=1000,
+                                    primary_type="parabolic",
+                                    enable_obstruction=True,
+                                    obstruction_ratio=0.2, spider_vanes=4)
+        # display_stretch="log" is the eye view, which carries the longest
+        # annotation: the mesopic note AND the R5.8 display-transfer line,
+        # both of which land at the full wrap width.
+        fig = plot_source_image(telescope, PointSource(),
+                                seeing_arcsec=2.5, figsize=(5, 5),
+                                display_stretch="log")
+        fig.canvas.draw()
+        ax = fig.axes[0]
+        boxes = [t for t in ax.texts if t.get_bbox_patch() is not None]
+        assert boxes, "the source image lost its info box"
+        ax_bb = ax.get_window_extent()
+        for t in boxes:
+            over = t.get_window_extent().x1 - ax_bb.x1
+            assert over <= 2.0, (
+                f"info box overruns its axes by {over:.1f}px at the tutorial's "
+                f"own figsize (axes is {ax_bb.width:.0f}px wide):\n"
+                + t.get_text())
         plt.close(fig)
 
     def test_title_does_not_overrun_the_axes(self):

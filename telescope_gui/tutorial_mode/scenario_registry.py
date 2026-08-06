@@ -332,25 +332,30 @@ SCENARIOS: list[ScenarioDefinition] = [
             "amber annulus — while the DETECTOR pane keeps the same amber "
             "everywhere. Watch the star's colour, not just its brightness, as "
             "you change Aperture.\n"
-            "WHY THEY DIFFER: a detector is LINEAR — pixel value ∝ collected "
-            "photons — so faint things stay faint and bright things clip. Your "
-            "eye is LOGARITHMIC (Weber–Fechner): it compresses a huge range of "
-            "brightness into what you can see at once, so it shows faint halo "
-            "and bright core together. Same star, same data — different "
-            "response curve. (See Parameters & Physics → Detector vs Eye.)\n"
+            "WHY THEY DIFFER: not a display curve — an instrument. Both panes "
+            "are drawn so that screen brightness is proportional to simulated "
+            "light, so any difference you see is physics. A DETECTOR lets you "
+            "choose the exposure and integrates as long as you like, and "
+            "silicon records the same colour at any light level. Your EYE has "
+            "no exposure control (~0.1 s, fixed), its brightness is set by the "
+            "exit pupil rather than by time, and its colour fails at both ends "
+            "of the range as described above. (See Parameters & Physics → "
+            "Detector vs Eye.)\n"
             "APERTURE affects BOTH panes: a bigger mirror collects more light, "
             "so the star brightens on the eye AND the detector (∝ aperture²). "
             "Change the Aperture control and watch both respond.\n"
-            "HOW MUCH DYNAMIC RANGE A LINEAR DISPLAY THROWS AWAY (R5.2): the "
-            "screen has 256 levels per channel, spread evenly from 0 to the "
-            "saturation level. A feature at 1.75% of the peak — the 1st Airy "
-            "ring — lands on level 4 of 255, which is black to your eye. The "
-            "2nd ring, 0.42%, lands on level 1. That is why the 2D linear "
-            "image looks like a bare dot even though the 1D profile plots "
-            "clearly show a few % of signal: the 1D plot rescales its y-axis "
-            "per curve, the 2D image cannot. The eye's asinh stretch maps that "
-            "same 1.75% to level 119 — over a quarter of the way up the "
-            "screen. Same photons, ~30× the displayed contrast.\n"
+            "CAN YOU SEE A 1% FEATURE? (R5.2) Yes — and if you cannot, "
+            "something is wrong with the display, not with your eye. This is "
+            "worth stating because this tutorial got it wrong: the 1st Airy "
+            "ring at 1.75% of peak used to render as level 4 of 255, and that "
+            "was explained away as what 'linear' costs you. It was a bug. A "
+            "monitor is not linear — it applies roughly luminance ∝ level^2.2 "
+            "— so handing it the raw number 0.0175 emitted 0.017% of peak "
+            "light, not 1.75%. Encoding for the monitor puts that ring at "
+            "level 36, and the 2nd ring (0.42%) at level 13: both visible, as "
+            "the 1D profile plots said they should be all along. Trust the "
+            "profile plots — if the 2D image disagrees with them, suspect the "
+            "display.\n"
             "EXPOSURE & SATURATION are the DETECTOR's story: a detector "
             "integrates over time, so raising Exposure builds signal until the "
             "core SATURATES and clips to pure white (the colour burns out "
@@ -360,7 +365,7 @@ SCENARIOS: list[ScenarioDefinition] = [
             "Toggle 'Eye blur' to add the eye's ~1″ spatial integration to the "
             "eye pane."
         ),
-        learn_more_section="Detector vs Eye (linear vs logarithmic)",
+        learn_more_section="Detector vs Eye (two instruments)",
         before_telescope=TelescopeConfig(
             telescope_type="Newtonian", diameter=100.0, focal_length=800.0,
             enable_obstruction=False, spider_vanes=0,
@@ -374,7 +379,7 @@ SCENARIOS: list[ScenarioDefinition] = [
             kwargs={"magnitude": 0.0, "field_angle_arcsec": 0.0,
                     "temperature_k": 4300.0},
         ),
-        before_label="Eye view (perceptual)",
+        before_label="Eye view (visual)",
         after_telescope=TelescopeConfig(
             telescope_type="Newtonian", diameter=100.0, focal_length=800.0,
             enable_obstruction=False, spider_vanes=0,
@@ -388,7 +393,7 @@ SCENARIOS: list[ScenarioDefinition] = [
             kwargs={"magnitude": 0.0, "field_angle_arcsec": 0.0,
                     "temperature_k": 4300.0},
         ),
-        after_label="Detector view (linear) →",
+        after_label="Detector view (CCD) →",
         plot_function="plot_source_image",
         theory_function=None,
         # Keep aperture (D² changes how fast the star saturates — relevant
@@ -485,17 +490,20 @@ SCENARIOS: list[ScenarioDefinition] = [
             "increases contrast in the secondary rings. Compare the theoretical Strehl (1\u2212\u03b5\u00b2)\u00b2 "
             "to the simulation.\n"
             "WHY THE RINGS LOOK ABSENT IN 2D WHILE THE 1D CUT SHOWS THEM "
-            "(R5.2): they are there \u2014 they are just far below what a linear "
-            "display can render. Unobstructed, the 1st ring peaks at 1.75% of "
-            "the core, which is pixel level 4 out of 255: black, for all "
-            "practical purposes. At \u03b5 = 0.33 it rises to 5.4% \u2014 still only "
-            "level 14. The 2nd ring is 0.42% \u2192 level 1. The 1D plot shows "
-            "them because its y-axis is rescaled per curve (often log); the "
-            "2D image cannot cheat that way. Raise Exposure, or switch to the "
-            "Eye view whose asinh stretch lifts that same 1.75% to level 119, "
-            "and the rings appear. Nothing changed in the data \u2014 only the "
-            "mapping from intensity to screen brightness. This is precisely "
-            "why astrophotographers stretch their images."
+            "(R5.2): they should NOT look absent, and until recently they did "
+            "\u2014 that was a bug in this simulator, and the fix is worth "
+            "understanding because the same trap catches real image "
+            "processing. A monitor is not linear: it emits roughly "
+            "luminance \u221d level^2.2. Writing the raw intensity 0.0175 into "
+            "the image therefore emitted 0.017% of the peak light, not 1.75%, "
+            "and the rings really were black. Encoding for the monitor first "
+            "puts the unobstructed 1st ring (1.75% of the core) at level 36 "
+            "of 255, the 2nd ring (0.42%) at level 13, and at \u03b5 = 0.33 the "
+            "1st ring (5.4%) at level 66 \u2014 all plainly visible, and now the "
+            "2D image and the 1D cut finally agree. The lesson: when a 2D "
+            "image and a quantitative profile disagree about whether a few-% "
+            "feature exists, the profile is usually right and the display is "
+            "usually lying."
         ),
         learn_more_section="Central Obstruction",
         before_telescope=_CLEAN_200MM,
@@ -839,11 +847,12 @@ SCENARIOS: list[ScenarioDefinition] = [
             "for an achromat — so R, B, and F=C are IDENTICAL choices for "
             "an achromat. (Greyed out for a singlet, where F and C lie on "
             "different focal planes.)\n\n"
-            "VIEW: Detector shows raw per-pixel CCD intensity (G core "
-            "dominates when focused at G because G is concentrated by the "
-            "in-focus Airy peak while F/C are spread thin over the chromatic "
-            "disk). Eye applies the eye's logarithmic intensity response so "
-            "dim halos are visible. Eye + integration adds 1″ spatial "
+            "VIEW: Detector shows what a CCD records (G core dominates when "
+            "focused at G because G is concentrated by the in-focus Airy peak "
+            "while F/C are spread thin over the chromatic disk). Eye shows "
+            "the same light as seen visually, where the dim halo loses its "
+            "colour near the cone threshold. Eye + integration adds 1″ "
+            "spatial "
             "integration matching eye resolution at a moderate eyepiece — "
             "the chromatic disk mixes into the perceived core, producing "
             "the white-cored, violet-haloed star image observers describe.\n\n"
@@ -1076,10 +1085,13 @@ SCENARIOS: list[ScenarioDefinition] = [
             "plane collects all the light regardless, so it has no exit-pupil "
             "term. (2) ND-2.0 makes the Moon look very dark — also correct: "
             "OD 2.0 is 1% transmission, a heavy cut (most visual observers use "
-            "ND-0.9/1.0 ≈ 12–10%). It reads as nearly black in the linear "
-            "Detector view, while the eye's logarithmic response keeps it "
-            "visible in the Eye view — a real demonstration of the detector-vs-"
-            "eye difference."
+            "ND-0.9/1.0 ≈ 12–10%). Cutting to 1% of the light darkens BOTH "
+            "views by the same factor — but only the Detector can undo it: "
+            "raise Exposure and a camera simply integrates 100× longer for "
+            "the same picture. Your eye has no such knob, so for a visual "
+            "observer the cut is permanent. That is the point of an ND filter "
+            "at the eyepiece, and it is the real detector-vs-eye difference "
+            "here."
         ),
         learn_more_section="Photometry & Filters",
         before_telescope=TelescopeConfig(
@@ -1215,15 +1227,25 @@ SCENARIOS: list[ScenarioDefinition] = [
             "signal a scene (or a device) contains. \"HDR\" (High Dynamic "
             "Range) means capturing scenes whose range exceeds what one "
             "linear exposure can record.\n"
-            "DETECTOR (left, linear): try the Exposure control — there is NO "
-            "single exposure that shows all seven. Expose for the faint stars "
-            "and the bright ones saturate and bloom to white; expose for the "
-            "bright ones and the faint ones vanish into black. A linear "
-            "detector's dynamic range is limited by saturation at the top and "
-            "noise at the bottom.\n"
-            "EYE (right, logarithmic): the eye's log response compresses the "
-            "whole range, so all seven stars read at once — the same trick "
-            "photographers call HDR. No magic gain; just log vs linear."
+            "DETECTOR (left): try the Exposure control — there is NO single "
+            "exposure that shows all seven. Expose for the faint stars and the "
+            "bright ones saturate and bloom to white; expose for the bright "
+            "ones and the faint ones vanish into black. A detector's dynamic "
+            "range is limited by saturation at the top and noise at the "
+            "bottom.\n"
+            "EYE (right): no exposure control at all — and yet all seven are "
+            "there. Your eye handles this range by adapting locally, which is "
+            "why you can read a page in sunlight and still see stars at "
+            "night.\n"
+            "THE SCREEN IS THE BOTTLENECK: this is the one module where the "
+            "simulation cannot be photometric, and it says so on the figure. "
+            "The scene spans 1000:1; a monitor in a lit room holds about "
+            "200:1. Every other module fits and is rendered exactly — here the "
+            "brightness ratios are deliberately compressed (screen ∝ "
+            "radiance^0.77) so that all seven fit at once. That compression "
+            "IS what astrophotographers mean by tone mapping, and the honest "
+            "caption on the figure is the difference between showing a scene "
+            "and pretending your screen is better than it is."
         ),
         learn_more_section="Photometry & Filters",
         before_telescope=TelescopeConfig(
@@ -1231,13 +1253,13 @@ SCENARIOS: list[ScenarioDefinition] = [
             enable_obstruction=False, spider_vanes=0,
         ),
         before_source=SourceConfig(source_type="DynamicRangeField"),
-        before_label="Detector view (linear)",
+        before_label="Detector view (CCD)",
         after_telescope=TelescopeConfig(
             telescope_type="Newtonian", diameter=150.0, focal_length=1200.0,
             enable_obstruction=False, spider_vanes=0,
         ),
         after_source=SourceConfig(source_type="DynamicRangeField"),
-        after_label="Eye view (logarithmic) →",
+        after_label="Eye view (visual) →",
         plot_function="plot_source_image",
         theory_function=None,
         tweakable_params=("diameter",),

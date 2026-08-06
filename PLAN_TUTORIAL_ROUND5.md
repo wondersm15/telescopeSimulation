@@ -274,6 +274,16 @@ hardcoded `spectral_rgb` literals.
 
 ### R5.2 — the simulation is right; the display is the honest limit
 
+> ⚠️ **SUPERSEDED BY BATCH R — THIS CONCLUSION WAS WRONG.** The arithmetic
+> below is right about the array and wrong about the screen. It assumed the
+> pixel value *was* the displayed level; it was not. The monitor applied its
+> own ~2.2 decode on top, so 1.75% of peak was emitted at 0.017% of peak
+> light. The rings really were invisible, but because of a missing display
+> encode — a code bug — not because "linear costs you that". The user's
+> instinct ("I am surprised that we cannot see any signal that is 1% of the
+> main peak. Does this seem right?") was correct and this diagnosis talked
+> them out of it twice. See *Batch R* below.
+
 Computed unobstructed Airy ring peaks:
 
 | Ring | Fraction of peak | 8-bit level |
@@ -469,6 +479,11 @@ the display stage, keyed off actual pixel flux — so a faint star fades to grey
 in the eye pane and keeps its colour in the detector pane.
 
 ### R5.2 — narrative written, with the numbers
+
+> ⚠️ **SUPERSEDED BY BATCH R.** "Confirmed the earlier finding" confirmed
+> nothing — it re-derived the same arithmetic from the same wrong premise.
+> The 8-bit levels in the table below are what the *array* held, not what the
+> *screen emitted*. Corrected table in Batch R.
 
 Confirmed the earlier finding: no code defect, the display is the honest
 limit. Wrote the quantitative version into both places the user was looking —
@@ -939,3 +954,198 @@ feature found every place Strehl was *computed* and none of the place it was *pr
   softened inner square is invisible to it. Its job in this sweep is to prove no *other*
   instance exists anywhere in the tutorial, which is what R5.7b asked for. The evidence
   for the fix itself is the kernel-level test that fails on revert.
+
+---
+
+## R5.8 (+ R5.2 reopened) — BATCH R: THE DISPLAY TRANSFER FUNCTION
+
+### What the user reported
+
+> "with detector view as you vary exposure you can get what appears to be a high
+> quality original image. With eye mode, it looks more like highlighter orange
+> stripes again. Are we sure this is right? It looks worse than before in eye mode.
+> I suppose this suggests eye viewing is worse than detector pictures. Aperture
+> also does not change apparent brightness which seems wrong."
+
+### My first hypothesis was wrong, and measurement said so
+
+I predicted the eye view was producing "highlighter orange" via a chroma-preserving
+asinh stretch. Measured on the Jupiter disk, saturation was p50 = **0.002** in the eye
+view against **0.147** in the detector view — the eye view was the *less* saturated of
+the two. The defect was never saturation. It was **contrast**, and the "orange stripes"
+impression came from belt/zone structure being flattened into flat bands of colour.
+
+### Root cause: both views were missing the display transfer function, in opposite directions
+
+`imshow` writes float RGB straight into the display buffer, so its input is an **sRGB
+code value**. The monitor then applies its own EOTF (`luminance ∝ code^2.2`).
+
+| View | What it did | Measured effect on the Jupiter disk |
+|---|---|---|
+| Detector | handed raw linear radiance to `imshow` | screen emitted `radiance^2.2` → real belt/zone contrast **exaggerated 2.15×**; aperture brightness range **20× too large** |
+| Eye | applied `asinh(a = 0.001)` first, "for the eye's log response" | scene compressed **twice** (the observer is already looking at the monitor) → contrast **flattened 2.1×**; the 12.25× exit-pupil surface-brightness range squashed to **2.56×** |
+
+The detector view looked punchy and photographic, which is exactly why it went
+unnoticed — "appears to be a high quality original image" was the bug flattering itself.
+
+R5.8b resolves as part of the same defect: the exit-pupil control *was* moving surface
+brightness correctly in the physics and the asinh was eating 79% of it on the way to
+the screen.
+
+### The fix: encode, don't stretch
+
+`colorimetry.srgb_encode` / `srgb_decode` (IEC 61966-2-1, exact and losslessly
+invertible) cancel the monitor's decode, so **screen luminance ∝ simulated radiance**
+and the viewer's own visual system supplies exactly the compression it would supply at
+the eyepiece. Applying a log or asinh "to model the eye" on top of that models the eye
+twice.
+
+Decided with the user (they chose **"Both views faithful"** over "eye view only"),
+accepting that the detector view would look less punchy and that all 17 modules shift
+in appearance.
+
+### Where compression is genuinely unavoidable — and disclosed
+
+`tone_map_gamma` returns γ = ln(D)/ln(S), which maps an S:1 scene onto exactly D:1 and
+degenerates to γ = 1 when the scene fits `DISPLAY_USABLE_CONTRAST = 200`.
+
+Scene contrast is derived from the **source's magnitude spread**, deliberately not from
+the frame: a per-render value would drift as a slider moves, and the Before/After panels
+would no longer share a brightness scale — which is their whole premise.
+
+Measured per source class, as the renderer actually reports it:
+
+| source | scene contrast | γ | result |
+|---|---|---|---|
+| Moon | 1.0 | 1.000 | exact |
+| Jupiter | 1.0 | 1.000 | exact |
+| Saturn | 1.0 | 1.000 | exact |
+| PointSource / DoubleStar | 1.0 | 1.000 | exact |
+| MultiColorStarField | 2.5 | 1.000 | exact, all 5 stars visible |
+| ShowcaseStarField | 150.1 | 1.000 | exact, all 66 visible, faintest at code 0.213 |
+| **DynamicRangeField** (`saturation_demo`) | **1000.0** | **0.767** | all 7 visible, codes 1.0000 → 0.1431 |
+
+Extended sources (Moon, Jupiter, Saturn) carry scene contrast 1.0 *by
+construction* — only the star branch overwrites it, since a resolved disk's own
+brightness range is what the exposure control is for. Their measured on-screen
+spans (Moon 2:1, Jupiter 203:1, Saturn 484:1) were audited separately and all
+sit inside the display's 200:1 or close enough that no compression is
+warranted; that audit is what justified leaving the extended-source path
+uncompressed rather than an assumption.
+
+`saturation_demo` is the only scenario that compresses, and its figure now prints
+`scene spans 1,000:1, screen only ~200:1 → tone-mapped (screen ∝ radiance^0.77);
+brightness ratios compressed, not photometric`. Required by the CLAUDE.md physics
+policy — the code comments promised this disclosure before it existed.
+
+### R5.2 REOPENED AND ACTUALLY FIXED
+
+The Round-5 diagnosis said twice that R5.2 was "a narrative gap, not a code bug". That
+was wrong, and it is the most important thing in this batch. The user asked whether it
+seemed right that a 1%-of-peak feature was invisible. It did not, and it was not.
+
+| feature | old: array value → level | **old: light actually emitted** | new: level | visible? |
+|---|---|---|---|---|
+| 1st ring, unobstructed (1.75%) | 0.0175 → 4 | **0.017% of peak** | **36 / 255** | yes |
+| 1st ring, ε = 0.33 (5.4%) | 0.054 → 14 | 0.19% | **66 / 255** | yes |
+| 2nd ring (0.42%) | 0.0042 → 1 | 0.0009% | **13 / 255** | yes |
+
+Verified end-to-end on the real render, not just in arithmetic: first ring at code
+0.1397 (Detector) and 0.1342 (Eye). The 2D image and the 1D profile plots finally
+agree, which is what the user was pointing at all along.
+
+Narratives rewritten in *Viewing Modes* and *Central Obstruction* to say so plainly —
+including that this simulator got it wrong — with the lesson generalised: when a 2D
+image and a quantitative profile disagree about a few-% feature, suspect the display.
+
+### Sibling audit (standing "check elsewhere" instruction)
+
+Encoding `image_rgb` is safe because it goes straight to the display buffer. Three
+other sites touch pixels and each was a variant of the same confusion:
+
+1. **The greyscale path** (`_draw_source_on_axes`) draws through a colormap with a
+   **numeric colorbar**. Encoding that array — which my first fix did — silently turns
+   ticks labelled "Normalized intensity" into code values. A third of the tutorial's
+   source renders take this path, including `saturation_demo`. Fixed with
+   `_DisplayNorm`, a `matplotlib.colors.Normalize` that feeds the colormap code values
+   while `inverse` keeps the colorbar in intensity units — the same seam `LogNorm` uses.
+   The array now stays linear all the way out of the renderer.
+2. **`_apply_exit_pupil_washout`** blends toward a mean — an operation on *light*. It
+   was receiving a linear `image` and an encoded `image_rgb`, i.e. applying two
+   different effects under one name. Now decodes on the way in, re-encodes on the way out.
+3. **Two crop renormalizations** (`display_rgb`, `tfov_rgb`) divided code values by
+   their max. Rescaling brightness is also an operation on light; now done in linear.
+
+The `log_scale=True` branch is deliberately left alone: it is a quantitative false-colour
+display whose colorbar states its own mapping, like any log-scaled scientific figure.
+
+### Verification
+
+- **555 tests pass** (was 532) — 23 new across four classes.
+- **Load-bearing, proven by revert.** Reverting `ray_trace_plot.py` to pre-R5.8 fails
+  **12** tests. Two more had to be *fixed* because the revert did **not** fail them:
+  - `test_detector_brightness_scales_as_aperture_squared` passed against broken code.
+    At the probe exposure Jupiter's disk sits inside sRGB's **linear toe** (below 0.0031,
+    where encode is just ×12.92) and an unencoded pipeline scales identically. Re-pinned
+    at exposure 1.0, where the disk lands at 0.15/0.59 of full scale — it now reports
+    **16.1× for a 2× aperture** against broken code, the double-gamma signature exactly.
+  - `test_renderer_leaves_the_greyscale_array_linear` asserted "an encoded array would
+    look different". It would not — encoding twice moves values as much as encoding
+    once, so it passed with the bug deliberately reintroduced. Rewritten to test
+    **physics instead of shape**: a linear array must obey Pogson's law. Slope of
+    instrumental vs true magnitude is 1.00 correct, **0.54 with the bug present**.
+- **End-to-end fidelity, decoding renders back to screen luminance**: Detector contrast
+  0.557 (1.00× true), Eye contrast 0.557 (1.00× true), exit pupil 1→7 mm gives 49.00×
+  vs 49.00× true, aperture gives 16.01× vs D² = 16.00×.
+- **The full sweep caught a regression I introduced — R5.8b, the annotation box.**
+  All 17 scenarios × every combo/checkbox/slider through real sidebar navigation:
+  **2475 renders, 0 nulls, 0 box artifacts, 0 banned axis/colourbar labels, 0
+  suptitle overprints** — but **276 annotation boxes overrunning their axes**, where
+  Batch P's final sweep had 0.
+
+  The cause was mine and it is a clean instance of a pattern already written down.
+  `_ANNOTATION_WIDTH = 62` is a *character* count, calibrated in Batch P against the
+  longest line that existed then (48 chars). Nothing ever reached the limit, so the
+  limit itself was never checked against the narrowest axes it draws on. R5.8 added
+  two lines of **exactly 62 characters** ("Display: sRGB encoded — screen brightness
+  ∝ simulated radiance" and the eye-view brightness note); at fontsize 7 they measure
+  324 px in a 311 px axes.
+
+  Batch P solved the sibling problem — the metrics panel — with a *measured* budget
+  (`_panel_char_budget`) precisely because "a hard-coded width fits one figsize and
+  clips at every other". That reasoning applied here just as well and I did not carry
+  it across. It also does not transfer directly: `_panel_char_budget` is exact only
+  because DejaVu Sans **Mono** has a constant 0.602 em advance, and this annotation is
+  proportional DejaVu Sans, where N characters have no fixed width. So the fix is
+  `_fit_annotation_to_axes`: place the text, **measure the box that actually
+  resulted**, and narrow the wrap until it fits. That checks the quantity that
+  matters for any figsize, font or content, instead of a proxy for it.
+
+  Applied to all four `_wrap_annotation` text sites. Two were latent rather than
+  live: the eyepiece "true size" and "eyepiece view" annotations are not reachable
+  from the tutorial *yet* and R5.9 is about to expose them. One more was invisible to
+  the detector entirely — `approx_text` in `plot_focal_image` is drawn with **no bbox
+  patch**, and the sweep's overflow check skips unboxed text, so it was never wrapped
+  at all and could have been overrunning throughout. It is wrapped now.
+
+  **The existing test did not catch this and could not have.**
+  `test_info_box_does_not_overrun_the_axes` renders at `plot_source_image`'s default
+  `figsize=(8,7)` — a 660 px axes — and passed cheerfully while the sweep counted 276
+  overruns, because `BeforeAfterPanel` draws every tutorial figure at **(5,5)**. A
+  width that fits the widest caller proves nothing about the narrowest, which is the
+  standalone-render-vs-GUI trap in test form. New
+  `test_info_box_fits_at_the_TUTORIAL_figsize` pins (5,5) and the eye view (the
+  longest annotation); with the refit disabled it fails by **35.7 px** while the three
+  older tests in the same class still pass. **556 tests.**
+- Every `learn_more_section` link re-verified against the real widget after the section
+  renames — all resolve.
+
+### Retired everywhere
+
+The "eye = asinh / logarithmic stretch" justification is gone from the view combo and
+its tooltip, the figure annotation, four scenario narratives, the panel labels, and the
+reference tab (which now carries a *How the image reaches your screen* section and an
+explicit note on why the simulator must **not** apply the eye's own response curve).
+The known-simplifications entry "Eye-mode diffraction rings look too obvious" is
+rewritten: rings are now at true contrast, and what remains simplified is *visibility*
+(the eye's ~1% contrast threshold and seeing are still unmodelled).

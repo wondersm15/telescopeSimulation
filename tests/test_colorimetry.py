@@ -23,6 +23,9 @@ from telescope_sim.physics.colorimetry import (
     mesopic_chroma_gain,
     planck_spectral_radiance,
     spectral_bands,
+    srgb_decode,
+    srgb_encode,
+    tone_map_gamma,
     xyz_to_linear_srgb,
 )
 
@@ -373,6 +376,13 @@ class TestEyeVersusDetectorColour:
 
     @staticmethod
     def _ring_sat(rgb, radius_px):
+        # The renderer emits sRGB CODE VALUES (R5.8), but chromaticity is a
+        # property of linear light — the encode is a per-channel power law,
+        # so it changes (max-min)/max even when the colour has not changed
+        # at all. Decode first, or this measures the transfer function
+        # instead of the colour.
+        from telescope_sim.physics.colorimetry import srgb_decode
+        rgb = srgb_decode(rgb)
         lum = (0.2126 * rgb[..., 0] + 0.7152 * rgb[..., 1]
                + 0.0722 * rgb[..., 2])
         cy, cx = np.unravel_index(int(np.argmax(lum)), lum.shape)
@@ -405,3 +415,372 @@ class TestEyeVersusDetectorColour:
         the fix has simply thrown all colour away."""
         rgb = self._render("log")
         assert self._ring_sat(rgb, 10) > self._ring_sat(rgb, 20)
+
+
+class TestSRGBTransferFunction:
+    """R5.8: the encode that cancels the monitor's own ~2.2 decode.
+
+    `imshow` writes float RGB straight into the display buffer, so its input
+    is an sRGB CODE VALUE, not a radiance. These tests pin the curve itself;
+    `TestPhotometricFidelity` below checks that the renderer actually uses it.
+    """
+
+    def test_endpoints_are_exact(self):
+        assert float(srgb_encode(0.0)) == pytest.approx(0.0)
+        assert float(srgb_encode(1.0)) == pytest.approx(1.0)
+
+    def test_round_trip_is_lossless(self):
+        lin = np.linspace(0.0, 1.0, 2001)
+        assert np.abs(srgb_decode(srgb_encode(lin)) - lin).max() < 1e-12
+
+    def test_matches_the_published_curve(self):
+        # Reference points from IEC 61966-2-1. Mid-grey is the one that
+        # matters pedagogically: 18% reflectance sits near code 0.46, which
+        # is why handing raw radiance to imshow looks ~2.3x too dark.
+        assert float(srgb_encode(0.18)) == pytest.approx(0.4613, abs=5e-4)
+        assert float(srgb_encode(0.5)) == pytest.approx(0.7354, abs=5e-4)
+        assert float(srgb_decode(0.5)) == pytest.approx(0.2140, abs=5e-4)
+
+    def test_is_monotonic(self):
+        lin = np.linspace(0.0, 1.0, 500)
+        assert np.all(np.diff(srgb_encode(lin)) > 0)
+
+    def test_lifts_a_one_percent_feature_out_of_black(self):
+        """The R5.2 arithmetic, pinned.
+
+        A 1st Airy ring at 1.75% of peak used to be written into the image as
+        the raw value 0.0175 -> level 4 of 255, and the monitor then emitted
+        0.0175**2.2 = 0.017% of peak light, i.e. black. Encoded, it lands at
+        level 36 and is visible.
+        """
+        assert float(srgb_encode(0.0175)) * 255 == pytest.approx(36, abs=1)
+        assert float(srgb_encode(0.0042)) * 255 == pytest.approx(13, abs=1)
+        assert float(srgb_encode(0.054)) * 255 == pytest.approx(66, abs=1)
+
+    def test_clamps_out_of_range_input(self):
+        assert float(srgb_encode(-0.5)) == pytest.approx(0.0)
+        assert float(srgb_encode(1.5)) == pytest.approx(1.0)
+
+
+class TestToneMapGamma:
+    """The exponent that squeezes an over-range scene onto the display.
+
+    This is a statement about the SCREEN, not a model of vision, and it must
+    stay switched off wherever the scene already fits.
+    """
+
+    def test_scene_that_fits_is_left_alone(self):
+        assert tone_map_gamma(2.0) == 1.0            # the Moon
+        assert tone_map_gamma(200.0) == 1.0          # exactly the display
+        assert tone_map_gamma(1.0) == 1.0            # a single star
+
+    def test_planets_need_no_compression(self):
+        # Jupiter ~203:1, Saturn ~484:1 measured. Jupiter must be exact;
+        # Saturn is allowed to compress, but only slightly.
+        assert tone_map_gamma(203.0) > 0.99
+        assert tone_map_gamma(484.0) > 0.85
+
+    def test_maps_the_scene_exactly_onto_the_display(self):
+        """The defining property: an S:1 scene must come out D:1."""
+        for scene in (1000.0, 1e4, 1e6):
+            g = tone_map_gamma(scene, 200.0)
+            assert scene ** g == pytest.approx(200.0, rel=1e-9)
+
+    def test_star_field_compresses(self):
+        # saturation_demo spans mag -1..6.5 = 1000:1.
+        assert tone_map_gamma(1000.0) == pytest.approx(0.767, abs=0.002)
+
+    def test_degenerate_input_is_safe(self):
+        assert tone_map_gamma(0.0) == 1.0
+        assert tone_map_gamma(-5.0) == 1.0
+
+
+class TestPhotometricFidelity:
+    """R5.8: does the RENDERER actually put simulated light on the screen?
+
+    Every assertion here decodes what the renderer emits back to screen
+    luminance -- what the monitor emits and the observer's eye receives --
+    and compares it to the physics. Measuring in code-value space instead
+    would silently pass a broken pipeline, which is how this went unnoticed.
+    """
+
+    _PROBE = 0.02          # low enough that Jupiter's disk does not clip
+    _EXPOSURE = 0.3        # the scenario default; at 1.0 the disk saturates
+                           # and every contrast measurement reads zero
+
+    @staticmethod
+    def _lum(rgb):
+        from telescope_sim.physics.colorimetry import srgb_decode
+        rgb = srgb_decode(np.asarray(rgb, dtype=float))
+        return (0.2126 * rgb[..., 0] + 0.7152 * rgb[..., 1]
+                + 0.0722 * rgb[..., 2])
+
+    @staticmethod
+    def _contrast(v):
+        p10, p50, p90 = np.percentile(v, [10, 50, 90])
+        return (p90 - p10) / max(p50, 1e-12)
+
+    def _render(self, diameter=200.0, **kw):
+        import dataclasses
+        from telescope_gui.tutorial_mode.scenario_registry import (
+            get_scenario_by_id)
+        from telescope_gui.tutorial_mode.scenario_runner import build_source
+        from telescope_gui.telescope_builder import build_telescope
+        from telescope_sim.plotting.ray_trace_plot import (
+            _render_source_through_telescope)
+
+        sc = get_scenario_by_id("color_filter_jupiter")
+        src = build_source(sc.after_source)
+        cfg = dataclasses.replace(sc.after_telescope, diameter=diameter)
+        tel = build_telescope(**dataclasses.asdict(cfg))
+        kw.setdefault("exit_pupil_mm", 7.0)
+        _, _, info = _render_source_through_telescope(
+            src, tel, filter_name="None", **kw)
+        return info
+
+    @pytest.fixture(scope="class")
+    def _truth(self):
+        """Unclipped linear render + the disk mask, defined ONCE.
+
+        Both views must be measured over the SAME pixels; letting each pick
+        its own threshold compares different pixel sets and manufactures a
+        difference that is not there.
+        """
+        info = self._render(display_stretch="linear",
+                            exposure_level=self._PROBE)
+        lum = self._lum(info["image_rgb"]) / self._PROBE
+        assert (np.asarray(info["image_rgb"]) < 0.999).all(), (
+            "probe exposure clipped; contrast would read as zero")
+        disk = lum > 0.25 * lum.max()
+        return lum, disk, self._contrast(lum[disk])
+
+    def test_detector_view_reproduces_real_contrast(self, _truth):
+        """Was 2.15x too punchy: linear radiance went straight to imshow,
+        so the monitor emitted radiance**2.2."""
+        _, disk, true_c = _truth
+        info = self._render(display_stretch="linear",
+                            exposure_level=self._EXPOSURE)
+        # Guard the measurement, not the image: a percentile contrast is
+        # meaningless once a large share of the disk saturates to a flat
+        # 1.0. At exposure 1.0 essentially all of it does, and this test
+        # would then read 0.0 and look like a transfer-function bug.
+        # The highest percentile this contrast measure reads is p90, so the
+        # bound that matters is 10% -- take half of it for margin. (At the
+        # scenario default ~1.8% of the disk saturates and the contrast is
+        # still exact; at exposure 1.0 nearly all of it does and the
+        # measurement collapses to 0.0, which would look like a
+        # transfer-function bug rather than a saturated frame.)
+        clipped = (np.asarray(info["image_rgb"]).max(axis=2)[disk] > 0.999)
+        assert clipped.mean() < 0.05, (
+            f"{clipped.mean():.1%} of the disk is saturated; p90 is no "
+            f"longer measurable, so this test cannot mean what it says")
+        got = self._contrast(self._lum(info["image_rgb"])[disk])
+        assert got == pytest.approx(true_c, rel=0.10)
+
+    def test_eye_view_reproduces_real_contrast(self, _truth):
+        """Was 2.1x too flat: an asinh stretch compressed a scene that the
+        observer's own eye was about to compress again."""
+        _, disk, true_c = _truth
+        info = self._render(display_stretch="log",
+                            exposure_level=self._EXPOSURE)
+        got = self._contrast(self._lum(info["image_rgb"])[disk])
+        assert got == pytest.approx(true_c, rel=0.10)
+
+    def test_both_views_agree_on_contrast(self, _truth):
+        """The Detector-vs-Eye comparison is only honest if neither side is
+        secretly rendered through a different curve."""
+        _, disk, _ = _truth
+        d = self._contrast(self._lum(
+            self._render(display_stretch="linear",
+                         exposure_level=self._EXPOSURE)["image_rgb"])[disk])
+        e = self._contrast(self._lum(
+            self._render(display_stretch="log",
+                         exposure_level=self._EXPOSURE)["image_rgb"])[disk])
+        assert d == pytest.approx(e, rel=0.10)
+
+    def test_exit_pupil_moves_surface_brightness_as_the_square(self, _truth):
+        """R5.8b. Surface brightness goes as (p/7mm)^2, so 1mm -> 7mm is
+        49x. The asinh stretch squashed that to 2.56x, which is why the
+        control appeared dead."""
+        _, disk, _ = _truth
+        ref = None
+        for p in (1.0, 3.0, 7.0):
+            info = self._render(display_stretch="log",
+                                exposure_level=self._EXPOSURE,
+                                exit_pupil_mm=p)
+            med = np.percentile(self._lum(info["image_rgb"])[disk], 50)
+            if ref is None:
+                ref, sb_ref = med, info["eye_surface_brightness_factor"]
+                continue
+            expected = info["eye_surface_brightness_factor"] / sb_ref
+            assert med / ref == pytest.approx(expected, rel=0.05)
+
+    def test_detector_brightness_scales_as_aperture_squared(self, _truth):
+        """Doubling the aperture must put 4x the light on the screen.
+
+        Exposure 1.0 is deliberate. sRGB has a LINEAR toe below 0.0031
+        (code 0.04), where encode and decode are just a factor of 12.92 and
+        an unencoded pipeline scales identically to an encoded one. At the
+        probe exposure Jupiter's whole disk sits inside that toe, and this
+        test could not tell a correct renderer from a broken one -- it
+        passed against the pre-R5.8 code. Here the disk lands at 0.15 and
+        0.59 of full scale: above the toe, below saturation.
+        """
+        _, disk, _ = _truth
+        med = {}
+        for d in (50.0, 100.0):
+            info = self._render(diameter=d, display_stretch="linear",
+                                exposure_level=1.0)
+            code = np.asarray(info["image_rgb"]).max(axis=2)[disk]
+            assert (code > 0.999).mean() < 0.01, "saturated; ratio is capped"
+            assert np.percentile(code, 50) > 0.04, "in the sRGB linear toe"
+            med[d] = np.percentile(self._lum(info["image_rgb"])[disk], 50)
+        assert med[100.0] / med[50.0] == pytest.approx(4.0, rel=0.05)
+
+    def test_planets_are_rendered_without_compression(self):
+        """Jupiter fits a screen, so the tone map must stay switched off --
+        otherwise every planetary module quietly stops being photometric."""
+        info = self._render(display_stretch="linear",
+                            exposure_level=self._EXPOSURE)
+        assert info["tone_gamma"] == 1.0
+
+
+class TestGreyscaleDisplayPath:
+    """R5.8: the colormapped path needs the same transfer function -- but it
+    also carries a numeric colorbar, so the ARRAY must stay linear.
+
+    Encoding the array itself would turn ticks labelled "Normalized
+    intensity" into sRGB code values without changing the label. A third of
+    the tutorial's source renders take this path.
+    """
+
+    def test_renderer_leaves_the_greyscale_array_linear(self):
+        """Regression guard: `image` must not be encoded in place."""
+        import dataclasses
+        from telescope_gui.tutorial_mode.scenario_registry import (
+            get_scenario_by_id)
+        from telescope_gui.tutorial_mode.scenario_runner import build_source
+        from telescope_gui.telescope_builder import build_telescope
+        from telescope_sim.plotting.ray_trace_plot import (
+            _render_source_through_telescope)
+
+        sc = get_scenario_by_id("saturation_demo")
+        src = build_source(sc.after_source)
+        tel = build_telescope(**dataclasses.asdict(sc.after_telescope))
+        image, _, info = _render_source_through_telescope(
+            src, tel, display_stretch=sc.default_display_stretch,
+            exposure_level=sc.default_exposure, filter_name="None")
+        assert info["image_rgb"] is None, "expected the greyscale path"
+
+        # Discriminate by PHYSICS, not by shape. "An encoded array would
+        # look different" is not a test -- encoding twice moves values just
+        # as much as encoding once, so a shape check passes either way (it
+        # did). What only a linear array can do is obey Pogson's law: one
+        # magnitude of difference is a flux ratio of exactly 2.512, and any
+        # display encode destroys that.
+        peaks = self._star_peaks(image, src, half_fov=info["half_fov_arcsec"])
+        usable = [(m, p) for m, p in peaks if 0.001 < p < 0.99]
+        assert len(usable) >= 3, "need unsaturated, above-noise stars"
+        mags = np.array([m for m, _ in usable])
+        inst = -2.5 * np.log10([p for _, p in usable])
+        # inst_mag should track true mag one-for-one.
+        slope = np.polyfit(mags, inst, 1)[0]
+        assert slope == pytest.approx(1.0, abs=0.06), (
+            f"flux ratios follow slope {slope:.3f}, not Pogson's 1.0 -- the "
+            f"greyscale array is not linear radiance")
+
+    @staticmethod
+    def _star_peaks(image, src, half_fov):
+        n = image.shape[0]
+        px = 2.0 * half_fov / n
+        out = []
+        for x, y, m in zip(src.star_x_arcsec, src.star_y_arcsec,
+                           src.star_magnitudes):
+            cx, cy = int(round(n / 2 + x / px)), int(round(n / 2 + y / px))
+            if not (0 <= cx < n and 0 <= cy < n):
+                continue
+            box = image[max(cy - 6, 0):cy + 7, max(cx - 6, 0):cx + 7]
+            if box.size:
+                out.append((float(m), float(box.max())))
+        return out
+
+    def test_norm_round_trips_so_colorbar_ticks_are_truthful(self):
+        from telescope_sim.plotting.ray_trace_plot import _DisplayNorm
+        for gamma in (1.0, 0.767, 0.5):
+            norm = _DisplayNorm(gamma)
+            data = np.array([0.0, 0.05, 0.1, 0.25, 0.5, 0.75, 1.0])
+            back = norm.inverse(np.asarray(norm(data)))
+            assert np.abs(back - data).max() < 1e-12
+
+    def test_norm_makes_the_picture_photometric(self):
+        """decode(what the colormap receives) must be proportional to the
+        linear data -- the same guarantee the RGB path gets."""
+        from telescope_sim.plotting.ray_trace_plot import _DisplayNorm
+        from telescope_sim.physics.colorimetry import srgb_decode
+        data = np.array([0.05, 0.1, 0.2, 0.4, 0.8, 1.0])
+        screen = srgb_decode(np.asarray(_DisplayNorm(1.0)(data)))
+        ratio = screen / data
+        assert ratio.max() / ratio.min() == pytest.approx(1.0, abs=1e-9)
+
+    def test_colorbar_keeps_intensity_units(self):
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        from telescope_sim.plotting.ray_trace_plot import (
+            _draw_source_on_axes)
+
+        fig, ax = plt.subplots()
+        img = np.linspace(0.0, 1.0, 64 * 64).reshape(64, 64)
+        _draw_source_on_axes(ax, img, None, 10.0, False, "gray", fig,
+                             tone_gamma=1.0)
+        cbar_ax = [a for a in fig.axes if a is not ax][0]
+        assert cbar_ax.get_ylabel() == "Normalized intensity"
+        lo, hi = cbar_ax.get_ylim()
+        assert (lo, hi) == pytest.approx((0.0, 1.0))
+        plt.close(fig)
+
+
+class TestToneMapDisclosure:
+    """CLAUDE.md physics policy: where the render is not real physics, the
+    FIGURE has to say so -- not just a code comment.
+
+    `saturation_demo` is the only scenario whose scene (1000:1) exceeds what
+    a screen can emit, so it is the only one that may carry the notice, and
+    it must.
+    """
+
+    @staticmethod
+    def _annotation(scenario_id):
+        import dataclasses
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        from telescope_gui.tutorial_mode.scenario_registry import (
+            get_scenario_by_id)
+        from telescope_gui.tutorial_mode.scenario_runner import build_source
+        from telescope_gui.telescope_builder import build_telescope
+        from telescope_sim.plotting.ray_trace_plot import plot_source_image
+
+        sc = get_scenario_by_id(scenario_id)
+        src = build_source(sc.after_source)
+        tel = build_telescope(**dataclasses.asdict(sc.after_telescope))
+        figs = plot_source_image(
+            tel, src, display_stretch=sc.default_display_stretch,
+            exposure_level=sc.default_exposure)
+        figs = figs if isinstance(figs, list) else [figs]
+        text = " ".join(t.get_text() for f in figs for a in f.axes
+                        for t in a.texts)
+        for f in figs:
+            plt.close(f)
+        return text
+
+    def test_compressed_scene_says_so_on_the_figure(self):
+        text = self._annotation("saturation_demo")
+        assert "tone-mapped" in text
+        assert "not photometric" in text
+        assert "0.77" in text, "the actual exponent must be stated"
+
+    def test_faithful_scene_claims_no_compression(self):
+        text = self._annotation("color_filter_jupiter")
+        assert "tone-mapped" not in text
+        assert "sRGB encoded" in text

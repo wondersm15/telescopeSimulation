@@ -388,3 +388,91 @@ def apply_mesopic_desaturation(image_rgb,
            + 0.0722 * image_rgb[..., 2])
     gain = mesopic_chroma_gain(lum, cone_threshold, bleach_level)
     return lum[..., None] + gain[..., None] * (image_rgb - lum[..., None])
+
+
+# ---------------------------------------------------------------------------
+# Display transfer function
+# ---------------------------------------------------------------------------
+
+#: Usable contrast ratio of a typical monitor in a normally-lit room. Real
+#: panels quote 1000:1 or better, but ambient light reflecting off the screen
+#: raises the effective black level, and this simulation is meant to be viewed
+#: at a desk, not in a darkroom. Used to decide how much a scene has to be
+#: compressed before it can be shown at all.
+DISPLAY_USABLE_CONTRAST = 200.0
+
+
+def srgb_encode(linear):
+    """Apply the sRGB opto-electronic transfer function (the "gamma encode").
+
+    This is the piece that makes a rendered image *photometrically* correct
+    rather than merely plausible, and it is easy to leave out by accident.
+
+    Matplotlib's `imshow` writes float RGB straight into the display buffer,
+    so whatever number is handed to it is treated as an **sRGB code value**.
+    The monitor then applies its own electro-optical transfer function —
+    roughly `luminance ∝ code ** 2.2` — before any light reaches the viewer.
+    Handing raw *linear* radiance to `imshow` therefore puts
+    `radiance ** 2.2` on the screen: mid-tones come out about 2.3× too dark
+    and every contrast in the picture is exaggerated by a factor of 2.2 in
+    log terms.
+
+    Encoding here cancels the monitor's decode, so the screen emits luminance
+    proportional to the simulated radiance. That matters for the Eye view in
+    particular: once the screen is linear in radiance, the observer's own
+    visual system supplies exactly the compression it would supply at the
+    eyepiece — which is the thing being simulated. Applying a log or asinh
+    "to model the eye's response" on top of that models the eye *twice*.
+
+    Args:
+        linear: Linear-light values, nominally in [0, 1] (1.0 = display
+            saturation). Values outside the range are clipped.
+
+    Returns:
+        sRGB-encoded code values in [0, 1], same shape as the input.
+    """
+    linear = np.clip(np.asarray(linear, dtype=float), 0.0, 1.0)
+    return np.where(linear <= 0.0031308,
+                    12.92 * linear,
+                    1.055 * np.power(linear, 1.0 / 2.4) - 0.055)
+
+
+def srgb_decode(code):
+    """Inverse of `srgb_encode` — code values back to linear light."""
+    code = np.clip(np.asarray(code, dtype=float), 0.0, 1.0)
+    return np.where(code <= 0.04045,
+                    code / 12.92,
+                    np.power((code + 0.055) / 1.055, 2.4))
+
+
+def tone_map_gamma(scene_contrast: float,
+                   display_contrast: float = DISPLAY_USABLE_CONTRAST) -> float:
+    """Exponent that squeezes `scene_contrast` into what a screen can show.
+
+    A faithful render is only possible while the scene fits the display. The
+    Moon (about 2:1 across its disk) and the planets (200–500:1) fit easily.
+    A star field does not: between the brightest star and the faintest one an
+    observer could still glimpse there are four or more decades, and no
+    monitor has that range. Something has to give, so the honest move is to
+    compress by a stated amount rather than to pretend the problem is absent.
+
+    A power law is used because it is the compression with one interpretable
+    parameter: `screen ∝ radiance ** γ` maps a `scene_contrast : 1` range onto
+    exactly `display_contrast : 1`, is monotonic (so nothing changes rank),
+    and degenerates to γ = 1 — no compression at all — the moment the scene
+    fits. It is *not* a model of vision; it is a statement about the screen.
+
+    ⚠️ Whenever this returns < 1 the render is no longer photometric and the
+    figure must say so; `plot_source_image` prints the compression it used.
+
+    Args:
+        scene_contrast: Ratio of the brightest to the faintest scene value
+            that needs to remain visible.
+        display_contrast: Usable contrast of the target display.
+
+    Returns:
+        γ in (0, 1]. Exactly 1.0 when no compression is needed.
+    """
+    if scene_contrast <= display_contrast or scene_contrast <= 1.0:
+        return 1.0
+    return float(np.log(display_contrast) / np.log(scene_contrast))

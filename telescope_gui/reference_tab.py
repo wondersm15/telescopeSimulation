@@ -195,9 +195,11 @@ the physically-correct downsample. Averaging (matplotlib's default
 bilinear interpolation) would dilute sub-pixel features and break flux
 conservation.</li>
 </ul>
-<p>Display modes (linear/asinh/asinh+eye-blur) operate on this same binned
-array; they alter only how pixel values are mapped to screen brightness,
-not the simulated photon counts.</p>
+<p>Display modes (Detector / Eye / Eye+integration) operate on this same
+binned array. They do not change the simulated photon counts, and since R5.8
+they do not change the display curve either &mdash; both views are encoded for
+the monitor identically, so what differs between them is the instrument being
+modelled.</p>
 
 <h3>PSF &mdash; 1D Profile</h3>
 <p>Radial cross-section of the Point Spread Function. Shows the Airy pattern:
@@ -603,19 +605,30 @@ T(&lambda;) is the filter transmission. A mag-0 star through a 100&nbsp;mm
 scope at unit exposure with no filter peaks just below the saturation
 level (= 1.0); brighter sources, larger apertures, or longer exposures
 saturate; dimmer sources sit at their true relative brightness.</p>
-<p><b>Display modes</b> (apply to the same simulated data):</p>
+<p><b>Display modes</b> model two <i>instruments</i> looking at the same
+simulated light. They are not two display curves: both are rendered through
+the same physically-correct transfer function (see <i>How the image reaches
+your screen</i> below), so any difference you see between them is
+physics.</p>
 <ul>
-  <li><b>Detector (linear)</b>: raw per-pixel intensity. A real CCD's
-  response to photon counts. Bright objects clip to white; dim ones
-  sit at a few percent. This is what a calibrated detector records
-  before any post-processing.</li>
-  <li><b>Eye (asinh)</b>: an inverse-hyperbolic stretch that
-  approximates the eye's logarithmic intensity response (Pogson scale).
-  Reveals dim features alongside bright ones &mdash; matches the visual
-  impression at the eyepiece.</li>
+  <li><b>Detector (CCD)</b>: exposure time is a free parameter, so the
+  detector integrates as long as you let it; brightness clips at
+  saturation; and silicon records the same colour at any light level.</li>
+  <li><b>Eye (visual)</b>: no exposure control (a fixed ~0.1&nbsp;s
+  integration), surface brightness set by the exit pupil rather than by
+  time, and colour that fails at both ends of the range &mdash; grey below
+  the cone threshold, bleached toward white above.</li>
   <li><b>Eye + integration</b>: as Eye, plus a 1&Prime; spatial blur
   approximating the eye's spatial resolution at moderate magnification.</li>
 </ul>
+<p><i>Historical note (R5.8):</i> the Eye mode used to apply an
+<code>asinh</code> stretch, justified as &ldquo;the eye's logarithmic
+response&rdquo;. That was wrong &mdash; the observer's eye is already in the
+loop, looking at the monitor, so the stretch modelled it a second time.
+Measured on Jupiter it flattened real belt/zone contrast by 2.1&times; and
+squashed a 12.25&times; exit-pupil brightness range down to 2.56&times;,
+which is why the aperture and exit-pupil controls appeared to do nothing.
+The stretch has been removed.</p>
 <p>In the Eye modes, an additional <b>cone-desaturation</b> step blends
 high-flux pixels toward grey luminance by
 <i>w</i> = <i>I</i>/(<i>I</i> + 0.5). This reproduces the &ldquo;Jupiter
@@ -714,10 +727,47 @@ is exactly a logarithmic response:</li>
 </ul>
 <p style="font-family:monospace; margin-left:20px;">
 m = &minus;2.5 log<sub>10</sub>(F / F<sub>0</sub>)</p>
-<p>In the tutorial, the <b>Detector (linear)</b> view maps pixel value straight
-to screen brightness; the <b>Eye (log)</b> view applies an <code>asinh</code>
-stretch (a smooth curve that is logarithmic for bright values and linear near
-zero, avoiding a singularity at black) to mimic this response.</p>
+<h3>Why the simulator does <i>not</i> apply this curve</h3>
+<p>All of the above is true, and it is exactly why the tutorial must
+<b>not</b> simulate it. You are already looking at the screen with the eye in
+question. Its logarithmic response is applied by <i>you</i>, in real time, to
+whatever light the monitor emits &mdash; so the simulator's only job is to make
+the monitor emit light in proportion to the simulated light. Apply an
+<code>asinh</code> curve on top of that and the scene gets compressed twice:
+once in software and once in your retina.</p>
+<p>The tutorial used to do precisely that, and the cost was measurable: on
+Jupiter it flattened real belt/zone contrast by 2.1&times; and reduced a
+12.25&times; exit-pupil brightness change to 2.56&times; on screen (R5.8).
+Both Eye and Detector views now share one faithful transfer function, and the
+Eye view keeps only the perceptual effect the screen genuinely cannot supply
+on its own &mdash; the loss of <i>colour</i> near the cone threshold, since
+your fully light-adapted eye in a lit room will not reproduce that by
+itself.</p>
+
+<h3>How the image reaches your screen</h3>
+<p>A monitor is not linear. Handed a code value <i>v</i> in 0&ndash;1, it emits
+luminance roughly &prop; <i>v</i><sup>2.2</sup> &mdash; the sRGB
+<b>electro-optical transfer function</b>. Writing raw radiance into an image
+therefore puts <i>radiance</i><sup>2.2</sup> on the screen: mid-tones come out
+about 2.3&times; too dark and every contrast is exaggerated. The fix is to
+<b>encode</b> &mdash; apply the inverse curve (&approx;<i>v</i><sup>1/2.2</sup>)
+before display &mdash; so the two cancel and screen luminance ends up
+proportional to simulated radiance.</p>
+<p>This is also the answer to a question worth asking: <i>why can't I see a
+feature at 1&nbsp;% of the peak?</i> You should be able to. Under the broken
+pipeline a 1.75&nbsp;% feature (the 1st Airy ring) was emitted at
+0.017&nbsp;% of peak light &mdash; genuinely black. Encoded correctly it lands
+at level 36 of 255, and the 2nd ring at level 13: both visible, and both now
+agreeing with the 1D profile plots.</p>
+<p><b>When the scene will not fit.</b> A monitor in a normally-lit room holds
+about <b>200:1</b>. The Moon spans 2:1 and the planets 200&ndash;500:1, so
+nearly every module is rendered <i>exactly</i> &mdash; no compression at all.
+A star field spanning 1000:1 physically cannot be shown, so there the
+simulator applies a power law (screen &prop; radiance<sup>&gamma;</sup>,
+&gamma;&nbsp;&lt;&nbsp;1) that squeezes the scene into what the display can
+emit &mdash; and prints the exponent it used on the figure. That disclosure is
+the point: a tone-mapped image is no longer photometric, and it should say
+so.</p>
 
 <h3>Eye resolution &amp; spatial integration</h3>
 <p>Brightness response is only half the story: the eye also has a finite
@@ -725,12 +775,10 @@ zero, avoiding a singularity at black) to mimic this response.</p>
 eyepiece magnification the eye's grain projects to roughly <b>1&Prime;</b> on the
 sky. The eye <i>integrates</i> light over that small patch, softening fine
 structure (and blending the colours of a chromatic blur disk into the perceived
-core). This is a separate effect from the logarithmic <i>intensity</i> response.
-The <b>Eye + integration</b> view (and the "Eye blur" toggle) adds this &sim;1&Prime;
-spatial blur, so together the two Eye modes model <i>both</i> how the eye maps
-brightness (log) <i>and</i> how it resolves detail (finite grain) &mdash; which
-is why a diffraction-limited detector image can look sharper than the same scene
-does to the eye at the eyepiece.</p>
+core). The <b>Eye + integration</b> view (and the "Eye blur" toggle) adds this
+&sim;1&Prime; spatial blur &mdash; which is why a diffraction-limited detector
+image can look sharper than the same scene does to the eye at the
+eyepiece.</p>
 <p>This makes the eye a <b>third resolution limit</b>, alongside aperture
 diffraction and atmospheric seeing (see the <i>Aperture vs Seeing</i> module).
 Whichever is <i>largest</i> dominates: a big aperture beats its own diffraction
@@ -740,9 +788,11 @@ limit but is still capped by the seeing disk, and at low magnification the eye's
 and &mdash; unlike a long exposure that smears them into one fat blur &mdash;
 lets an observer catch the fleeting moments of steady air when detail snaps into
 view.</p>
-<p><i>Accuracy: perceptual model. The asinh stretch and 1&Prime; integration are
+<p><i>Accuracy: the sRGB transfer function is exact and the brightness
+scaling is photometric. The remaining perceptual pieces &mdash; the 1&Prime;
+spatial integration and the cone-threshold desaturation &mdash; are
 qualitative stand-ins for human vision, not calibrated psychophysics; they
-convey the linear-vs-log and finite-resolution distinctions, not exact retinal
+convey the finite-resolution and colour-threshold effects, not exact retinal
 response.</i></p>
 """
 
@@ -778,18 +828,20 @@ says what the shortcut is, why it's acceptable (often: to isolate one teaching
 effect, or because the exact version is disproportionately hard), and what a
 higher-fidelity upgrade would take.</p>
 
-<h3>Eye-mode diffraction rings look too obvious</h3>
-<p>Good catch if you noticed this. The Eye view uses an <b>asinh</b> (log-like)
-stretch with a very low linear floor (a&nbsp;=&nbsp;0.001) to lift faint
-structure. That floor is aggressive: the Airy pattern's 1st ring is only
-<b>1.7%</b> of the peak in raw flux, but the stretch renders it at <b>~47%</b>
-brightness (2nd ring 0.4%&rarr;28%, 3rd 0.16%&rarr;16%). So the rings show far
-more prominently than a real observer sees them &mdash; visually you catch the
-first ring (sometimes the second) on a <i>bright</i> star only in <i>excellent</i>
-seeing; the higher rings are washed out by the atmosphere and your eye's real
-contrast threshold. <i>Accepted</i> because it makes the diffraction structure
-legible for teaching. <i>To improve:</i> raise the asinh floor toward the eye's
-true ~1% contrast threshold and gate ring visibility on the seeing value.</p>
+<h3>Diffraction rings are shown at true contrast, not at true visibility</h3>
+<p>This entry used to describe an <code>asinh</code> stretch with a very low
+floor (a&nbsp;=&nbsp;0.001) that rendered the 1st Airy ring &mdash; 1.7% of the
+peak in raw flux &mdash; at about 47% brightness. That stretch has been removed
+(R5.8); the rings are now displayed at their true relative luminance, which
+puts the 1st ring at level 36 of 255 and the 2nd at 13.</p>
+<p>What remains simplified is <i>visibility</i>, not contrast. A real observer
+catches the first ring (sometimes the second) only on a <i>bright</i> star in
+<i>excellent</i> seeing; the higher rings are lost to the atmosphere and to the
+eye's own ~1% contrast threshold, which this simulator does not model.
+<i>Accepted</i> &mdash; a photometrically correct image is the right default,
+and it keeps the diffraction structure legible for teaching. <i>To improve:</i>
+gate ring visibility on the seeing value and on a contrast-threshold model of
+the eye.</p>
 
 <h3>Atmospheric seeing = a Gaussian blur</h3>
 <p>Real seeing is a rapidly boiling speckle pattern (Kolmogorov turbulence); we
@@ -828,12 +880,14 @@ near the zenith). <i>To improve:</i> add a dispersion offset per channel as a
 function of target altitude.</p>
 
 <h3>Perceptual eye model</h3>
-<p>The Eye view (asinh brightness + ~1&prime; spatial integration + cone
-desaturation) is a <i>qualitative</i> stand-in for human vision, not calibrated
-psychophysics, and magnification is not modelled (the view is a fixed angular
-scale). <i>Accepted</i> &mdash; it conveys linear-vs-log and finite-resolution
-distinctions. <i>To improve:</i> a calibrated luminance/contrast model plus an
-explicit eyepiece magnification stage.</p>
+<p>Brightness is now photometric (screen luminance &prop; simulated
+radiance), but the remaining eye model &mdash; ~1&prime; spatial integration
+plus cone-threshold desaturation &mdash; is a <i>qualitative</i> stand-in for
+human vision, not calibrated psychophysics. Magnification is still not
+modelled: the view is a fixed angular scale. <i>Accepted</i> &mdash; it conveys
+the finite-resolution and colour-threshold effects. <i>To improve:</i> a
+calibrated luminance/contrast model plus an explicit eyepiece magnification
+stage.</p>
 
 <h3>Vignetting = secondary-only</h3>
 <p>Only the beam sliding off the secondary mirror is modelled (a
@@ -1232,7 +1286,7 @@ class ParametersPhysicsTab(QWidget):
         layout.addWidget(_make_section(
             "Understanding the Plots", PLOTS_HTML, anchors))
         layout.addWidget(_make_section(
-            "Detector vs Eye (linear vs logarithmic)", DETECTOR_VS_EYE_HTML,
+            "Detector vs Eye (two instruments)", DETECTOR_VS_EYE_HTML,
             anchors))
         layout.addWidget(_make_figure_section(
             "Vignetting (diagram)", _build_vignetting_diagram(),

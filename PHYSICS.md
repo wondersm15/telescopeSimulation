@@ -158,10 +158,13 @@ Both ends blend a pixel toward its own luminance; only the middle shows full
 chroma. This is why a nebula looks grey in an eyepiece and colourful in a
 photograph, and why only the brightest stars show an obvious tint.
 
-**Applied to the eye/log view only.** A detector has no cones — a camera
-records the same chromaticity at any flux until the wells clip — so the linear
-path deliberately skips it. That difference is the point of the *Viewing Modes:
-Detector vs Eye* tutorial module.
+**Applied to the eye view only.** A detector has no cones — a camera records
+the same chromaticity at any flux until the wells clip — so the detector path
+deliberately skips it. That difference is the point of the *Viewing Modes:
+Detector vs Eye* tutorial module, and since R5.8 it is the *only* thing that
+differs between the two views: both are drawn through the same display
+transfer function (§7c), so everything else you see between them is physics
+rather than a display curve.
 
 **Accuracy**:
 - ✅ The *shape* is real: the two-sided rod/cone/bleaching structure, and the
@@ -174,6 +177,56 @@ Detector vs Eye* tutorial module.
 
 **Real physics**: ⚠️ Physiologically-motivated perceptual model — ordering and
 limiting behaviour are real, absolute thresholds are tuned
+
+#### 7c. Display transfer function (both views)
+
+**Location**: `colorimetry.srgb_encode` / `srgb_decode` / `tone_map_gamma`,
+applied at the end of `_render_source_through_telescope` and (for the
+colormapped path) by `ray_trace_plot._DisplayNorm`
+
+**What**: The step that puts simulated radiance on a physical screen. A
+monitor is not linear — handed a code value `v` it emits luminance ≈ `v²·²`
+(the sRGB EOTF). `imshow` writes float RGB straight into the display buffer,
+so its input *is* a code value. Encoding with the inverse curve cancels the
+monitor's decode, leaving **screen luminance ∝ simulated radiance**.
+
+**Why there is no "eye response" curve here.** The observer is already in the
+loop, looking at the monitor. Their logarithmic response is applied by them,
+in real time. The renderer previously applied an `asinh` stretch in the eye
+view "to model the eye's log response", which compressed the scene twice.
+Measured on Jupiter that flattened real belt/zone contrast by 2.1× and
+squashed a 12.25× exit-pupil surface-brightness range to 2.56× on screen
+(R5.8); the detector view, missing the encode in the other direction,
+exaggerated the same contrast by 2.15×. Both are now encoded identically.
+
+**Tone mapping.** A screen in a lit room holds ~200:1
+(`DISPLAY_USABLE_CONTRAST`). Where a scene exceeds that, `tone_map_gamma`
+returns γ = ln(D)/ln(S) and the render is compressed by `radiance^γ` — which
+maps an S:1 scene onto exactly D:1 and degenerates to γ = 1 when the scene
+fits. Scene contrast is a property of the **source** (its magnitude spread),
+never of the frame: deriving it per render would let it drift as a slider
+moves, breaking the shared brightness scale the Before/After panels depend
+on.
+
+**Where it engages**: the Moon spans 2:1, Jupiter 203:1, Saturn 484:1, and
+both star fields fit — 16 of 17 modules render at γ = 1.0, exactly
+photometric. Only `saturation_demo` (mag −1…6.5, 1000:1) compresses, at
+γ = 0.767, and that figure prints the exponent and the words "not
+photometric".
+
+**Accuracy**:
+- ✅ The sRGB curve is the IEC 61966-2-1 standard, exact and losslessly
+  invertible
+- ✅ Verified end-to-end by decoding renders back to luminance: belt/zone
+  contrast, exit-pupil ratio (49.0× vs 49.0× true) and aperture D² (16.01×
+  vs 16.00×) all reproduce at fidelity 1.00
+- ⚠️ `DISPLAY_USABLE_CONTRAST = 200` is a room-lighting assumption, not a
+  measurement of the user's monitor; a dark room supports more
+- ⚠️ Tone-mapped output (γ < 1) is deliberately **not** photometric. Flagged
+  on the figure itself, not only in code
+
+**Real physics**: ✅ Exact at γ = 1 (nearly every module); ⚠️ disclosed
+approximation where the scene physically cannot fit a display
 
 
 ---

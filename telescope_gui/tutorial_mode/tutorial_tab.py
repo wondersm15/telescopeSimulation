@@ -717,32 +717,44 @@ class TutorialTab(QWidget):
     def _add_display_stretch_combo(self, default_stretch: str = "log"):
         """View toggle: Detector / Eye / Eye + integration.
 
-        Three display mappings of the same underlying simulation:
-        - Detector: linear per-pixel intensity (what a CCD records).
-        - Eye: asinh intensity response (eye's log magnitude response).
-        - Eye + integration: asinh + ~1″ spatial blur (eye's spatial
-          resolution at moderate eyepiece magnification).
+        Three *instruments* looking at the same simulation:
+        - Detector: exposure time is yours to choose, and silicon records
+          colour the same at any light level.
+        - Eye: no exposure control (fixed ~0.1 s), surface brightness set by
+          the exit pupil, and colour fades near the cone threshold.
+        - Eye + integration: as Eye, plus the ~1″ spatial resolution of the
+          eye at moderate eyepiece magnification.
 
-        The simulated data is identical in all three; only the screen
-        mapping changes.
+        R5.8: these used to differ by their *display curve* — Eye applied an
+        asinh stretch "for the eye's log response". That double-counted the
+        observer, who is already looking at the screen. All three now share
+        one physically-correct transfer function, and what separates them is
+        the physics above.
         """
         col = QVBoxLayout()
         lbl = QLabel("View")
         lbl.setStyleSheet("font-size: 8pt; font-weight: normal; color: #555;")
         combo = QComboBox()
-        combo.addItem("Detector (linear)", "linear")
-        combo.addItem("Eye (logarithmic)", "log")
-        combo.addItem("Eye + integration (log + spatial)", "log_integrated")
+        # The data values ("linear"/"log"/"log_integrated") are historical
+        # API strings kept so every scenario definition does not have to
+        # change; they no longer name a display curve (R5.8).
+        combo.addItem("Detector (CCD)", "linear")
+        combo.addItem("Eye (visual)", "log")
+        combo.addItem("Eye + integration (1″ blur)", "log_integrated")
         # Default per-scenario: "log" (Eye) for most; "linear" (Detector)
         # for exposure / saturation lessons where the exposure slider and
         # saturation clipping need to be live. Eye view ignores exposure.
         _default_idx = combo.findData(default_stretch)
         combo.setCurrentIndex(_default_idx if _default_idx >= 0 else 1)
         combo.setToolTip(
-            "Detector: linear per-pixel intensity (calibrated CCD pixel\n"
-            "  response — bright cores dominate, dim features clipped).\n"
-            "Eye: asinh intensity response (eye's logarithmic magnitude\n"
-            "  response — dim stars visible alongside bright ones).\n"
+            "Both views are rendered so that screen brightness is\n"
+            "proportional to simulated light; what differs is the\n"
+            "instrument, not the display curve.\n\n"
+            "Detector: you choose the exposure, and silicon records the\n"
+            "  same colour at any light level.\n"
+            "Eye: no exposure control (~0.1s fixed); brightness is set by\n"
+            "  the exit pupil, and colour fades where the cones fall\n"
+            "  below threshold.\n"
             "Eye + integration: Eye plus 1″ spatial integration (eye's\n"
             "  ~1″ resolution at moderate eyepiece magnification —\n"
             "  chromatic-disk light mixes into the perceived core)."
@@ -970,9 +982,9 @@ class TutorialTab(QWidget):
     def _add_eye_blur_check(self):
         """Eye-blur toggle for fixed Eye-vs-Detector scenarios (R3.12).
 
-        Switches the Eye pane between plain asinh (log) and asinh + 1″ spatial
-        integration (log_integrated) — the eye's finite spatial resolution at
-        a moderate eyepiece magnification."""
+        Switches the Eye pane between the plain visual view (log) and the
+        same view plus 1″ spatial integration (log_integrated) — the eye's
+        finite spatial resolution at a moderate eyepiece magnification."""
         col = QVBoxLayout()
         lbl = QLabel("Eye pane")
         lbl.setStyleSheet("font-size: 8pt; font-weight: normal; color: #555;")
