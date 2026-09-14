@@ -1149,3 +1149,161 @@ explicit note on why the simulator must **not** apply the eye's own response cur
 The known-simplifications entry "Eye-mode diffraction rings look too obvious" is
 rewritten: rings are now at true contrast, and what remains simplified is *visibility*
 (the eye's ~1% contrast threshold and seeing are still unmodelled).
+
+---
+
+## R5.9 + R5.4 — BATCH S: THE EYEPIECE MODULE. **ROUND 5 CLOSES.**
+
+Scope chosen by the user: **"Explain + make it real"** — not just a narrative about
+magnification, but a real eyepiece control that changes the apparent size of the object,
+so that autoscaling stops hiding the effect.
+
+### S1 — the shared `Eyepiece` model was thinner than the module needed
+
+`telescope_sim/geometry/eyepiece.py` already existed and was already consumed by `main.py`
+and the Design tab, so the module had to be built on it rather than beside it (the user's
+standing constraint: the tutorial must exercise *the same code* the rest of the program
+uses). Three things were missing or wrong:
+
+- **True field had only the approximate basis.** `TFOV ≈ AFOV/M` is what an eyepiece box
+  quotes, but the exact statement is `TFOV = 206265·d_stop/f_tel` from the field-stop
+  diameter. Added `field_stop_mm`, an exact branch, a `nominal_field_stop_mm()` helper,
+  and a `tfov_is_exact` property — and `summary()` now **discloses which basis it used**,
+  because a number that is sometimes exact and sometimes a 5%-off approximation is worse
+  than either if the reader cannot tell which they are holding.
+- **The useful-magnification limits were hard-coded.** Max useful was written as `2·D`.
+  That is not a law; it is `D / 0.5 mm` — the aperture divided by the smallest exit pupil
+  the eye can use — with the constant already substituted. Both limits now derive from
+  their defining exit pupil (`MIN_USEFUL_EXIT_PUPIL_MM`, `DEFAULT_EYE_PUPIL_MM`).
+- **The eye's pupil was two independent literals.** `Eyepiece` had `7.0` and
+  `ray_trace_plot` had its own `EYE_PUPIL_MM = 7.0`. Same observer property, declared
+  twice. Now aliased — the renderer imports it — so the brightness model and the eyepiece
+  model cannot drift into describing different eyes.
+
+**Two of my own tests were not testing anything.** The first pair of max-magnification
+tests asserted `max_useful == 2*D`, which passes for the derived implementation *and* for
+the hard-coded one they were supposed to be replacing. Replaced with
+`test_threshold_actually_drives_the_limit`, which monkeypatches
+`MIN_USEFUL_EXIT_PUPIL_MM` and demands the answer move. Equivalence is not derivation.
+The shared-constant claim is pinned with `is`, not `==`, since two equal float literals
+in two modules are distinct objects.
+
+### S2 — wiring it through, and two real bugs in shared code that fell out
+
+No new field-of-view mechanism was invented. `plot_source_image` already accepted an
+`eyepiece` and already returned **a list of up to three figures** (analysis view, true
+angular size, circular field-stop view); the runner now builds a real `Eyepiece`, passes
+it, and `_select_eyepiece_figure` picks one **and closes the other two** — unclosed Agg
+figures live for the life of the process and the tutorial re-renders on every control
+change. The sweep now counts live figures per scenario to keep that honest.
+
+Because the tutorial had **never passed an eyepiece before**, this lit up two pre-existing
+defects in `ray_trace_plot.py` that only the eyepiece path can reach:
+
+**(a) A bright square inside the circular field.** The first sweep found 8 box artifacts on
+the 32/25/15 mm eyepieces. Measured, not guessed: `_apply_exit_pupil_washout` blended
+toward `image.mean()`, which lifted black sky to **0.676**; `_crop_or_pad_to_fov` then
+padded the widened field with `np.zeros` — its comment said "black sky" — producing a hard
+0.00 → 0.676 step. Padding now uses the image's own floor, per channel for RGB (sRGB
+encoding is monotonic, so the minimum code value is the darkest sky either way).
+
+The end-to-end test **did not fail** when I reverted only the greyscale branch, because the
+Moon renders through the RGB path. Reverting both made all three fail. That is the only
+reason the test is known to pin the branch that actually runs.
+
+**(b) The deeper defect the square was a symptom of.** Padding correctly still left the sky
+glowing uniform grey — coherent, and wrong. Blending toward the **frame** mean has two
+consequences that are not physics: it *adds light to empty sky*, and it makes an object's
+washout **depend on how it is framed** (reframing the same Moon changed its contrast) —
+unacceptable in the one module whose entire subject is changing the field of view. The
+operator now blends toward a **locally** smoothed copy (Gaussian, σ = 4% of the frame).
+A fixed fraction of the frame is the right scale because the field maps to the eyepiece's
+fixed *apparent* field, so 4% of frame is a constant apparent angle to the observer.
+
+**All nine pre-existing washout tests passed unchanged.** That is the signal that this
+tightened the model rather than loosening the tests.
+
+> ⚠️ **This is shared code.** The corrected washout changes the eye view in the **Design
+> tab** too (`design_tab.py` imports the same `plot_source_image`). Intended — the old
+> behaviour was wrong in both consumers — but the Design tab remains unswept; see the
+> single-mode debt below.
+
+**Sibling audit** (standing "check elsewhere" rule): every `np.zeros` in
+`ray_trace_plot.py` was inspected. The only other padding site (PSF radial profile)
+legitimately decays to zero; the rest are array initialisations. `_crop_or_pad_to_fov` was
+the sole instance.
+
+### S3 — the module
+
+New Act-1 scenario `eyepiece_magnification`, placed immediately after *Viewing Modes*:
+Moon, 200 mm f/5 Newtonian on both sides, 32 mm before vs a **live eyepiece selector**
+(32/25/15/10/6 mm) after, rendered in the circular field-stop view so the field shrinks as
+the power climbs. The combo *replaces* the exit-pupil combo on this module rather than
+sitting beside it: **the exit pupil is not an independent knob.** Offering both would let
+the user request an eyepiece/exit-pupil pair that no physical eyepiece can produce.
+
+Visually confirmed end to end: at 32 mm a small Moon sits in a wide dark field with a soft
+glare halo; at 6 mm it overflows the field stop entirely. That contrast is the lesson, and
+it is exactly what autoscaling had been hiding everywhere else.
+
+New reference section *Magnification, Exit Pupil & Field of View* carries the derivations,
+eye relief (**described, explicitly not modelled**), and an accuracy disclaimer.
+
+### S4 — R5.4, and the mislabelled telescope it uncovered
+
+R5.4 asked, of the **vignetting module**, "is 10,000 arcsec a lot or a little?". I first
+answered it only in the new reference section — which is not where the question was asked.
+The anchor table is now in the vignetting narrative itself, and answering it properly
+required getting the telescope right:
+
+- **The x-axis is a radius; an eyepiece's true field is a diameter.** That factor of two
+  is most of the confusion, and the text now says so explicitly.
+- On this scope a 32 mm 2″ wide-field (70°) gives a true field of **10,080″** — so 10,000
+  arcsec is *a lot*: 2.8°, five and a half Moons, essentially the widest field the
+  telescope can produce. But **read off the plot's axis** it would mean a 5.6° field, which
+  no eyepiece can deliver. Only the innermost ~5000″ of the curve is reachable at all.
+
+**Found while writing it:** the vignetting Before panel was labelled **"200 mm f/5
+baseline"** while its config is 800 mm on 200 mm — **f/4**. Every scenario label was then
+audited against its own config; this was the only mismatch, and it is now a permanent test
+(`test_every_f_ratio_in_a_panel_label_matches_its_config`). Narrative numbers are the one
+class of error no other test can see — the figure renders perfectly, it just lies — so the
+quoted eyepiece table is also recomputed from the live `Eyepiece` model and the live
+config. Extending the same audit to **magnification** claims in labels found the new
+module's own "31×" (correct — 1000/32 — but hand-written, so it would rot the moment the
+telescope changed); that is pinned too. All **four** tests were revert-checked.
+
+**A stale `.pyc` briefly faked a failure** during that revert-checking: restoring the
+source with `cp` left `__pycache__` serving the modified module, so a test kept failing
+against a file that had already been fixed. Worth remembering because it can only ever
+*mask* a real failure or invent a fake one — never make a broken thing pass silently — but
+it wasted a cycle. Clear `__pycache__` after any scripted revert.
+
+### Verification
+
+Full GUI sweep, navigating by **sidebar emit** (not `_load_scenario`), exercising every
+combo, checkbox and slider on all **18** scenarios:
+
+| Check | Result |
+|---|---|
+| Renders | **2733**, **0 null figures** |
+| 2D images box-scanned | 2067, **0 box artifacts** |
+| Banned axis / colourbar labels | **0** |
+| Suptitle–title overprints | **0** |
+| Annotation boxes overrunning axes | **0** |
+| Live matplotlib figures after each scenario | **0** (no leak from the 3-figure eyepiece path) |
+
+**578 tests pass** (was 572). Committed on `feature/tutorial-testing-tab`, **not merged.**
+
+### Open debt carried out of Round 5 — READ BEFORE MERGING
+
+- **Single-telescope (Design tab) rendering is still unswept for Batches M–S**, all of
+  which changed shared `telescope_sim/` code. Deferred by explicit user agreement
+  (*"We can ensure clean propagation once the tutorial and testing is all good"*), with
+  the physics covered by unit tests in the meantime. Batch S raises the stakes: the
+  eyepiece figures the padding fix touches have **always** been reachable from the Design
+  tab and never from the tutorial until now — so the Design tab has been showing that
+  bright-square artifact all along. It is the first thing the single-mode sweep should
+  look at. There is still no `tests/test_design_tab.py`.
+- `_WASHOUT_LOCAL_SCALE = 0.04` is **empirical**, flagged in code and in PHYSICS.md.
+- Eye relief, eyepiece aberrations and field-stop vignetting are **not modelled**.

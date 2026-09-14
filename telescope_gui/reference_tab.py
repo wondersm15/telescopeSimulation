@@ -796,6 +796,117 @@ convey the finite-resolution and colour-threshold effects, not exact retinal
 response.</i></p>
 """
 
+EYEPIECE_HTML = """
+<p>The telescope forms one fixed image at the focal plane. The eyepiece does
+<b>not</b> change that image &mdash; it cannot add detail the aperture did not
+collect &mdash; it decides how you <i>look</i> at it. Choosing an eyepiece sets
+four things at once, and they are not independent: fix one and the rest
+follow.</p>
+
+<h3>1. Magnification</h3>
+<p style="font-family:monospace; margin-left:20px;">
+M = f<sub>telescope</sub> / f<sub>eyepiece</sub></p>
+<p>A 1000&nbsp;mm telescope with a 25&nbsp;mm eyepiece gives 40&times;; swap to
+10&nbsp;mm and you get 100&times;. Magnification is a property of the
+<i>pair</i>, not of the eyepiece &mdash; the same 10&nbsp;mm eyepiece gives
+100&times; on one scope and 200&times; on another.</p>
+
+<h3>2. Exit pupil &mdash; the master variable</h3>
+<p style="font-family:monospace; margin-left:20px;">
+p = D / M = D &times; f<sub>eyepiece</sub> / f<sub>telescope</sub></p>
+<p>The exit pupil is the little disc of light floating above the eyepiece; it
+is the image of the objective formed by the eyepiece, and it is the beam that
+actually enters your eye. Almost every rule of thumb in visual observing is
+this one number in disguise:</p>
+<ul>
+<li><b>Too big</b> (p &gt; your eye's pupil, &sim;7&nbsp;mm dark-adapted when
+young, nearer 5&nbsp;mm by middle age): the beam is wider than your iris, so
+the outer part never gets in. You have <i>thrown away aperture</i> &mdash; a
+200&nbsp;mm scope working at a 9&nbsp;mm exit pupil performs like a smaller
+one. This sets the <b>minimum useful magnification</b>, M<sub>min</sub> =
+D / p<sub>eye</sub>.</li>
+<li><b>Too small</b> (p &lt; &sim;0.5&nbsp;mm): the eye's own optics become the
+limit &mdash; its diffraction grows and floaters are projected onto an
+ever-smaller patch of retina. This sets the <b>maximum useful
+magnification</b>, M<sub>max</sub> = D / 0.5&nbsp;mm. Note that this is
+<i>exactly</i> the familiar &ldquo;2&times; the aperture in mm&rdquo; rule:
+D / 0.5 = 2D. The rule is not a separate fact &mdash; it <i>is</i> the
+exit-pupil criterion, restated.</li>
+<li><b>Surface brightness</b> of extended objects scales as
+(p / 7&nbsp;mm)<sup>2</sup>, capped at the naked-eye value. A telescope can
+make a nebula <i>bigger</i>, never intrinsically <i>brighter</i> than looking
+at it directly. This is why high power dims the view.</li>
+</ul>
+
+<h3>3. True field vs apparent field</h3>
+<p>The <b>apparent</b> field of view (AFOV) is a property of the eyepiece
+alone: how wide the illuminated circle looks to your eye, typically 50&deg; for
+a Pl&ouml;ssl and 82&deg;+ for an ultra-wide. The <b>true</b> field (TFOV) is
+how much actual sky that circle contains. There are two ways to get it, and
+they are not equally good:</p>
+<p style="font-family:monospace; margin-left:20px;">
+TFOV = 206265&Prime; &times; d<sub>field&nbsp;stop</sub> /
+f<sub>telescope</sub> &nbsp;&nbsp;(exact)<br>
+TFOV &asymp; AFOV / M &nbsp;&nbsp;(approximate)</p>
+<p>The first is exact because the <b>field stop</b> is a real physical aperture
+sitting at the focal plane, so the sky it admits follows straight from the
+plate scale &mdash; nothing about the eyepiece's internal design enters.
+The second assumes the eyepiece maps field angle to apparent angle linearly,
+which no real wide-field eyepiece does: they deliberately carry angular
+magnification distortion to keep the exit pupil manageable. The error runs a
+few percent and is usually <i>optimistic</i>. This simulator uses the exact
+formula whenever a field stop is supplied, and labels the result
+&ldquo;approx: AFOV/mag&rdquo; when it has to fall back.</p>
+
+<h3>How much sky is that, really?</h3>
+<p>Angular fields are hard to judge in the abstract, so here are fixed
+anchors. The <b>Moon and Sun are both about 0.5&deg; = 30&prime; =
+1800&Prime;</b> across &mdash; that is the ruler to measure everything else
+against:</p>
+<table border="1" cellpadding="4" cellspacing="0" style="margin-left:20px;">
+<tr><th>Field</th><th>arcsec</th><th>In Moons</th><th>What it is</th></tr>
+<tr><td>1&Prime;</td><td>1</td><td>1/1800</td>
+    <td>good seeing; the eye's own resolution at the eyepiece</td></tr>
+<tr><td>1&prime;</td><td>60</td><td>1/30</td>
+    <td>Jupiter (&sim;40&ndash;50&Prime;); naked-eye resolution</td></tr>
+<tr><td>15&prime;</td><td>900</td><td>1/2</td>
+    <td>high-power planetary field (6&nbsp;mm on a 1000&nbsp;mm scope)</td></tr>
+<tr><td>30&prime;</td><td>1800</td><td>1</td>
+    <td>the Moon exactly fills the field (10&nbsp;mm eyepiece here)</td></tr>
+<tr><td>1.25&deg;</td><td>4500</td><td>2.5</td>
+    <td>typical 25&nbsp;mm Pl&ouml;ssl low-power field</td></tr>
+<tr><td>2.8&deg;</td><td>10000</td><td>5.3</td>
+    <td>wider than almost any real eyepiece reaches</td></tr>
+<tr><td>7&deg;</td><td>25000</td><td>14</td>
+    <td>binoculars; the practical ceiling for any telescope</td></tr>
+</table>
+<p>So a 10,000&Prime; field is <b>a lot</b> &mdash; nearly 3&deg;, over five
+Moon diameters side by side. Reaching it needs both a short focal length and a
+wide-field eyepiece, and on most telescopes it is simply not attainable: the
+drawtube and the eyepiece barrel (1.25&Prime; barrels cap the field stop near
+27&nbsp;mm) cut the field off first. That physical cutoff is
+<i>vignetting</i> &mdash; see the Vignetting module and diagram.</p>
+
+<h3>4. Eye relief</h3>
+<p>Eye relief is how far behind the eyepiece the exit pupil forms &mdash; the
+distance your eye has to sit to see the whole field. It is roughly
+proportional to the eyepiece focal length in simple designs, which is the
+classic problem with short Pl&ouml;ssls: a 6&nbsp;mm has &sim;4&nbsp;mm of eye
+relief, so you must press your eyeball almost onto the glass, and eyeglass
+wearers cannot use it at all (spectacles need &sim;15&ndash;20&nbsp;mm).
+Complex designs add relief deliberately, which is much of what you pay for in
+a premium short-focal-length eyepiece.</p>
+<p><i>Accuracy: magnification, exit pupil, and both true-field formulas are
+exact geometric optics and are computed as written above. Eye relief is
+<b>described here but not modeled</b> &mdash; it depends on the eyepiece's
+internal lens layout, which this simulator does not represent. The
+&ldquo;useful magnification&rdquo; limits (0.5&nbsp;mm and 7&nbsp;mm exit
+pupils) are <b>empirical physiological thresholds</b>, not derived constants:
+they vary between observers, with age, and with seeing. The contrast
+&ldquo;washout&rdquo; applied at large exit pupils is a qualitative perceptual
+stand-in, flagged on the plot itself.</i></p>
+"""
+
 NOT_IMPLEMENTED_HTML = """
 <p>The following effects are <b>not yet modeled</b>. Simulation results will not
 reflect these phenomena:</p>
@@ -1287,6 +1398,9 @@ class ParametersPhysicsTab(QWidget):
             "Understanding the Plots", PLOTS_HTML, anchors))
         layout.addWidget(_make_section(
             "Detector vs Eye (two instruments)", DETECTOR_VS_EYE_HTML,
+            anchors))
+        layout.addWidget(_make_section(
+            "Magnification, Exit Pupil & Field of View", EYEPIECE_HTML,
             anchors))
         layout.addWidget(_make_figure_section(
             "Vignetting (diagram)", _build_vignetting_diagram(),

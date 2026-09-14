@@ -185,6 +185,38 @@ class ScenarioDefinition:
     # when the exit-pupil control is shown (extended-source scenarios).
     default_exit_pupil_mm: float = 2.0
 
+    # ── Eyepiece (R5.9) ──────────────────────────────────────────────────
+    # Eyepiece focal length in mm for each side. When set, `plot_source_image`
+    # is given a real `Eyepiece`, which sets the magnification, crops the
+    # field to the eyepiece's true field of view, and DERIVES the exit pupil
+    # (D / magnification) instead of taking it from the exit-pupil combo.
+    # None = no eyepiece, i.e. the direct focal-plane view every other
+    # scenario uses. Most scenarios autoscale the object to fill the frame,
+    # which is exactly what hides the effect of changing eyepieces; these
+    # fields exist so one module can show it honestly.
+    before_eyepiece_mm: float | None = None
+    after_eyepiece_mm: float | None = None
+
+    # Apparent field of view of the eyepieces, in degrees. A single value:
+    # the module compares focal lengths at a FIXED apparent field so that
+    # magnification is the only variable. AFOV gets its own comparison.
+    eyepiece_afov_deg: float = 50.0
+
+    # Published field stop diameter in mm, if known. Present makes the true
+    # field of view EXACT (206265 * d / f_telescope); absent falls back to
+    # the AFOV/magnification approximation, which the render labels as such.
+    eyepiece_field_stop_mm: float | None = None
+
+    # Which of the three eyepiece figures to show: "enhanced" (analysis view),
+    # "true_size" (apparent angular size), or "eyepiece_view" (circular field
+    # stop, source at true relative scale). Names match the Design tab's
+    # display modes. "eyepiece_view" is the one where changing eyepieces
+    # visibly changes how big the object looks.
+    eyepiece_view_mode: str = "eyepiece_view"
+
+    # When True, show an eyepiece dropdown on the After side.
+    show_eyepiece_combo: bool = False
+
     # ── Chromatic ray-trace idealisation (Phase B4) ──────────────────────
     # When True, the polychromatic ray trace draws each colour converging to
     # a point (spherical aberration removed) so the singlet/achromat/APO
@@ -430,6 +462,116 @@ SCENARIOS: list[ScenarioDefinition] = [
     ),
 
     ScenarioDefinition(
+        id="eyepiece_magnification", applies_to="both",
+        title="Magnification, Exit Pupil & Field of View",
+        act=1, act_label="Isolated Effects",
+        description=(
+            "Applies to: any telescope. READ THIS ONE SECOND. Every other "
+            "module in this tutorial autoscales the object to fill the frame "
+            "— which is convenient for studying detail, but it quietly hides "
+            "the single most obvious thing about looking through a telescope: "
+            "the eyepiece decides how BIG the object is and how MUCH SKY you "
+            "see around it. This module turns the autoscaling off. Both panes "
+            "are drawn at the eyepiece's real true field of view, so the Moon "
+            "is shown at its honest size inside the circle you would actually "
+            "see.\n"
+            "THE ONE CONTROL: change 'Eyepiece' and watch three things move "
+            "together, because they are the same fact written three ways. "
+            "Magnification = telescope focal length / eyepiece focal length. "
+            "Exit pupil = aperture / magnification. True field ≈ apparent "
+            "field / magnification. You cannot change one without changing "
+            "the others — there is no eyepiece that magnifies more AND shows "
+            "more sky AND keeps the image bright.\n"
+            "WATCH THE MOON OUTGROW THE FIELD. On this 200mm f/5, the 32mm "
+            "eyepiece (31×) gives a 96′ field with the Moon sitting "
+            "comfortably inside it. The 10mm (100×) gives 30′ — and the Moon "
+            "is 30′ across, so it exactly fills the field, edge to edge. Go "
+            "to the 6mm (167×) and the Moon no longer fits: you are looking "
+            "at a piece of it. Nothing was added by magnifying; the field was "
+            "taken away.\n"
+            "WHY THE HIGH-POWER VIEW IS DIMMER. A telescope cannot make an "
+            "extended object's surface brightness exceed what your naked eye "
+            "would see — it can only make it bigger, spreading the same light "
+            "over more retina. Surface brightness follows (exit pupil / "
+            "7mm)², so going 32mm → 6mm drops the exit pupil from 6.4mm to "
+            "1.2mm and the view gets markedly darker. This is real physics, "
+            "not a rendering choice.\n"
+            "WHY THE LOW-POWER VIEW LOOKS WASHED OUT. At a 6.4mm exit pupil "
+            "the beam nearly fills your iris and contrast suffers. ⚠️ Note "
+            "the contrast washout specifically is an approximate PERCEPTUAL "
+            "model, flagged on the image — the brightness scaling above it is "
+            "photometric.\n"
+            "THE TWO LIMITS, BOTH FROM THE EXIT PUPIL. Below ~29× here the "
+            "exit pupil exceeds a 7mm dark-adapted eye pupil and you are "
+            "literally throwing away aperture — the outer beam misses your "
+            "iris. Above ~400× the exit pupil drops under 0.5mm and your own "
+            "eye becomes the limit. That upper figure is the famous '2× the "
+            "aperture in mm' rule, and it is not a separate fact: 200 / 0.5 "
+            "= 2 × 200. Same criterion, restated.\n"
+            "APERTURE is tweakable and moves BOTH limits (both are D / "
+            "pupil), while leaving magnification and true field untouched — "
+            "those depend only on focal lengths. (See Parameters & Physics → "
+            "Magnification, Exit Pupil & Field of View, which also lists how "
+            "big real fields are in Moon diameters.)"
+        ),
+        learn_more_section="Magnification, Exit Pupil & Field of View",
+        # 200mm f/5 chosen so the eyepiece range straddles BOTH useful limits:
+        # the 32mm lands at a 6.4mm exit pupil (near the 7mm overflow) and the
+        # 6mm at 1.2mm, with the Moon exactly filling the 10mm field.
+        before_telescope=TelescopeConfig(
+            telescope_type="Newtonian", diameter=200.0, focal_length=1000.0,
+            enable_obstruction=True, obstruction_ratio=0.20, spider_vanes=4,
+        ),
+        before_source=SourceConfig(source_type="Moon"),
+        before_label="32mm eyepiece — 31×, wide field",
+        after_telescope=TelescopeConfig(
+            telescope_type="Newtonian", diameter=200.0, focal_length=1000.0,
+            enable_obstruction=True, obstruction_ratio=0.20, spider_vanes=4,
+        ),
+        after_source=SourceConfig(source_type="Moon"),
+        after_label="Your eyepiece choice →",
+        plot_function="plot_source_image",
+        theory_function=None,
+        # Aperture only. It moves both useful-magnification limits without
+        # touching magnification or true field, which is the point being
+        # made. Focal length is deliberately NOT tweakable: it would change
+        # the magnification out from under the eyepiece labels.
+        tweakable_params=("diameter",),
+        # The whole module is about honest framing, so both sides render the
+        # circular field-stop view rather than the autoscaled analysis view.
+        before_eyepiece_mm=32.0,
+        after_eyepiece_mm=10.0,
+        eyepiece_afov_deg=50.0,
+        eyepiece_view_mode="eyepiece_view",
+        show_eyepiece_combo=True,
+        # Eye view: this is a visual-observing module, and the exit-pupil
+        # surface-brightness model only runs in the Eye view.
+        default_display_stretch="log",
+        before_display_stretch="log",
+        implemented=True,
+        terminal_template=(
+            "from telescope_gui.telescope_builder import build_telescope\n"
+            "from telescope_sim.geometry.eyepiece import Eyepiece\n"
+            "from telescope_sim.source.sources import Moon\n"
+            "from telescope_sim.plotting import plot_source_image\n\n"
+            "t = build_telescope(telescope_type='reflector',\n"
+            "                    diameter={diameter}, focal_length={focal_length},\n"
+            "                    primary_type='parabolic', enable_obstruction=True,\n"
+            "                    obstruction_ratio=0.20, spider_vanes=4)\n"
+            "ep = Eyepiece(focal_length_mm=10.0,  # try 32, 25, 15, 10, 6\n"
+            "              apparent_fov_deg=50.0)\n"
+            "print(ep.summary(t.focal_length, t.primary_diameter))\n\n"
+            "# Returns [enhanced, true-size, eyepiece-view] when an eyepiece\n"
+            "# is supplied; [2] is the circular field-stop view.\n"
+            "figs = plot_source_image(t, Moon(), display_stretch='log',\n"
+            "                         eyepiece=ep,\n"
+            "                         eyepiece_view_figsize=(5, 5),\n"
+            "                         exit_pupil_mm=ep.exit_pupil_mm(\n"
+            "                             t.primary_diameter, t.focal_length))"
+        ),
+    ),
+
+    ScenarioDefinition(
         id="rayleigh_criterion", applies_to="both",
         title="Rayleigh Criterion",
         act=1, act_label="Isolated Effects",
@@ -655,14 +797,39 @@ SCENARIOS: list[ScenarioDefinition] = [
             "\u03b8_fif the on-axis cone is unobstructed; beyond it, illumination falls "
             "smoothly toward zero at the 50% edge. Adjust the parameters to see how "
             "each shifts the curve.\n"
+            "\n"
+            "IS THAT A LOT OF SKY? Careful: the x-axis is the angle OUT FROM THE "
+            "CENTRE — a radius — while an eyepiece's true field is quoted as a "
+            "DIAMETER, so an eyepiece is only reaching half as far along this axis "
+            "as its specification suggests. On the 200 mm f/4 above (800 mm focal "
+            "length):\n"
+            "    • 32 mm 2″ wide-field (70°)  25×   true field 2.80° = 10080″   "
+            "reaches 5040″ on this axis\n"
+            "    • 32 mm Plössl (50°)         25×   true field 2.00° =  7200″   "
+            "reaches 3600″\n"
+            "    • 25 mm Plössl (50°)         32×   true field 1.56° =  5625″   "
+            "reaches 2812″\n"
+            "    • 10 mm Plössl (50°)         80×   true field 0.62° =  2250″   "
+            "reaches 1125″\n"
+            "For scale, the full Moon is about 1800 arcsec across — it very nearly "
+            "fills the 10 mm eyepiece's entire field. So 10,000 arcsec is a LOT: as "
+            "a field diameter it is 2.8°, about five and a half Moons side by side, "
+            "and it is essentially the widest true field this telescope can produce "
+            "at all. But 10,000 arcsec read off THIS axis would mean a 5.6° field, "
+            "which no eyepiece here can deliver. The practical consequence: only the "
+            "innermost ~5000 arcsec of this curve is reachable, so judge the falloff "
+            "against the eyepiece you would actually use, not against the curve's "
+            "right-hand edge.\n"
+            "\n"
             "See also the labelled Vignetting diagram in the Parameters & Physics "
             "tab, which shows the clipped-cone geometry and the secondary-face "
-            "circle-overlap picture."
+            "circle-overlap picture, and the Magnification, Exit Pupil & Field of "
+            "View section there for the full field-of-view anchor table."
         ),
         learn_more_section="Vignetting",
         before_telescope=_SPIDER_200MM,
         before_source=_POINT,  # source unused by plot_vignetting_curve
-        before_label="200 mm f/5 baseline",
+        before_label="200 mm f/4 baseline",
         after_telescope=_SPIDER_200MM,
         after_source=_POINT,
         after_label="Adjust aperture / f / obstruction \u2192",

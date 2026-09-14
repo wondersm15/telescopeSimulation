@@ -4,6 +4,23 @@ NOTE: These functions compute theoretical predictions for educational comparison
 purposes. They are NOT part of the telescope_sim physics engine and should not
 be used for telescope design. They live here in the tutorial tab code deliberately.
 
+⚠️ DELIBERATE DUPLICATION — DO NOT "DRY THIS UP".
+This module re-derives closed-form results (θ = 1.22·λ/D, the Dawes limit, the
+Rayleigh criterion, …) from first principles, *independently* of the code in
+`telescope_sim` that renders them. That redundancy is the entire point: the
+tutorial's job is to check that the simulation's physics is right, and it can
+only do that by comparing the renderer's output against a number the renderer
+did not produce. If a future refactor makes these functions call into
+`telescope_sim` — or makes `telescope_sim` call into these — the theory-vs-
+simulation comparison becomes circular, will agree with itself no matter how
+wrong it is, and every validation panel in the tutorial silently stops testing
+anything.
+
+The project's general "reduce duplication" convention is subordinate to this
+invariant *here and only here*. Everything else the tutorial renders must go
+through the shared `telescope_sim` code path, so that fixes propagate; it is
+specifically the reference values that are computed twice, on purpose.
+
 Each function returns a dict with at minimum:
     theory_value: float   — the primary scalar to compare against simulation
     label: str            — display label (e.g. "Airy radius")

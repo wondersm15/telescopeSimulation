@@ -15,6 +15,7 @@ import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 
 from telescope_gui.telescope_builder import build_telescope
+from telescope_sim.geometry.eyepiece import Eyepiece
 from telescope_gui.tutorial_mode.scenario_registry import (
     ScenarioDefinition, TelescopeConfig, SourceConfig,
 )
@@ -27,6 +28,43 @@ from telescope_sim.source.sources import (
     StarFieldResolutionField, ComaDemoField, ShowcaseStarField,
     DynamicRangeField,
 )
+
+
+#: Which figure `plot_source_image` returns for each eyepiece view mode.
+#: The names match `design_tab`'s `display_mode` so single-telescope mode and
+#: the tutorial refer to the same three views by the same words.
+_EYEPIECE_VIEW_INDEX = {
+    "enhanced": 0,      # analysis view, cropped to TFOV when TFOV < source FOV
+    "true_size": 1,     # apparent angular size at a standard viewing distance
+    "eyepiece_view": 2,  # circular field stop, source at true relative scale
+}
+
+
+def _select_eyepiece_figure(result, eyepiece_view_mode: str) -> Figure:
+    """Pick one figure out of `plot_source_image`'s result and close the rest.
+
+    With an eyepiece, `plot_source_image` returns a LIST of up to three
+    figures; without one it returns a bare Figure. The tutorial's
+    before/after panel shows a single figure per side, so the others must be
+    closed rather than dropped — an unclosed Agg figure stays in matplotlib's
+    registry for the life of the process, and the tutorial re-renders on
+    every control change (R5.9/S2).
+
+    Falls back to the enhanced view if the requested mode was not built, so a
+    scenario asking for a view it did not enable still renders something real
+    instead of raising.
+    """
+    if not isinstance(result, list):
+        return result
+
+    idx = _EYEPIECE_VIEW_INDEX.get(eyepiece_view_mode, 0)
+    if idx >= len(result):
+        idx = 0
+    chosen = result[idx]
+    for other in result:
+        if other is not chosen:
+            plt.close(other)
+    return chosen
 
 
 def build_source(config: SourceConfig):
@@ -79,6 +117,18 @@ def _telescope_kwargs(config: TelescopeConfig) -> dict:
     return d
 
 
+def build_scenario_telescope(config: TelescopeConfig):
+    """Build the telescope a scenario side will actually render through.
+
+    Public because the UI needs the SAME object the render uses: the eyepiece
+    combo labels magnification and exit pupil, and both depend on the
+    effective focal length, which for a compound scope is not the config's
+    `focal_length` field. Reading the config directly would let the label and
+    the render disagree (R5.9/S2).
+    """
+    return build_telescope(**_telescope_kwargs(config))
+
+
 def run_scenario_side(
     telescope_config: TelescopeConfig,
     source_config: SourceConfig,
@@ -100,6 +150,10 @@ def run_scenario_side(
     focal_zoom_arcsec: float | None = None,
     coma_view_mode: str = "ray_fan",
     apply_aperture_diffraction: bool = True,
+    eyepiece_focal_length_mm: float | None = None,
+    eyepiece_afov_deg: float = 50.0,
+    eyepiece_field_stop_mm: float | None = None,
+    eyepiece_view_mode: str = "eyepiece_view",
 ) -> tuple[Figure | None, dict, str | None]:
     """Run one side (before or after) of a scenario.
 
@@ -108,11 +162,30 @@ def run_scenario_side(
         figure is None and error_message is set if rendering fails.
     """
     try:
-        telescope = build_telescope(**_telescope_kwargs(telescope_config))
+        telescope = build_scenario_telescope(telescope_config)
         source = build_source(source_config)
+
+        # R5.9/S2: with a real eyepiece the exit pupil is DERIVED, not chosen.
+        # Exit pupil = D / magnification, so letting the eyepiece combo and the
+        # exit-pupil combo be set independently would let the tutorial display
+        # a pair that no telescope can produce — a 25 mm eyepiece on this scope
+        # simply cannot give a 0.5 mm exit pupil. One control, one consistent
+        # set of numbers: magnification, true field, apparent size and eye-view
+        # surface brightness all follow from the eyepiece.
+        eyepiece = None
+        if eyepiece_focal_length_mm is not None:
+            eyepiece = Eyepiece(
+                focal_length_mm=eyepiece_focal_length_mm,
+                apparent_fov_deg=eyepiece_afov_deg,
+                field_stop_mm=eyepiece_field_stop_mm,
+            )
+            exit_pupil_mm = eyepiece.exit_pupil_mm(
+                telescope.primary_diameter, telescope.focal_length)
 
         fig, info = _call_plot_function(
             plot_function_name, telescope, source,
+            eyepiece=eyepiece,
+            eyepiece_view_mode=eyepiece_view_mode,
             wavelength_nm=wavelength_nm,
             seeing_arcsec=seeing_arcsec,
             polychromatic=polychromatic,
@@ -160,6 +233,8 @@ def _call_plot_function(
     focal_zoom_arcsec: float | None = None,
     coma_view_mode: str = "ray_fan",
     apply_aperture_diffraction: bool = True,
+    eyepiece=None,
+    eyepiece_view_mode: str = "eyepiece_view",
 ) -> tuple[Figure, dict]:
     """Dispatch to the appropriate telescope_sim plot function."""
     from telescope_sim.plotting import (
@@ -177,6 +252,9 @@ def _call_plot_function(
     )
 
     if name == "plot_source_image":
+        # Only ask for the circular eyepiece view when it will be shown —
+        # building it costs a third figure.
+        want_ev = eyepiece is not None and eyepiece_view_mode == "eyepiece_view"
         fig = plot_source_image(
             telescope, source,
             wavelength_nm=wavelength_nm,
@@ -191,16 +269,30 @@ def _call_plot_function(
             filter_name=filter_name,
             exit_pupil_mm=exit_pupil_mm,
             apply_aperture_diffraction=apply_aperture_diffraction,
+            eyepiece=eyepiece,
+            eyepiece_view_figsize=figsize if want_ev else None,
         )
-        if isinstance(fig, list):
-            fig = fig[0]
-        return fig, {
+        fig = _select_eyepiece_figure(fig, eyepiece_view_mode)
+        info = {
             "plot_function": name,
             "display_stretch": display_stretch,
             "exposure_level": exposure_level,
             "filter_name": filter_name,
             "exit_pupil_mm": exit_pupil_mm,
         }
+        if eyepiece is not None:
+            # Surfaced so the terminal panel and the theory readout quote the
+            # same numbers the render used, rather than recomputing them.
+            info.update(
+                eyepiece_focal_length_mm=eyepiece.focal_length_mm,
+                eyepiece_afov_deg=eyepiece.apparent_fov_deg,
+                magnification=eyepiece.magnification(telescope.focal_length),
+                true_fov_arcsec=eyepiece.true_fov_arcsec(
+                    telescope.focal_length),
+                tfov_is_exact=eyepiece.tfov_is_exact,
+                eyepiece_view_mode=eyepiece_view_mode,
+            )
+        return fig, info
 
     elif name == "plot_psf_2d":
         # log_scale defaults to True (legacy behavior) for plot_psf_2d

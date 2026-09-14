@@ -9,6 +9,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 
+from telescope_sim.geometry.eyepiece import DEFAULT_EYE_PUPIL_MM
 from telescope_sim.physics.colorimetry import srgb_encode, srgb_decode
 from telescope_sim.physics.ray import Ray
 from telescope_sim.physics.diffraction import compute_psf, rayleigh_criterion_arcsec
@@ -70,7 +71,14 @@ SATURATION_LEVEL = 1.0
 # Eye-view brightness model, where exposure (a detector concept) does not
 # apply — brightness comes from the optics instead. Visual-astronomy
 # standard ~7 mm. Perceptual model — flagged in the plot annotation.
-EYE_PUPIL_MM = 7.0
+#
+# Aliased, NOT redefined. This is the same observer property that sets the
+# minimum useful magnification in `Eyepiece` (below which the exit pupil
+# overflows the eye and aperture is wasted), so it has to be one number: if
+# the two drifted apart, the eye-view brightness model and the eyepiece model
+# would be describing different eyes, and the tutorial's job is to check the
+# physics the rest of the program uses (R5.9/S1).
+EYE_PUPIL_MM = DEFAULT_EYE_PUPIL_MM
 
 
 def _draw_ray_trace(ax: plt.Axes, rays: list[Ray], components: dict,
@@ -5745,6 +5753,21 @@ def _draw_source_on_axes(ax, image, image_rgb, half_fov, log_scale,
 def _crop_or_pad_to_fov(image, image_rgb, current_half_fov, target_half_fov):
     """Crop or pad an image to match a target field of view.
 
+    Padding fills with the DARKEST level already present in the image, not
+    with hard zero. Those are the same thing for a raw render — empty sky is
+    zero — but not after `_apply_exit_pupil_washout`, which blends the whole
+    frame toward its mean and so lifts black sky to a pedestal of
+    ``mean * (1 - contrast_factor)``. Padding that image with zeros drew a
+    hard step at the edge of the simulated field: on a 32 mm eyepiece the
+    Moon's 2431" field sat inside a 5760" true field as a visibly brighter
+    square, 0.68 against 0.00 (R5.9/S2).
+
+    Using the image minimum is right in both cases rather than a special
+    case for one: it is the darkest sky the render actually contains, which
+    is the best available estimate of the sky just outside the simulated
+    patch, and it collapses to the old behaviour exactly when that sky is
+    black.
+
     Args:
         image: 2D grayscale image array.
         image_rgb: 3D RGB image array or None.
@@ -5769,10 +5792,12 @@ def _crop_or_pad_to_fov(image, image_rgb, current_half_fov, target_half_fov):
             image_rgb = image_rgb[start:end, start:end]
         new_half_fov = target_half_fov
     elif target_half_fov > current_half_fov:
-        # Pad with black sky
+        # Pad with the darkest sky the image actually contains (see the
+        # docstring — zero is wrong once the washout has lifted the floor).
         frac = current_half_fov / target_half_fov
         source_size = max(1, int(num_pixels * frac))
-        padded = np.zeros((num_pixels, num_pixels))
+        sky_level = float(image.min())
+        padded = np.full((num_pixels, num_pixels), sky_level)
         start = (num_pixels - source_size) // 2
         end = start + source_size
         # Resample source into the smaller region
@@ -5784,7 +5809,12 @@ def _crop_or_pad_to_fov(image, image_rgb, current_half_fov, target_half_fov):
         padded[start:start + sy, start:start + sx] = resized
         image = padded
         if image_rgb is not None:
-            padded_rgb = np.zeros((num_pixels, num_pixels, 3))
+            # Per-channel sky level, for the same reason as the greyscale
+            # branch. sRGB encoding is monotonic, so the minimum code value
+            # is still the darkest sky whether or not this array is encoded.
+            padded_rgb = np.empty((num_pixels, num_pixels, 3))
+            for c in range(3):
+                padded_rgb[..., c] = float(image_rgb[..., c].min())
             for c in range(3):
                 resized_c = zoom(image_rgb[..., c], scale, order=1)
                 padded_rgb[start:start + sy, start:start + sx, c] = resized_c
@@ -5794,6 +5824,14 @@ def _crop_or_pad_to_fov(image, image_rgb, current_half_fov, target_half_fov):
         new_half_fov = current_half_fov
 
     return image, image_rgb, new_half_fov
+
+
+#: Scale of the "local background" the exit-pupil washout reduces contrast
+#: against, as a fraction of the frame width. Detail finer than this loses
+#: contrast; structure coarser than this survives, as does the sky/object
+#: boundary. ⚠️ EMPIRICAL: chosen so the effect reads as loss of fine detail
+#: rather than as a global fog, not fitted to psychophysical data.
+_WASHOUT_LOCAL_SCALE = 0.04
 
 
 def _apply_exit_pupil_washout(image, image_rgb, exit_pupil_mm):
@@ -5833,17 +5871,36 @@ def _apply_exit_pupil_washout(image, image_rgb, exit_pupil_mm):
     contrast_factor = 1.0 - 0.7 * washout
     saturation_factor = 1.0 - 0.8 * washout
 
-    # Contrast reduction: blend toward mean brightness
-    mean_val = image.mean()
-    image = mean_val + contrast_factor * (image - mean_val)
+    # Contrast reduction: blend toward the LOCAL mean, not the frame mean.
+    #
+    # Blending toward `image.mean()` had two consequences that are not
+    # defensible (R5.9/S2). It lifted empty sky to `mean * (1 -
+    # contrast_factor)` — on the Moon at a 6.4 mm exit pupil that is 0.68,
+    # so the night sky inside the eyepiece field rendered as bright grey.
+    # And because a frame mean depends on how much of the frame the object
+    # fills, the "washout" changed when the field of view changed, with the
+    # object itself untouched: reframing the same Moon in a wider eyepiece
+    # altered its contrast. That is framing driving physics.
+    #
+    # What the effect actually describes is loss of fine DETAIL contrast on
+    # a flooded retina, so the right reference is the local background, not
+    # the frame average. Blending toward a smoothed copy reduces detail
+    # contrast exactly as before, leaves empty sky where it was, and no
+    # longer depends on the field of view. ⚠️ Still an approximate
+    # perceptual model — see the notes above; only its reference level is
+    # now physically motivated.
+    from scipy.ndimage import gaussian_filter
+    blur_sigma = max(1.0, image.shape[0] * _WASHOUT_LOCAL_SCALE)
+    local_mean = gaussian_filter(image, blur_sigma, mode="nearest")
+    image = local_mean + contrast_factor * (image - local_mean)
     image = np.clip(image, 0.0, 1.0)
 
     if image_rgb is not None:
-        # Pass 1: contrast reduction on all channels
+        # Pass 1: contrast reduction on all channels, same local reference.
         for c in range(3):
             channel = image_rgb[..., c]
-            mean_c = channel.mean()
-            image_rgb[..., c] = mean_c + contrast_factor * (channel - mean_c)
+            local_c = gaussian_filter(channel, blur_sigma, mode="nearest")
+            image_rgb[..., c] = local_c + contrast_factor * (channel - local_c)
 
         # Pass 2: desaturation — compute luminance from *contrast-reduced*
         # channels so the blend target is consistent with the modified image

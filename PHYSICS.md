@@ -209,7 +209,7 @@ moves, breaking the shared brightness scale the Before/After panels depend
 on.
 
 **Where it engages**: the Moon spans 2:1, Jupiter 203:1, Saturn 484:1, and
-both star fields fit — 16 of 17 modules render at γ = 1.0, exactly
+both star fields fit — 17 of 18 modules render at γ = 1.0, exactly
 photometric. Only `saturation_demo` (mag −1…6.5, 1000:1) compresses, at
 γ = 0.767, and that figure prints the exponent and the words "not
 photometric".
@@ -227,6 +227,88 @@ photometric".
 
 **Real physics**: ✅ Exact at γ = 1 (nearly every module); ⚠️ disclosed
 approximation where the scene physically cannot fit a display
+
+### 8. Eyepiece: magnification, exit pupil and field of view
+
+**Location**: `telescope_sim/geometry/eyepiece.py`, consumed by
+`ray_trace_plot.plot_source_image` and by the `eyepiece_magnification`
+tutorial module (R5.9)
+
+**What**: The eyepiece is what converts a focal-plane image into something an
+eye can look at, and it sets four coupled quantities from one choice:
+
+| Quantity | Formula | Notes |
+|---|---|---|
+| Magnification | `M = f_tel / f_ep` | Both focal lengths, same units |
+| Exit pupil | `p = D / M` ( = `D·f_ep/f_tel` ) | Diameter of the light cone leaving the eyepiece |
+| True field | `TFOV = 206265·d_stop / f_tel` | **Exact**, when the field-stop diameter is known |
+| True field (fallback) | `TFOV ≈ AFOV / M` | Approximate — ignores eyepiece distortion |
+
+**The exit pupil is the master variable.** Magnification, true field, apparent
+size and eye-view surface brightness are not four independent knobs — pick an
+eyepiece and all of them follow. This is why the tutorial exposes a real
+eyepiece selector rather than a free-floating exit-pupil control: an
+independent exit-pupil slider would let the user request combinations that no
+physical eyepiece can produce.
+
+Both useful-magnification limits are **derived from the exit pupil**, not
+hard-coded:
+- **Max useful** `M = D / MIN_USEFUL_EXIT_PUPIL_MM` (0.5 mm) — beyond this the
+  cone is finer than the eye can use and the view only gets dimmer and
+  blurrier. This is the origin of the familiar "2× the aperture in mm" rule of
+  thumb, which is just `D / 0.5` rewritten
+- **Min useful** `M = D / DEFAULT_EYE_PUPIL_MM` (7.0 mm) — below this the exit
+  pupil overflows the eye's own pupil and the surplus aperture is thrown away
+
+`DEFAULT_EYE_PUPIL_MM` is the **same object** as the renderer's `EYE_PUPIL_MM`
+(aliased, not re-declared, and pinned by an identity assertion in
+`tests/test_eyepiece.py`). If the two drifted, the eyepiece model and the
+eye-view brightness model would be describing different observers.
+
+**Exit-pupil washout** (`_apply_exit_pupil_washout`): as the exit pupil grows
+past the eye's pupil, or shrinks toward the diffraction limit, fine detail
+loses contrast. The operator blends the image toward a **locally** smoothed
+copy (Gaussian, σ = 4% of the frame) rather than toward the frame average.
+Two defects were fixed here in R5.9/S2, both of which the frame-mean version
+had:
+- it **added light to empty sky** — for the Moon at a 6.4 mm exit pupil, black
+  sky rendered at 0.68, so the night sky glowed grey
+- it made washout **depend on framing** — the same object in a wider field had
+  a different mean, hence different contrast, which is unacceptable in a
+  module whose whole subject is changing the field of view
+
+A fixed fraction of the *frame* is the right scale because the field maps to
+the eyepiece's fixed apparent field, so 4% of the frame is a constant
+*apparent* angle to the observer — which is the scale the eye's response is
+defined on.
+
+> **Consumer note:** this operator is shared code. The correction changes the
+> eye-view render in the **Design tab** as well as the tutorial (`design_tab.py`
+> imports the same `plot_source_image`). That is intended — the old behaviour
+> was wrong in both places.
+
+**Eye relief** — the distance behind the eyepiece where the exit pupil forms,
+and the reason short focal lengths are uncomfortable and eyeglass wearers need
+long-eye-relief designs — is **described in the reference text but NOT
+modelled**. Nothing in the render depends on it.
+
+**Accuracy**:
+- ✅ `M`, `p`, and the exact `TFOV` from a field stop are elementary geometric
+  optics, exact
+- ✅ Both useful-magnification limits are derived from their defining exit
+  pupil, verified by monkeypatching the constant (`test_threshold_actually_
+  drives_the_limit`) rather than by asserting an equivalent formula
+- ⚠️ `TFOV ≈ AFOV/M` is the standard approximation, used only when no field
+  stop is supplied; which basis was used is disclosed in `Eyepiece.summary()`
+  and by the `tfov_is_exact` property
+- ⚠️ `_WASHOUT_LOCAL_SCALE = 0.04` is **empirical** — chosen so the effect
+  reads as loss of fine detail rather than as global fog, not fitted to
+  psychophysical data. Flagged in code and in the module narrative
+- ❌ Eye relief, eyepiece aberrations, and field-stop vignetting are not
+  modelled
+
+**Real physics**: ✅ Exact for the geometric quantities; ⚠️ the washout
+operator is a disclosed perceptual approximation
 
 
 ---

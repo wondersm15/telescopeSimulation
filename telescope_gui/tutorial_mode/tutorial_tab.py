@@ -99,6 +99,11 @@ class TutorialTab(QWidget):
         # (∝ (exit_pupil / 7 mm)², capped at naked-eye). Irrelevant in
         # Detector view (where exposure drives brightness instead).
         self._exit_pupil_combo: QComboBox | None = None
+        # Eyepiece combo (R5.9). Shown for the magnification / exit-pupil /
+        # field-of-view module. When present it REPLACES the exit-pupil combo,
+        # because with a real eyepiece the exit pupil is derived (D / mag)
+        # rather than independently chosen.
+        self._eyepiece_combo: QComboBox | None = None
         # Focal-zoom combo (Phase B4). Shown for the chromatic scenario;
         # switches the after-side focal-plane radial-profile x-axis between
         # a wide view (singlet halo off-panel) and a close view (resolves
@@ -376,6 +381,7 @@ class TutorialTab(QWidget):
         self._exposure_value_label = None
         self._filter_combo = None
         self._exit_pupil_combo = None
+        self._eyepiece_combo = None
         self._focal_zoom_combo = None
         self._coma_view_combo = None
         self._aperture_diffraction_check = None
@@ -489,7 +495,14 @@ class TutorialTab(QWidget):
         # scenarios, where the Eye-view surface brightness is exit-pupil
         # driven. Stars are aperture-driven, so the control is meaningless
         # for point/double/field sources.
-        if wants_display_combo and self._scenario_has_extended_source(scenario):
+        # When the scenario has a real eyepiece, the exit pupil is DERIVED
+        # from it (D / magnification), so offering both controls would let the
+        # user pick a physically impossible pair. The eyepiece combo replaces
+        # it and drives the surface-brightness model through the same value.
+        if wants_display_combo and scenario.show_eyepiece_combo:
+            self._add_eyepiece_combo(scenario)
+        elif (wants_display_combo
+                and self._scenario_has_extended_source(scenario)):
             self._add_exit_pupil_combo(scenario.default_exit_pupil_mm)
         if scenario.supports_realtime:
             self._add_realtime_check()
@@ -979,6 +992,72 @@ class TutorialTab(QWidget):
         self.controls_layout.addLayout(col)
         self._exit_pupil_combo = combo
 
+    #: Eyepiece focal lengths offered by the R5.9 module, in mm. Spread to
+    #: straddle both useful limits on the module's 200 mm f/5: the 32 mm sits
+    #: just above the minimum useful magnification (exit pupil 6.4 mm, close
+    #: to overflowing a 7 mm pupil) and the 6 mm approaches a 1.2 mm exit
+    #: pupil. The magnification each gives depends on the TELESCOPE, so the
+    #: labels are computed per scenario rather than written in here.
+    _EYEPIECE_OPTIONS_MM = (32.0, 25.0, 15.0, 10.0, 6.0)
+
+    def _add_eyepiece_combo(self, scenario: ScenarioDefinition):
+        """Eyepiece dropdown: the one control behind magnification, TFOV,
+        apparent size and exit pupil (R5.9).
+
+        Every other scenario autoscales the object to fill the frame, which
+        is precisely what hides the eyepiece's effect. Here the render is
+        given a real `Eyepiece`, so changing this combo changes the true
+        field of view, how large the object actually appears inside it, and
+        the exit pupil that sets eye-view surface brightness — all from
+        f_telescope / f_eyepiece, with no separate tutorial-only rule.
+        """
+        from telescope_sim.geometry.eyepiece import Eyepiece
+        from telescope_gui.tutorial_mode.scenario_runner import (
+            build_scenario_telescope,
+        )
+
+        # The same telescope object the render uses, so the magnification and
+        # exit pupil on the labels are the ones the image is drawn with.
+        scope = build_scenario_telescope(scenario.after_telescope)
+        col = QVBoxLayout()
+        lbl = QLabel("Eyepiece")
+        lbl.setStyleSheet(
+            "font-size: 8pt; font-weight: normal; color: #555;")
+        combo = QComboBox()
+        for f_mm in self._EYEPIECE_OPTIONS_MM:
+            ep = Eyepiece(focal_length_mm=f_mm,
+                          apparent_fov_deg=scenario.eyepiece_afov_deg,
+                          field_stop_mm=scenario.eyepiece_field_stop_mm)
+            mag = ep.magnification(scope.focal_length)
+            exit_pupil = ep.exit_pupil_mm(scope.primary_diameter,
+                                          scope.focal_length)
+            combo.addItem(
+                f"{f_mm:.0f} mm — {mag:.0f}×, {exit_pupil:.1f} mm pupil",
+                f_mm)
+        idx = combo.findData(scenario.after_eyepiece_mm)
+        combo.setCurrentIndex(idx if idx >= 0 else 0)
+        combo.setToolTip(
+            "Magnification = telescope focal length / eyepiece focal length.\n"
+            "Everything else follows: exit pupil = aperture / magnification,\n"
+            "and true field of view = apparent field / magnification.\n"
+            "A shorter eyepiece magnifies more, but shows less sky and\n"
+            "delivers a dimmer extended image — this control shows all three\n"
+            "at once instead of autoscaling the object to fill the frame."
+        )
+        combo.currentIndexChanged.connect(self._on_update_clicked)
+        col.addWidget(lbl)
+        col.addWidget(combo)
+        self.controls_layout.addLayout(col)
+        self._eyepiece_combo = combo
+
+    def _current_eyepiece_mm(self,
+                             scenario: ScenarioDefinition) -> float | None:
+        """Return the selected eyepiece focal length (mm), or the default."""
+        if self._eyepiece_combo is None:
+            return scenario.after_eyepiece_mm
+        data = self._eyepiece_combo.currentData()
+        return float(data) if data is not None else scenario.after_eyepiece_mm
+
     def _add_eye_blur_check(self):
         """Eye-blur toggle for fixed Eye-vs-Detector scenarios (R3.12).
 
@@ -1373,6 +1452,12 @@ class TutorialTab(QWidget):
             idealize_sa=scenario.idealize_singlet_sa,
             focal_zoom_arcsec=self._current_focal_zoom(scenario),
             coma_view_mode=self._current_coma_view(),
+            # The before side is the FIXED reference eyepiece, not the
+            # combo — the whole comparison is "this eyepiece vs that one".
+            eyepiece_focal_length_mm=scenario.before_eyepiece_mm,
+            eyepiece_afov_deg=scenario.eyepiece_afov_deg,
+            eyepiece_field_stop_mm=scenario.eyepiece_field_stop_mm,
+            eyepiece_view_mode=scenario.eyepiece_view_mode,
         )
         if err:
             self.status_label.setText("Before render failed")
@@ -1523,6 +1608,10 @@ class TutorialTab(QWidget):
             focal_zoom_arcsec=self._current_focal_zoom(scenario),
             coma_view_mode=self._current_coma_view(),
             apply_aperture_diffraction=apply_aperture_diffraction,
+            eyepiece_focal_length_mm=self._current_eyepiece_mm(scenario),
+            eyepiece_afov_deg=scenario.eyepiece_afov_deg,
+            eyepiece_field_stop_mm=scenario.eyepiece_field_stop_mm,
+            eyepiece_view_mode=scenario.eyepiece_view_mode,
         )
 
         if err:

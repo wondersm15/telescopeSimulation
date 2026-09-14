@@ -69,11 +69,12 @@ class TestDoubleStar:
 # ---------------------------------------------------------------------------
 
 class TestScenarioRegistry:
-    def test_seventeen_scenarios_total(self):
+    def test_eighteen_scenarios_total(self):
         # 17 after Jupiter Full Simulation was dropped (redundant with Saturn
-        # with Rings + Colour Filters on Jupiter).
+        # with Rings + Colour Filters on Jupiter); 18 with R5.9's
+        # Magnification / Exit Pupil / Field of View module.
         from telescope_gui.tutorial_mode.scenario_registry import SCENARIOS
-        assert len(SCENARIOS) == 17
+        assert len(SCENARIOS) == 18
 
     def test_acts_populated(self):
         from telescope_gui.tutorial_mode.scenario_registry import get_scenarios_by_act
@@ -81,7 +82,8 @@ class TestScenarioRegistry:
         # R4.2c/D1: Viewing-Modes (detector-vs-eye + exposure/saturation) moved
         # up to Act 1 right after Airy disc, absorbing the old Act-3 exposure
         # module → Act 1 = 8, Act 3 = 3.
-        assert len(by_act[1]) == 8      # Isolated Effects (+ Viewing Modes)
+        # R5.9: + Magnification / Exit Pupil / Field of View → Act 1 = 9.
+        assert len(by_act[1]) == 9      # Isolated Effects (+ Eyepiece)
         assert len(by_act[2]) == 4      # Combined Effects
         assert len(by_act[3]) == 3      # Brightness, Saturation & Filters
         assert len(by_act[4]) == 2      # Real Objects (Saturn, Star Field)
@@ -89,7 +91,7 @@ class TestScenarioRegistry:
     def test_all_scenarios_implemented(self):
         from telescope_gui.tutorial_mode.scenario_registry import SCENARIOS
         implemented = [s for s in SCENARIOS if s.implemented]
-        assert len(implemented) == 17
+        assert len(implemented) == 18
         ids = {s.id for s in implemented}
         assert ids == {
             "airy_disk", "rayleigh_criterion", "central_obstruction",
@@ -97,7 +99,7 @@ class TestScenarioRegistry:
             "spherical_aberration",
             "obstruction_plus_spiders", "chromatic_plus_seeing",
             "aperture_vs_seeing", "fratio_coma",
-            "viewing_modes", "nd_filter_moon",
+            "viewing_modes", "eyepiece_magnification", "nd_filter_moon",
             "color_filter_jupiter", "saturation_demo",
             "saturn_rings", "starfield_resolution",
         }
@@ -1313,3 +1315,127 @@ class TestLegendsOutOfPlots:
         # the legend must not sit on the illumination curve (was 64 pts).
         assert self._legend_data_overlap(fig.axes[0], fig) < 5
         plt.close(fig)
+
+
+class TestScenarioNarrativeMatchesItsTelescope:
+    """R5.4 / Batch S: numbers written into prose must match the real config.
+
+    Narrative text is the one place a wrong number is invisible to every other
+    test — it renders fine, it just lies. These pin the two ways that happened.
+    """
+
+    def test_every_f_ratio_in_a_panel_label_matches_its_config(self):
+        """A panel labelled "f/N" must actually be f/N.
+
+        The vignetting Before panel read "200 mm f/5 baseline" while its
+        config was 800 mm on 200 mm — f/4. Found by auditing every label
+        after R5.4 asked for field-of-view context on that same module, per
+        the standing "check elsewhere for the same error" rule.
+        """
+        import re
+        from telescope_gui.tutorial_mode.scenario_registry import SCENARIOS
+
+        mismatches = []
+        for sc in SCENARIOS:
+            for side in ("before", "after"):
+                cfg = getattr(sc, f"{side}_telescope", None)
+                label = getattr(sc, f"{side}_label", "") or ""
+                if cfg is None or not getattr(cfg, "focal_length", None):
+                    continue
+                m = re.search(r"f/\s*([0-9]+(?:\.[0-9]+)?)", label)
+                if m is None:
+                    continue
+                claimed = float(m.group(1))
+                real = cfg.focal_length / cfg.diameter
+                if abs(claimed - real) >= 0.06:
+                    mismatches.append(
+                        f"{sc.id}.{side}_label says f/{claimed:g} but the "
+                        f"config is f/{real:.2f}")
+        assert not mismatches, "panel labels contradict their telescopes: " + \
+            "; ".join(mismatches)
+
+    def test_vignetting_eyepiece_numbers_are_the_real_ones(self):
+        """The FOV anchor table in the vignetting prose must be recomputable.
+
+        R5.4 asked "is 10,000 arcsec a lot or a little?", answered in the
+        module text with a table of true fields. Those are hand-written
+        numbers about a specific telescope, so they can rot silently if the
+        baseline config or the Eyepiece model changes. Recompute and compare.
+        """
+        from telescope_gui.tutorial_mode.scenario_registry import SCENARIOS
+        from telescope_gui.tutorial_mode.scenario_runner import (
+            build_scenario_telescope)
+        from telescope_sim.geometry.eyepiece import Eyepiece
+
+        sc = next(s for s in SCENARIOS if s.id == "vignetting")
+        tel = build_scenario_telescope(sc.before_telescope)
+        text = sc.description
+
+        # (focal length mm, AFOV deg, magnification, true field deg, arcsec)
+        quoted = [
+            (32.0, 70.0, 25, 2.80, 10080),
+            (32.0, 50.0, 25, 2.00, 7200),
+            (25.0, 50.0, 32, 1.56, 5625),
+            (10.0, 50.0, 80, 0.62, 2250),
+        ]
+        for f_ep, afov, mag, tfov_deg, tfov_arcsec in quoted:
+            ep = Eyepiece(focal_length_mm=f_ep, apparent_fov_deg=afov)
+            assert ep.magnification(tel.focal_length) == pytest.approx(
+                mag, abs=0.5), f"{f_ep}mm magnification drifted from the text"
+            real_arcsec = ep.true_fov_arcsec(tel.focal_length)
+            assert real_arcsec == pytest.approx(tfov_arcsec, rel=0.01), (
+                f"{f_ep}mm/{afov}° true field is {real_arcsec:.0f}\" but the "
+                f"vignetting narrative claims {tfov_arcsec}\"")
+            # and the number the reader actually sees must be in the prose
+            assert f"{tfov_arcsec}" in text.replace(",", ""), (
+                f"{tfov_arcsec}\" is no longer quoted in the narrative")
+
+        # The axis is a radius but eyepiece fields are diameters; the text has
+        # to say so, because that factor of two is the whole confusion.
+        assert "radius" in text and "DIAMETER" in text
+
+    def test_vignetting_narrative_does_not_misstate_the_f_ratio(self):
+        """The prose names the telescope it is quoting numbers for."""
+        from telescope_gui.tutorial_mode.scenario_registry import SCENARIOS
+        sc = next(s for s in SCENARIOS if s.id == "vignetting")
+        cfg = sc.before_telescope
+        real = cfg.focal_length / cfg.diameter
+        assert f"f/{real:.0f}" in sc.description
+        assert f"{cfg.focal_length:.0f} mm focal length" in sc.description
+
+    def test_every_magnification_in_a_panel_label_matches_its_eyepiece(self):
+        """A panel labelled "N×" must be N× for its telescope and eyepiece.
+
+        Same defect class as the f-ratio mismatch above: a magnification is a
+        derived quantity written into prose by hand, so it silently rots the
+        moment the telescope or the eyepiece changes. Recompute it.
+        """
+        import re
+        from telescope_gui.tutorial_mode.scenario_registry import SCENARIOS
+        from telescope_gui.tutorial_mode.scenario_runner import (
+            build_scenario_telescope)
+        from telescope_sim.geometry.eyepiece import Eyepiece
+
+        # "31×" / "31x", but not "32mm" or an "x" inside a word.
+        pattern = re.compile(r"([0-9]+(?:\.[0-9]+)?)\s*[x×](?![a-zA-Z0-9])")
+        checked, mismatches = 0, []
+        for sc in SCENARIOS:
+            for side in ("before", "after"):
+                label = getattr(sc, f"{side}_label", "") or ""
+                m = pattern.search(label)
+                ep_mm = getattr(sc, f"{side}_eyepiece_mm", None)
+                cfg = getattr(sc, f"{side}_telescope", None)
+                if m is None or ep_mm is None or cfg is None:
+                    continue
+                checked += 1
+                claimed = float(m.group(1))
+                tel = build_scenario_telescope(cfg)
+                real = Eyepiece(focal_length_mm=ep_mm).magnification(
+                    tel.focal_length)
+                if abs(claimed - real) > 1.0:
+                    mismatches.append(
+                        f"{sc.id}.{side}_label claims {claimed:g}x but a "
+                        f"{ep_mm:g}mm eyepiece on {tel.focal_length:.0f}mm "
+                        f"gives {real:.2f}x")
+        assert checked, "no magnification labels found — has the module moved?"
+        assert not mismatches, "; ".join(mismatches)

@@ -2,11 +2,142 @@
 
 ---
 
+## Tutorial Tab — Round 5, Batch S (the eyepiece module): COMPLETE — **ROUND 5 CLOSES**
+
+Ledger: `PLAN_TUTORIAL_ROUND5.md`. Closes **R5.9** (new module) and **R5.4** (field-of-view
+context on vignetting). **578 tests pass** (was 572); committed on
+`feature/tutorial-testing-tab`, **not merged**.
+
+Scope was the user's choice: *"Explain + make it real"* — a real eyepiece control that
+changes the apparent size of the object, not just prose about magnification. Every other
+module autoscales the object to fill the frame, which had been quietly hiding the single
+most consequential thing an observer actually changes.
+
+**The tutorial had never passed an eyepiece to the renderer before, and doing so exposed
+two real bugs in shared `telescope_sim` code.**
+
+**(1) A bright square inside the circular eyepiece field.** Found by the sweep (8 hits on
+the 32/25/15 mm eyepieces), then measured rather than guessed: `_apply_exit_pupil_washout`
+blended toward `image.mean()`, lifting black sky to **0.676**, and `_crop_or_pad_to_fov`
+then padded the widened field with `np.zeros` — its comment claimed "black sky" — leaving a
+hard 0.00 → 0.676 step. Padding now uses the image's own floor (per channel for RGB).
+**The end-to-end test did not fail when I reverted only the greyscale branch**, because the
+Moon renders through the RGB path; reverting both made all three fail. That is the only
+reason the test is known to pin the branch that actually runs.
+
+**(2) The defect the square was a symptom of.** Correct padding still left the sky glowing
+uniform grey — coherent, and wrong. Blending toward the *frame* mean does two things that
+are not physics: it **adds light to empty sky**, and it makes washout **depend on framing**
+(reframing the same Moon changed its contrast) — fatal in the one module whose subject *is*
+changing the field of view. The operator now blends toward a locally smoothed copy
+(Gaussian, σ = 4% of frame — a constant *apparent* angle, since the field maps to the
+eyepiece's fixed apparent field). **All nine pre-existing washout tests passed unchanged**,
+which is the signal that this tightened the model rather than loosening the tests.
+
+⚠️ Both fixes are in **shared** code: the Design tab imports the same `plot_source_image`,
+so its eye view changes too. Intended (it was wrong there as well) but **unswept** — and
+since the eyepiece figures have always been reachable from the Design tab and never from
+the tutorial until now, the Design tab has been showing that square artifact all along.
+
+**Two of my own tests were not testing anything.** The first max-magnification pair
+asserted `max_useful == 2*D`, which passes for the derived implementation *and* for the
+hard-coded one it was meant to replace. Replaced with a monkeypatch test that moves the
+underlying constant and demands the answer move with it. Equivalence is not derivation.
+The shared eye-pupil constant is pinned with `is`, not `==` — two equal float literals in
+two modules are distinct objects.
+
+**R5.4 was first answered in the wrong place.** The user asked, of the *vignetting module*,
+"is 10,000 arcsec a lot or a little?" — I initially answered only in the new reference
+section. The anchor table is now in the vignetting narrative itself, and getting it right
+required two corrections: the plot's x-axis is a **radius** while eyepiece true fields are
+quoted as **diameters** (that factor of two is most of the confusion), and the baseline
+telescope is **f/4**, not the f/5 its panel label claimed. On this scope a 32 mm 2″
+wide-field gives **10,080″** — so 10,000 arcsec is *a lot*: 2.8°, five and a half Moons,
+essentially the widest field the telescope can produce; but read off the plot's axis it
+would mean a 5.6° field that no eyepiece can deliver.
+
+Per the standing "check elsewhere" rule, every scenario label was then audited against its
+own config — f-ratios (one mismatch, the vignetting one) and magnifications (one claim,
+correct). Both audits are now permanent tests, along with a recomputation of the quoted
+eyepiece table from the live model. Narrative numbers are the one error class no other
+test can see: the figure renders perfectly, it just lies.
+
+## Changes Made
+
+### Modified: `telescope_sim/geometry/eyepiece.py` — model corrections (S1)
+- New constants `MIN_USEFUL_EXIT_PUPIL_MM = 0.5`, `DEFAULT_EYE_PUPIL_MM = 7.0`
+- New fields `field_stop_mm`, `eye_pupil_mm`; new `tfov_is_exact` property
+- `true_fov_arcsec` gained the **exact** basis `206265·d_stop/f_tel`, falling back to
+  `AFOV/M`; `summary()` now discloses which basis produced the number
+- `max_useful_magnification` / `min_useful_magnification` **derived** from their defining
+  exit pupil instead of hard-coded (`2·D` was `D/0.5` with the constant substituted)
+
+### Modified: `telescope_sim/plotting/ray_trace_plot.py` — two shared-code fixes (S2)
+- Imports `DEFAULT_EYE_PUPIL_MM` and **aliases** it as `EYE_PUPIL_MM` — was an independent
+  `7.0`, so the brightness model and the eyepiece model could have drifted apart
+- `_crop_or_pad_to_fov`: pads with the image floor, not zero (per channel for RGB)
+- `_apply_exit_pupil_washout`: blends toward a Gaussian local mean, not the frame mean;
+  new `_WASHOUT_LOCAL_SCALE = 0.04`, flagged **⚠️ EMPIRICAL** in code and PHYSICS.md
+
+### Modified: `telescope_gui/tutorial_mode/scenario_runner.py` — plumbing (S2)
+- `_EYEPIECE_VIEW_INDEX` + `_select_eyepiece_figure`, which picks one of the up-to-three
+  figures `plot_source_image` returns **and closes the rest** (unclosed Agg figures live
+  for the life of the process; the tutorial re-renders on every control change)
+- `build_scenario_telescope` so the tab can build the same telescope the render uses
+- `run_scenario_side` accepts the eyepiece parameters and derives the exit pupil from them
+
+### Modified: `telescope_gui/tutorial_mode/scenario_registry.py` — the module (S3/S4)
+- New Act-1 scenario `eyepiece_magnification` (Moon, 200 mm f/5, 32 mm vs live selector),
+  placed after *Viewing Modes*
+- `ScenarioDefinition` gained the eyepiece fields
+- Vignetting: FOV anchor table added to the narrative; `before_label` corrected f/5 → **f/4**
+
+### Modified: `telescope_gui/tutorial_mode/tutorial_tab.py`
+- Eyepiece combo (32/25/15/10/6 mm) that **replaces** the exit-pupil combo on this module —
+  the exit pupil is not an independent knob, and offering both would let the user request a
+  pair no physical eyepiece can produce
+
+### Modified: `telescope_gui/reference_tab.py`
+- New section *Magnification, Exit Pupil & Field of View*: derivations, the "How much sky is
+  that, really?" anchor table, eye relief (**described, explicitly not modelled**)
+
+### Modified: `telescope_gui/tutorial_mode/theory_computations.py`
+- Module docstring now records the **deliberate-duplication invariant**: these re-derive
+  theory independently of `telescope_sim` on purpose, and a future DRY pass that wires them
+  together would make every validation panel agree with itself no matter how wrong it is
+
+### Modified: `PHYSICS.md`
+- New §8 on the eyepiece model, the corrected washout operator, and what is not modelled
+
+### Tests: 572 → 578
+- `tests/test_eyepiece.py` 18 → 36 (TFOV basis, derived limits, padding, washout locality)
+- `tests/test_tutorial_tab.py`: scenario counts 17 → 18, plus
+  `TestScenarioNarrativeMatchesItsTelescope` (4 tests, all revert-checked)
+
+## Verification
+Full GUI sweep by **sidebar emit** (not `_load_scenario`), every combo/checkbox/slider on
+all 18 scenarios: **2733 renders, 0 nulls**; 2067 images box-scanned, **0 box artifacts**;
+**0** banned labels, **0** overprints, **0** annotation overruns; **0 live figures** left
+after every scenario (no leak from the 3-figure eyepiece path).
+
+## Gotcha worth remembering
+A stale `__pycache__` kept serving a modified module after `cp` restored the source, so a
+test kept failing against a file that was already fixed. It can only mask a real failure or
+invent a fake one — never make a broken thing pass — but clear `__pycache__` after any
+scripted revert.
+
+## Nothing Installed
+No new packages installed.
+
+---
+
+---
+
 ## Tutorial Tab — Round 5, Batch R (display transfer function): COMPLETE
 
 Ledger: `PLAN_TUTORIAL_ROUND5.md`. Closes R5.8a/b **and reopens-then-closes R5.2**,
 which Round 5 had twice diagnosed as "a narrative gap, not a code bug". It was a code
-bug. **555 tests pass** (was 532); committed on `feature/tutorial-testing-tab`, not
+bug. **556 tests pass** (was 532); committed on `feature/tutorial-testing-tab`, not
 merged.
 
 **My first hypothesis was wrong and measurement said so.** I predicted the eye view's
@@ -61,7 +192,7 @@ blending toward a mean — an operation on light — with a linear `image` and a
 divided code values by their max. The `log_scale=True` branch is deliberately untouched:
 its colorbar states its own mapping.
 
-**Verification.** 23 new tests across four classes. Reverting `ray_trace_plot.py` fails
+**Verification.** 24 new tests across five classes. Reverting `ray_trace_plot.py` fails
 12 of them — and two more had to be *fixed* because the revert did **not** fail them.
 `test_detector_brightness_scales_as_aperture_squared` passed against broken code because
 at the probe exposure Jupiter's disk sits inside sRGB's **linear toe** (below 0.0031,
@@ -74,6 +205,34 @@ to assert **physics instead of shape** (a linear array must obey Pogson's law: s
 1.00 correct, 0.54 with the bug). End-to-end, decoding renders back to screen luminance:
 contrast fidelity 1.00 both views, exit pupil 49.00× vs 49.00× true, aperture 16.01× vs
 D² = 16.00×.
+
+**The full GUI sweep then caught a regression this batch introduced.** All 17 scenarios
+× every combo/checkbox/slider through real sidebar navigation: 2475 renders, 0 nulls,
+0 box artifacts, 0 banned labels, 0 overprints — but **276 annotation boxes overrunning
+their axes**, where Batch P's final sweep had 0. `_ANNOTATION_WIDTH = 62` is a
+*character* count calibrated when the longest line was 48 chars, so the limit itself was
+never checked against the narrowest axes; the two new 62-character disclosure lines
+measure 324 px in a 311 px axes. Batch P had solved the sibling problem with a measured
+budget precisely because "a hard-coded width fits one figsize and clips at every other",
+and I did not carry that across. It also does not transfer directly — `_panel_char_budget`
+is exact only because DejaVu Sans **Mono** has a constant advance, and this annotation is
+proportional. `_fit_annotation_to_axes` instead places the text, **measures the box that
+actually resulted**, and narrows the wrap until it fits, which holds for any figsize,
+font or content. Applied at all four wrap sites: two were latent (the eyepiece
+"true size" and "eyepiece view" annotations, which R5.9 is about to expose) and one was
+invisible to the detector entirely (`approx_text` is drawn with no bbox patch, and the
+sweep skips unboxed text, so it was never wrapped at all).
+
+The existing `test_info_box_does_not_overrun_the_axes` **could not** have caught this: it
+renders at the default `figsize=(8,7)`, a 660 px axes, and passed while the sweep counted
+276 overruns, because `BeforeAfterPanel` draws every tutorial figure at **(5,5)**. A width
+that fits the widest caller proves nothing about the narrowest — the standalone-render-vs-
+GUI trap in test form. New `test_info_box_fits_at_the_TUTORIAL_figsize` pins (5,5) and the
+eye view; with the refit disabled it fails by 35.7 px while the three older tests in the
+same class still pass.
+
+**Re-swept clean:** 2475 renders, 0 nulls, 0 box artifacts, 0 banned axis/colourbar
+labels, 0 overprints, **0 annotation overruns**.
 
 **Lessons.**
 - *A "not a bug, that's just the physics" verdict deserves the same scrutiny as a bug
