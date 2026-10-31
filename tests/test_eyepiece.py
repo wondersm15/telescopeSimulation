@@ -293,6 +293,73 @@ class TestPaddingMatchesTheSkyLevel:
             plt.close(f)
 
 
+class TestEyepieceFiguresKeepTheirBrightness:
+    """The true-size and Eyepiece View figures must not re-normalise.
+
+    The image reaching the eyepiece figures is already on the shared display
+    scale: in the Eye view its peak is the exit-pupil surface brightness, in
+    the Detector view the exposure. Both figures used to divide by their own
+    max after `_crop_or_pad_to_fov`, which stretched them back to full white
+    — so a 1 mm exit pupil looked as bright as a 7 mm one in exactly the
+    figures that are meant to show what the eye sees (single-mode follow-up,
+    issue 2). Reverting that fix makes the dim cases below read 1.0.
+    """
+
+    @staticmethod
+    def _figure_peaks(source, eyepiece, stretch, exposure):
+        import matplotlib.pyplot as plt
+        from telescope_gui.telescope_builder import build_telescope
+        from telescope_sim.plotting.ray_trace_plot import plot_source_image
+
+        telescope = build_telescope(
+            telescope_type="Newtonian", diameter=200.0, focal_length=1000.0,
+            primary_type="parabolic", enable_obstruction=True,
+            obstruction_ratio=0.20, spider_vanes=4)
+        figs = plot_source_image(
+            telescope, source, seeing_arcsec=2.0, num_pixels=256,
+            figsize=(5, 5), display_stretch=stretch, exposure_level=exposure,
+            eyepiece=eyepiece, eyepiece_view_figsize=(5, 5))
+        peaks = []
+        for f in figs:
+            arr = np.asarray(f.axes[0].get_images()[0].get_array(),
+                             dtype=float)
+            peaks.append(float(arr.max()))
+            plt.close(f)
+        return peaks
+
+    # A 5 mm eyepiece on 200 mm f/5: 200×, 1 mm exit pupil, 900" true field.
+    # That crops the Moon (2431" field) and pads Jupiter (60" field), so both
+    # branches of `_crop_or_pad_to_fov` are covered.
+    @pytest.mark.parametrize("source_name", ["Moon", "Jupiter"])
+    @pytest.mark.parametrize("stretch,exposure",
+                             [("log", 1.0), ("linear", 0.2)])
+    def test_all_three_figures_share_one_peak(self, source_name, stretch,
+                                              exposure):
+        from telescope_sim.source import sources
+
+        source = getattr(sources, source_name)()
+        enhanced, true_size, eyepiece_view = self._figure_peaks(
+            source, Eyepiece(5.0, 50.0), stretch, exposure)
+
+        # Dim to begin with — otherwise the comparison cannot tell a
+        # re-normalised figure from a correct one.
+        assert enhanced < 0.9
+        assert true_size == pytest.approx(eyepiece_view)
+        # Padding resamples the source with bilinear zoom, which can shave
+        # a few percent off a small disk's peak; re-normalising would add
+        # far more than 10 % here (up to ~7×).
+        assert true_size == pytest.approx(enhanced, rel=0.10), (
+            f"{source_name} {stretch}: true-size peak {true_size:.3f} vs "
+            f"standardized {enhanced:.3f} — eyepiece figure re-normalised?")
+
+    def test_eye_view_dimming_survives_in_eyepiece_figures(self):
+        """The 1 mm exit pupil's surface brightness, not full white."""
+        from telescope_sim.source.sources import Moon
+
+        peaks = self._figure_peaks(Moon(), Eyepiece(5.0, 50.0), "log", 1.0)
+        assert max(peaks) < 0.5, f"eyepiece figures not dimmed: {peaks}"
+
+
 class TestWashoutFunction:
     """Unit tests for _apply_exit_pupil_washout."""
 

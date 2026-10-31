@@ -6421,23 +6421,15 @@ def plot_source_image(telescope: Telescope,
         tfov_half = tfov_arcsec / 2.0
         if tfov_half < half_fov:
             # TFOV smaller than source — crop to eyepiece field
+            # No re-normalisation after the crop. The image arriving here is
+            # already on the shared display scale — in the Eye view its peak
+            # IS the exit-pupil surface brightness, in the Detector view it
+            # is the exposure. Dividing by the cropped max used to stretch
+            # every eyepiece figure back to full white, so a 2 mm exit pupil
+            # looked as bright as a 7 mm one (single-mode follow-up, issue 2).
             display_image, display_rgb, display_half_fov = (
                 _crop_or_pad_to_fov(
                     display_image, display_rgb, half_fov, tfov_half))
-            # Re-normalize after crop: restores display range to [0, 1]
-            # while preserving the *relative* contrast reduction from washout
-            if display_image.max() > 0:
-                display_image = display_image / display_image.max()
-            if display_rgb is not None:
-                # `display_rgb` is already sRGB-encoded, and rescaling
-                # brightness is an operation on LIGHT: dividing code values
-                # by their max is not the same operation and warps the
-                # ratios it is meant to preserve. Decode, rescale, re-encode.
-                lin = srgb_decode(display_rgb)
-                lin_max = lin.max()
-                if lin_max > 0:
-                    lin = lin / lin_max
-                display_rgb = srgb_encode(np.clip(lin, 0.0, 1.0))
 
     fig, ax = plt.subplots(figsize=figsize)
 
@@ -6491,18 +6483,9 @@ def plot_source_image(telescope: Telescope,
         image.copy(),
         image_rgb.copy() if image_rgb is not None else None,
         half_fov, tfov_half)
-    # Re-normalize: restores display range while preserving relative
-    # contrast reduction from washout
-    if tfov_image.max() > 0:
-        tfov_image = tfov_image / tfov_image.max()
-    if tfov_rgb is not None:
-        # Same reason as the crop above: rescale in linear light, not in
-        # code values (see the note at the display-crop renormalization).
-        lin = srgb_decode(tfov_rgb)
-        lin_max = lin.max()
-        if lin_max > 0:
-            lin = lin / lin_max
-        tfov_rgb = srgb_encode(np.clip(lin, 0.0, 1.0))
+    # Not re-normalised, for the same reason as the enhanced-view crop
+    # above: the true-size and Eyepiece View figures must show the same
+    # brightness as the standardized view, or the Eye-view dimming is lost.
 
     viewing_distance_mm = 500.0  # 50cm standard
     mm_per_degree = viewing_distance_mm * np.tan(np.radians(1.0))

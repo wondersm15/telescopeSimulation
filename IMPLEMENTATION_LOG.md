@@ -2,7 +2,39 @@
 
 ---
 
-## Single-mode review (2026-10-31): "Jupiter is completely washed out" — FIXED (uncommitted)
+## Single-mode follow-up (2026-10-31), issue 2: eyepiece figures re-normalised — FIXED
+
+**606 tests pass** (was 601; +5). Not merged.
+
+**Problem:** the true-size and Eyepiece View figures divided by their own max after
+`_crop_or_pad_to_fov`. That stretched them to full white, so the Eye-view exit-pupil dimming
+disappeared in exactly the figures meant to show what the eye sees. The standardized view of
+the same settings stayed dim.
+
+**Change:** `ray_trace_plot.py` — removed both re-normalisation blocks, at the enhanced-view
+crop and at the true-size image (the Eyepiece View figure reuses the true-size image). The
+image there is already on the shared display scale, so nothing replaces them.
+
+**Verification**
+- New `TestEyepieceFiguresKeepTheirBrightness` in `tests/test_eyepiece.py`: Moon (crop
+  branch) and Jupiter (pad branch) × Eye/Detector view at a 5 mm eyepiece (1 mm exit pupil).
+  All three figures share one peak, and the Eye-view dimming survives. **Revert check: all 5
+  fail without the fix.**
+- Washout contrast survives: Moon at 32 mm (6.4 mm exit pupil, 99 % washout), object
+  p95/p5 = 2.60 after vs 2.62 before. Only the absolute level changed.
+
+**Visible effect:** Jupiter through a 5 mm eyepiece (1 mm exit pupil) is now a dim disc
+(peak 0.14), where it used to be bright white. It is also grey; that is issue 1 (mesopic
+units), the next item.
+
+**Pre-existing, noted, not fixed:** padding resamples with bilinear `zoom` (point-sampling).
+A source only a few pixels wide in a wide field loses peak brightness: Jupiter at 25 mm loses
+about 5 % at 512 px, and nearly all of it at 128 px (≈1 px disc). The old re-normalisation
+hid this. An area-averaging resample would fix it. The GUI uses 512 px.
+
+---
+
+## Single-mode review (2026-10-31): "Jupiter is completely washed out" — FIXED (committed 5c5f93a)
 
 **User report:** the Design tab's Jupiter is a white disc. **601 tests pass** (was 578; +23
 in the new `tests/test_design_tab.py`). Not committed, not merged.
