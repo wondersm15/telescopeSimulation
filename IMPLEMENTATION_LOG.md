@@ -2,6 +2,49 @@
 
 ---
 
+## Eye view: stop dimming extended objects by exit pupil (2026-10-31)
+
+**620 tests pass.** Not merged.
+
+**Problem (user report):** "why is it so much fainter now?" The Eye view scaled an
+extended object's displayed brightness by (exit pupil / 7 mm)², and since R5.8 the
+screen is linear. A 1 mm exit pupil therefore showed at 2 % brightness, and high-power
+Moon and planet views were near black. The eyepiece figures used to hide this by
+re-normalising; issue 2 (6327b00) removed that, which exposed it. A real observer's
+eye adapts, so the view does not look 49× darker.
+
+**Decision:** the user rejected an adaptation model (Ward 1994) as overcomplicated.
+Extended objects are now shown at naked-eye surface brightness at every exit pupil.
+The (p/7)² factor is still computed and is used only for the real luminance.
+
+**Changes**
+- `ray_trace_plot.py` `_render_source_through_telescope`:
+  - Eye view, extended source: `brightness_scale = 1/aperture_factor`, no longer
+    sb_factor/aperture_factor.
+  - The cd/m² calibration no longer divides out the sb factor; it multiplies it into
+    `luminance_scale_cd_m2`. Jupiter therefore still reads 802 cd/m² at 7 mm and
+    16 cd/m² at 1 mm, and the colour gate is unchanged.
+  - The annotation says "real SB ≈ N× naked-eye" plus "Approx: shown at naked-eye
+    brightness (eye adapts)".
+- Tests:
+  - R5.8b became `test_exit_pupil_moves_luminance_not_the_picture`: the display median
+    is constant and cd/m² ∝ (p/7)².
+  - The eyepiece test is now `test_eye_view_not_dimmed_by_small_exit_pupil`, which
+    requires the Moon at 1 mm to peak above 0.5.
+  - The tutorial test is now `test_eye_view_extended_shown_at_naked_eye_brightness`.
+  - The "dim to begin with" guard now applies to Detector only.
+  - Revert check: restoring the old line fails all 3 new tests.
+- Text:
+  - Exit-pupil tooltip and View tooltip (display_controls).
+  - Eyepiece tooltip and docstrings (tutorial_tab).
+  - The scenario narratives "WHY THE HIGH-POWER VIEW IS DIMMER" and Moon exit pupil
+    (scenario_registry).
+  - reference_tab: Eye bullet, surface-brightness bullet and R5.8 follow-up notes.
+  - main.py comment.
+  - PHYSICS.md §7b/§7c.
+
+---
+
 ## Single-mode follow-up (2026-10-31), issue 1: mesopic colour gate in cd/m² — FIXED
 
 **620 tests pass** (was 606; +14). Not merged. Both follow-up issues are now closed.

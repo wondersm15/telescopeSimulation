@@ -770,13 +770,15 @@ class TestExitPupilEyeModel:
                           exposure_level=1.0)
         assert hi.sum() > lo.sum() * 1.5
 
-    def test_eye_view_extended_brightness_scales_with_exit_pupil(self):
-        """Eye view: a larger exit pupil gives a brighter extended surface."""
+    def test_eye_view_extended_shown_at_naked_eye_brightness(self):
+        """Eye view: the picture does not dim with exit pupil (the eye
+        adapts); the (p/7mm)² lives in the cd/m² luminance instead —
+        see test_colorimetry's test_exit_pupil_moves_luminance_not_the_picture."""
         small = self._render(self._jupiter(), display_stretch="log",
                              exit_pupil_mm=1.0)
         large = self._render(self._jupiter(), display_stretch="log",
                              exit_pupil_mm=7.0)
-        assert large.sum() > small.sum() * 1.5
+        assert small.sum() == pytest.approx(large.sum(), rel=0.02)
 
     def test_detector_view_ignores_exit_pupil(self):
         """Detector view: exit pupil has no effect (exposure drives brightness)."""

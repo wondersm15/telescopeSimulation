@@ -615,9 +615,13 @@ physics.</p>
   detector integrates as long as you let it; brightness clips at
   saturation; and silicon records the same colour at any light level.</li>
   <li><b>Eye (visual)</b>: no exposure control (a fixed ~0.1&nbsp;s
-  integration), surface brightness set by the exit pupil rather than by
-  time, and colour that fails at both ends of the range &mdash; grey below
-  the cone threshold, bleached toward white above.</li>
+  integration), extended objects shown at their naked-eye surface
+  brightness (the observer's eye adapts to the field, so the
+  (p/7&nbsp;mm)<sup>2</sup> exit-pupil drop is <i>not</i> rendered as
+  darkening &mdash; &#9888; a perceptual display choice), and colour that
+  fails at both ends of the range &mdash; grey below the cone threshold,
+  bleached toward white above. The exit pupil sets the real luminance in
+  cd/m<sup>2</sup>, which drives that colour gate.</li>
   <li><b>Eye + integration</b>: as Eye, plus a 1&Prime; spatial blur
   approximating the eye's spatial resolution at moderate magnification.</li>
 </ul>
@@ -628,7 +632,13 @@ loop, looking at the monitor, so the stretch modelled it a second time.
 Measured on Jupiter it flattened real belt/zone contrast by 2.1&times; and
 squashed a 12.25&times; exit-pupil brightness range down to 2.56&times;,
 which is why the aperture and exit-pupil controls appeared to do nothing.
-The stretch has been removed.</p>
+The stretch has been removed. <i>Follow-up (2026-10-31):</i> rendering
+the full exit-pupil range literally then made high-power views near black
+(1&nbsp;mm exit pupil = 2% brightness on screen), which is not what an
+observer sees, since the eye adapts to the field. The Eye view now shows
+extended objects at naked-eye brightness at every exit pupil; the exit pupil
+shows up as the cd/m<sup>2</sup> luminance printed on the image and in the
+colour gate.</p>
 <p>In the Eye modes, an additional <b>cone-desaturation</b> step blends
 high-flux pixels toward grey luminance by
 <i>w</i> = <i>I</i>/(<i>I</i> + 0.5). This reproduces the &ldquo;Jupiter
@@ -742,7 +752,12 @@ Both Eye and Detector views now share one faithful transfer function, and the
 Eye view keeps only the perceptual effect the screen genuinely cannot supply
 on its own &mdash; the loss of <i>colour</i> near the cone threshold, since
 your fully light-adapted eye in a lit room will not reproduce that by
-itself.</p>
+itself. The same argument cuts the other way for the exit pupil: an
+observer's eye adapts to a dimmer high-power field, but yours, looking at a
+bright monitor, will not adapt to a dark patch of screen. So extended objects
+are shown at naked-eye surface brightness, and the exit-pupil drop is carried
+by the cd/m<sup>2</sup> luminance and the colour it costs (&#9888; perceptual
+display choice).</p>
 
 <h3>How the image reaches your screen</h3>
 <p>A monitor is not linear. Handed a code value <i>v</i> in 0&ndash;1, it emits
@@ -835,7 +850,10 @@ exit-pupil criterion, restated.</li>
 <li><b>Surface brightness</b> of extended objects scales as
 (p / 7&nbsp;mm)<sup>2</sup>, capped at the naked-eye value. A telescope can
 make a nebula <i>bigger</i>, never intrinsically <i>brighter</i> than looking
-at it directly. This is why high power dims the view.</li>
+at it directly. This is why high power dims the view. (The simulator reports
+that drop as cd/m<sup>2</sup> on the image and uses it for the colour gate,
+but shows the picture at naked-eye brightness, because a dark-adapted eye
+adapts to the dimmer field.)</li>
 </ul>
 
 <h3>3. True field vs apparent field</h3>

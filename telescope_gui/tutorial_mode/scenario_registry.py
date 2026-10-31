@@ -179,9 +179,11 @@ class ScenarioDefinition:
     shared_psf_normalization: bool = False
 
     # ── Exit-pupil eye model (Phase 1.4) ─────────────────────────────────
-    # Default exit pupil (mm) for the Eye-view brightness model on extended
-    # sources: surface brightness ∝ (exit_pupil / 7 mm)², capped at the
-    # naked-eye level. ~2 mm is a typical planetary exit pupil. Only used
+    # Default exit pupil (mm) for the Eye-view model on extended sources:
+    # real surface brightness ∝ (exit_pupil / 7 mm)², capped at the
+    # naked-eye level — it sets the cd/m² luminance (colour gate), while the
+    # picture is shown at naked-eye brightness (the eye adapts). ~2 mm is a
+    # typical planetary exit pupil. Only used
     # when the exit-pupil control is shown (extended-source scenarios).
     default_exit_pupil_mm: float = 2.0
 
@@ -489,13 +491,19 @@ SCENARIOS: list[ScenarioDefinition] = [
             "to the 6mm (167×) and the Moon no longer fits: you are looking "
             "at a piece of it. Nothing was added by magnifying; the field was "
             "taken away.\n"
-            "WHY THE HIGH-POWER VIEW IS DIMMER. A telescope cannot make an "
-            "extended object's surface brightness exceed what your naked eye "
-            "would see — it can only make it bigger, spreading the same light "
-            "over more retina. Surface brightness follows (exit pupil / "
-            "7mm)², so going 32mm → 6mm drops the exit pupil from 6.4mm to "
-            "1.2mm and the view gets markedly darker. This is real physics, "
-            "not a rendering choice.\n"
+            "WHY THE HIGH-POWER VIEW IS DIMMER — EVEN IF IT DOESN'T LOOK IT. "
+            "A telescope cannot make an extended object's surface brightness "
+            "exceed what your naked eye would see — it can only make it "
+            "bigger, spreading the same light over more retina. Surface "
+            "brightness follows (exit pupil / 7mm)², so going 32mm → 6mm "
+            "drops the exit pupil from 6.4mm to 1.2mm and the light per "
+            "square arcsecond falls ~28×. Watch the cd/m² figure printed on "
+            "the image. Your eye, though, adapts to the dimmer field, so the "
+            "picture is shown at naked-eye brightness rather than ~28× "
+            "darker — ⚠️ a perceptual display choice, flagged on the "
+            "image. Where the drop really shows is in COLOUR: push a planet "
+            "to a tiny exit pupil and its luminance heads toward the "
+            "mesopic range, where the cones begin to give up.\n"
             "WHY THE LOW-POWER VIEW LOOKS WASHED OUT. At a 6.4mm exit pupil "
             "the beam nearly fills your iris and contrast suffers. ⚠️ Note "
             "the contrast washout specifically is an approximate PERCEPTUAL "
@@ -1238,14 +1246,16 @@ SCENARIOS: list[ScenarioDefinition] = [
             "toggle approximates the eye's resolution, not magnification).\n\n"
             "Exit pupil = the width of the light beam leaving the eyepiece = "
             "aperture ÷ magnification = eyepiece focal length ÷ f-ratio. It "
-            "sets how bright an EXTENDED object looks: a bigger exit pupil "
-            "packs the same light into a smaller image, so surface brightness "
-            "rises — until the exit pupil exceeds your eye's ~7 mm pupil, "
-            "where the extra light spills around the iris and is wasted. The "
-            "full Moon can be uncomfortably bright at a large exit pupil; an "
-            "ND filter (or a smaller exit pupil, i.e. more magnification) "
-            "tames it. Use the Exit pupil control to see the surface-"
-            "brightness effect.\n\n"
+            "sets the real surface brightness of an EXTENDED object: a "
+            "bigger exit pupil packs the same light into a smaller image, so "
+            "surface brightness rises — until the exit pupil exceeds your "
+            "eye's ~7 mm pupil, where the extra light spills around the iris "
+            "and is wasted. The full Moon can be uncomfortably bright at a "
+            "large exit pupil; an ND filter (or a smaller exit pupil, i.e. "
+            "more magnification) tames it. Use the Exit pupil control and "
+            "watch the cd/m² figure on the image change. The picture itself "
+            "stays at naked-eye brightness, because your eye adapts to the "
+            "field (⚠️ a perceptual display choice).\n\n"
             "Two things you may notice: (1) the Exit pupil only changes the "
             "EYE view, not the Detector view — that's correct. Exit pupil is a "
             "visual concept (the beam width at your eye); a camera at the focal "

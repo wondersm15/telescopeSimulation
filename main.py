@@ -567,6 +567,8 @@ def main():
 
     exit_pupil_mm = 2.0                 # Eye view, no eyepiece: planetary magnification
     # exit_pupil_mm = 7.0               # max (naked-eye surface brightness)
+    # Sets the real luminance (cd/m², colour gate); the picture itself is
+    # shown at naked-eye brightness because the eye adapts.
     # (With an eyepiece configured, the exit pupil is derived from it and
     #  this value is ignored.)
 

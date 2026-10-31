@@ -47,9 +47,10 @@ VIEW_TOOLTIP = (
     "instrument, not the display curve.\n\n"
     "Detector: you choose the exposure, and silicon records the\n"
     "  same colour at any light level.\n"
-    "Eye: no exposure control (~0.1s fixed); brightness is set by\n"
-    "  the exit pupil, and colour fades where the cones fall\n"
-    "  below threshold.\n"
+    "Eye: no exposure control (~0.1s fixed); extended objects are\n"
+    "  shown at naked-eye brightness (the eye adapts), and colour\n"
+    "  fades where the real luminance (set by the exit pupil)\n"
+    "  falls below the cone threshold.\n"
     "Eye + integration: Eye plus 1″ spatial integration (eye's\n"
     "  ~1″ resolution at moderate eyepiece magnification —\n"
     "  chromatic-disk light mixes into the perceived core)."
@@ -99,8 +100,11 @@ EXIT_PUPIL_TOOLTIP = (
     "a telescope can't exceed naked-eye surface brightness, and\n"
     "at higher magnification (smaller exit pupil) it falls as\n"
     "(exit pupil / 7 mm)². Exit pupil = aperture / magnification.\n"
+    "This sets the real luminance (cd/m², shown on the image) and\n"
+    "so the colour gate. The picture stays at naked-eye brightness\n"
+    "because the eye adapts. Large exit pupils also wash out contrast.\n"
     "No effect in Detector view (exposure drives brightness there)\n"
-    "or on point-like stars (aperture-driven). Perceptual model.\n"
+    "or on point-like stars (aperture-driven).\n"
     "With an eyepiece the exit pupil is set by the eyepiece."
 )
 
@@ -228,7 +232,7 @@ class ImageDisplayControls(QWidget):
 
     Defaults to the Eye view: it answers "what will I see through this
     telescope" without an exposure number someone has to tune, and an
-    extended object's brightness there is set by the exit pupil, so it does
+    extended object is shown at its naked-eye surface brightness, so it does
     not saturate merely because the aperture grew.
     """
 

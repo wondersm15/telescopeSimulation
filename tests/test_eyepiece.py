@@ -297,12 +297,11 @@ class TestEyepieceFiguresKeepTheirBrightness:
     """The true-size and Eyepiece View figures must not re-normalise.
 
     The image reaching the eyepiece figures is already on the shared display
-    scale: in the Eye view its peak is the exit-pupil surface brightness, in
-    the Detector view the exposure. Both figures used to divide by their own
-    max after `_crop_or_pad_to_fov`, which stretched them back to full white
-    — so a 1 mm exit pupil looked as bright as a 7 mm one in exactly the
-    figures that are meant to show what the eye sees (single-mode follow-up,
-    issue 2). Reverting that fix makes the dim cases below read 1.0.
+    scale (in the Detector view, set by the exposure). Both figures used to
+    divide by their own max after `_crop_or_pad_to_fov`, which stretched a
+    dim exposure back to full white in the very figures meant to match the
+    standard view (single-mode follow-up, issue 2). Reverting that fix makes
+    the dim Detector cases below read 1.0.
     """
 
     @staticmethod
@@ -342,8 +341,10 @@ class TestEyepieceFiguresKeepTheirBrightness:
             source, Eyepiece(5.0, 50.0), stretch, exposure)
 
         # Dim to begin with — otherwise the comparison cannot tell a
-        # re-normalised figure from a correct one.
-        assert enhanced < 0.9
+        # re-normalised figure from a correct one. (The Eye view shows the
+        # object near its naked-eye level, so only Detector is dim here.)
+        if stretch == "linear":
+            assert enhanced < 0.9
         assert true_size == pytest.approx(eyepiece_view)
         # Padding resamples the source with bilinear zoom, which can shave
         # a few percent off a small disk's peak; re-normalising would add
@@ -352,12 +353,14 @@ class TestEyepieceFiguresKeepTheirBrightness:
             f"{source_name} {stretch}: true-size peak {true_size:.3f} vs "
             f"standardized {enhanced:.3f} — eyepiece figure re-normalised?")
 
-    def test_eye_view_dimming_survives_in_eyepiece_figures(self):
-        """The 1 mm exit pupil's surface brightness, not full white."""
+    def test_eye_view_not_dimmed_by_small_exit_pupil(self):
+        """A 1 mm exit pupil is 1/49 of naked-eye surface brightness in
+        cd/m², but the adapted eye still sees a well-lit Moon — rendering
+        the 1/49 literally left these figures near black (peak ~0.15)."""
         from telescope_sim.source.sources import Moon
 
         peaks = self._figure_peaks(Moon(), Eyepiece(5.0, 50.0), "log", 1.0)
-        assert max(peaks) < 0.5, f"eyepiece figures not dimmed: {peaks}"
+        assert min(peaks) > 0.5, f"eyepiece figures dimmed: {peaks}"
 
 
 class TestWashoutFunction:

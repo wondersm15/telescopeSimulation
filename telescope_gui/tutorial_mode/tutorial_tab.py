@@ -101,7 +101,8 @@ class TutorialTab(QWidget):
         self._filter_combo: QComboBox | None = None
         # Exit-pupil combo (Phase 1.4). Shown for extended-source image
         # scenarios; drives the Eye-view surface-brightness model
-        # (∝ (exit_pupil / 7 mm)², capped at naked-eye). Irrelevant in
+        # (real cd/m² ∝ (exit_pupil / 7 mm)², capped at naked-eye; the
+        # picture stays at naked-eye brightness). Irrelevant in
         # Detector view (where exposure drives brightness instead).
         self._exit_pupil_combo: QComboBox | None = None
         # Eyepiece combo (R5.9). Shown for the magnification / exit-pupil /
@@ -863,7 +864,9 @@ class TutorialTab(QWidget):
         In the Eye view, a telescope cannot raise an extended object's
         surface brightness above the naked-eye level; at higher
         magnification (smaller exit pupil) it falls as (p / 7 mm)². This
-        control picks the observing exit pupil. It has NO effect in the
+        control picks the observing exit pupil, which sets the real cd/m²
+        luminance (colour gate, annotation); the picture itself is shown at
+        naked-eye brightness because the eye adapts. It has NO effect in the
         Detector view (where exposure drives brightness) or on stars
         (point sources are aperture-driven, magnification-independent).
         """
@@ -924,8 +927,10 @@ class TutorialTab(QWidget):
             "Everything else follows: exit pupil = aperture / magnification,\n"
             "and true field of view = apparent field / magnification.\n"
             "A shorter eyepiece magnifies more, but shows less sky and\n"
-            "delivers a dimmer extended image — this control shows all three\n"
-            "at once instead of autoscaling the object to fill the frame."
+            "delivers a dimmer extended image (cd/m² on the image; the\n"
+            "picture stays at naked-eye brightness as the eye adapts).\n"
+            "This control shows all of it at once instead of autoscaling\n"
+            "the object to fill the frame."
         )
         combo.currentIndexChanged.connect(self._on_update_clicked)
         col.addWidget(lbl)

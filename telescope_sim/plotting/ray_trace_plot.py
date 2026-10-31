@@ -5528,11 +5528,16 @@ def _render_source_through_telescope(
     #       • extended sources (planets/Moon): a telescope can never raise
     #         surface brightness above the naked-eye level, and at higher
     #         magnification (smaller exit pupil) it falls as
-    #         (exit_pupil / eye_pupil)². So the D² aperture_factor baked into
-    #         `ideal*` is divided back out and replaced by the exit-pupil
-    #         surface-brightness factor (aperture-independent surface
-    #         brightness — bigger scope buys resolution, not surface
-    #         brightness). Perceptual model — flagged in the UI annotation.
+    #         (exit_pupil / eye_pupil)². That factor is computed and drives
+    #         the real retinal luminance in cd/m² (mesopic colour gate +
+    #         annotation) — but it does NOT dim the displayed picture. The
+    #         D² aperture_factor baked into `ideal*` is divided back out and
+    #         the object is shown at its naked-eye surface brightness.
+    #         ⚠️ Perceptual display choice: a dark-adapted observer's eye
+    #         adapts to the dimmer field, so the view does not LOOK
+    #         (p/7mm)² darker the way a linear screen would render it
+    #         (a 1 mm exit pupil would be ~2% brightness — near black).
+    #         Flagged in the UI annotation.
     is_eye_view = display_stretch in ("log", "log_integrated")
     is_extended_source = hasattr(source, "render_ideal_rgb")
     eye_surface_brightness_factor = None
@@ -5541,7 +5546,8 @@ def _render_source_through_telescope(
         if is_extended_source:
             eye_surface_brightness_factor = min(
                 1.0, (exit_pupil_mm / EYE_PUPIL_MM) ** 2)
-            brightness_scale = eye_surface_brightness_factor / aperture_factor
+            # Displayed at naked-eye level; the sb factor is physics-only.
+            brightness_scale = 1.0 / aperture_factor
         else:
             brightness_scale = 1.0
     else:
@@ -5613,22 +5619,25 @@ def _render_source_through_telescope(
     # The mesopic colour gate is a statement about cd/m² at the retina, but
     # this renderer works in display units. For a source with a known
     # surface brightness we can tie the two together by MEASUREMENT rather
-    # than assumption: at a naked-eye exit pupil (surface-brightness factor
-    # 1) the object's mean display luminance must equal its literature mean
-    # surface brightness. Measured here, after seeing and before the filter,
-    # so a filter then genuinely lowers the luminance the eye receives.
+    # than assumption: the Eye view displays the object at its naked-eye
+    # surface brightness, so its mean display luminance must equal its
+    # literature mean surface brightness. The exit pupil then enters as the
+    # (p/7mm)² factor on the cd/m² — physically real, but not shown as
+    # dimming (see the brightness comment above). Measured after seeing and
+    # before the filter, so a filter genuinely lowers the luminance.
     luminance_scale_cd_m2 = None
     naked_eye_cd_m2 = None
     sb_mag = (source.surface_brightness_mag_arcsec2()
               if is_eye_view and image_rgb is not None else None)
     if sb_mag is not None:
         from telescope_sim.physics.colorimetry import mag_arcsec2_to_cd_m2
-        naked_eye_lum = (rec709_luminance(image_rgb) / saturation_divisor
-                         / eye_surface_brightness_factor)
+        naked_eye_lum = rec709_luminance(image_rgb) / saturation_divisor
         naked_eye_cd_m2 = float(mag_arcsec2_to_cd_m2(sb_mag))
         mean_object_lum = _object_mean(naked_eye_lum)
         if mean_object_lum > 0:
-            luminance_scale_cd_m2 = naked_eye_cd_m2 / mean_object_lum
+            # display units → retinal cd/m² at this exit pupil
+            luminance_scale_cd_m2 = (naked_eye_cd_m2 / mean_object_lum
+                                     * eye_surface_brightness_factor)
 
     # Filter transmission — applied *before* saturation normalisation
     # so the filter genuinely reduces collected photons (a 10% ND on
@@ -6387,12 +6396,14 @@ def plot_source_image(telescope: Telescope,
         if sb is not None:
             # Extended source: exit-pupil-driven surface brightness.
             ann_lines.append(
-                f"Eye view: exposure N/A — surface brightness "
-                f"≈ {sb:.2f}× naked-eye"
+                f"Eye view: exposure N/A — real SB ≈ {sb:.2f}× naked-eye"
             )
             ann_lines.append(
                 f"  (exit pupil {info.get('exit_pupil_mm', EYE_PUPIL_MM):.1f}"
                 f"mm; ∝ (p/{EYE_PUPIL_MM:.0f}mm)², capped)"
+            )
+            ann_lines.append(
+                "  Approx: shown at naked-eye brightness (eye adapts)"
             )
         else:
             # Point-like source: aperture-driven — but a bright star clips at

@@ -715,10 +715,13 @@ class TestPhotometricFidelity:
                          exposure_level=self._EXPOSURE)["image_rgb"])[disk])
         assert d == pytest.approx(e, rel=0.10)
 
-    def test_exit_pupil_moves_surface_brightness_as_the_square(self, _truth):
-        """R5.8b. Surface brightness goes as (p/7mm)^2, so 1mm -> 7mm is
-        49x. The asinh stretch squashed that to 2.56x, which is why the
-        control appeared dead."""
+    def test_exit_pupil_moves_luminance_not_the_picture(self, _truth):
+        """Surface brightness goes as (p/7mm)^2, so 1mm -> 7mm is 49x in
+        real cd/m^2 -- but the Eye view shows the object at naked-eye
+        brightness at every exit pupil, because the observer's eye adapts
+        to the dimmer field. Rendering the 49x literally on a linear screen
+        (R5.8b) left high-power views near black. Reverting puts the 49x
+        back into the display median and fails the first assertion."""
         _, disk, _ = _truth
         ref = None
         for p in (1.0, 3.0, 7.0):
@@ -726,11 +729,15 @@ class TestPhotometricFidelity:
                                 exposure_level=self._EXPOSURE,
                                 exit_pupil_mm=p)
             med = np.percentile(self._lum(info["image_rgb"])[disk], 50)
+            cd = info["object_luminance_cd_m2"]
             if ref is None:
-                ref, sb_ref = med, info["eye_surface_brightness_factor"]
+                ref, cd_ref = med, cd
+                sb_ref = info["eye_surface_brightness_factor"]
                 continue
+            assert med == pytest.approx(ref, rel=0.02), (
+                f"display dimmed by exit pupil at {p} mm")
             expected = info["eye_surface_brightness_factor"] / sb_ref
-            assert med / ref == pytest.approx(expected, rel=0.05)
+            assert cd / cd_ref == pytest.approx(expected, rel=0.02)
 
     def test_detector_brightness_scales_as_aperture_squared(self, _truth):
         """Doubling the aperture must put 4x the light on the screen.

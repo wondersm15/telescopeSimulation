@@ -172,9 +172,10 @@ rather than a display curve.
 - **Extended sources (Moon, Jupiter, Saturn) — gated in cd/m².** Each source
   has a catalogue surface brightness (`surface_brightness_mag_arcsec2()`),
   converted with L = 10.8·10⁴ · 10^(−0.4·S) cd/m². The display-to-cd/m² scale
-  is **measured** in each render: at a naked-eye exit pupil the object's mean
-  display luminance must equal its catalogue luminance, and smaller exit
-  pupils scale it by (p/7 mm)². Values: full Moon 3.35 mag/arcsec² (≈4,900
+  is **measured** in each render: the Eye view displays the object at its
+  naked-eye surface brightness (§7c), so its mean display luminance must
+  equal its catalogue luminance; the real retinal luminance at the chosen
+  exit pupil is that times (p/7 mm)². Values: full Moon 3.35 mag/arcsec² (≈4,900
   cd/m²; Allen, V = −12.74 over 1865″), Jupiter 5.3 (≈800 cd/m²) and the
   Saturn globe 6.7 (≈220 cd/m²) (Mallama & Hilton 2018 V(1,0) at mean
   opposition). The Moon's lit part dims with phase angle α as ΔV = 0.026α +
@@ -248,15 +249,36 @@ photometric".
 - ✅ The sRGB curve is the IEC 61966-2-1 standard, exact and losslessly
   invertible
 - ✅ Verified end-to-end by decoding renders back to luminance: belt/zone
-  contrast, exit-pupil ratio (49.0× vs 49.0× true) and aperture D² (16.01×
-  vs 16.00×) all reproduce at fidelity 1.00
+  contrast and aperture D² (16.01× vs 16.00×) reproduce at fidelity 1.00.
+  (The 49× exit-pupil ratio was also reproduced on screen until
+  2026-10-31; it is now reported in cd/m² instead. See below.)
 - ⚠️ `DISPLAY_USABLE_CONTRAST = 200` is a room-lighting assumption, not a
   measurement of the user's monitor; a dark room supports more
 - ⚠️ Tone-mapped output (γ < 1) is deliberately **not** photometric. Flagged
   on the figure itself, not only in code
 
+**Eye view: extended objects shown at naked-eye surface brightness**
+(2026-10-31). Real surface brightness through a telescope is (p/7 mm)² of
+naked-eye, capped at 1, and that factor is still computed. It sets the
+object's retinal luminance in cd/m², which drives the colour gate (§7b) and
+is printed on the figure. It is **not** applied to the displayed picture.
+Rendered literally on a linear screen, a 1 mm exit pupil is 2 % brightness,
+so high-power views of the Moon and planets came out near black. A real
+observer doesn't see that: their dark-adapted eye adapts to the field, and a
+200× Moon still looks bright. The screen can't make the viewer's eye adapt
+to a dark patch, so the renderer shows the adapted percept directly. Point
+sources are unchanged (aperture-driven, ∝ D²).
+
+- ⚠️ Perceptual display choice, not photometry: brightness differences
+  *between* exit pupils are not shown, only the cd/m² figure and the colour
+  that follows from it. Flagged on the figure ("Approx: shown at naked-eye
+  brightness (eye adapts)")
+- Considered and rejected as over-complicated: a Ward (1994) contrast-based
+  adaptation scale, which would partially restore the dimming
+
 **Real physics**: ✅ Exact at γ = 1 (nearly every module); ⚠️ disclosed
-approximation where the scene physically cannot fit a display
+approximation where the scene physically cannot fit a display; ⚠️ Eye-view
+extended-source brightness is the adapted percept, not radiance
 
 ### 8. Eyepiece: magnification, exit pupil and field of view
 
