@@ -2,6 +2,64 @@
 
 ---
 
+## Single-mode follow-up (2026-10-31), issue 1: mesopic colour gate in cd/m² — FIXED
+
+**620 tests pass** (was 606; +14). Not merged. Both follow-up issues are now closed.
+
+**Problem:** the Eye view's colour gate used display units normalised *per source*
+(1.0 = that object's naked-eye brightness). One threshold therefore meant very different
+real luminances for different objects. Jupiter at a 2 mm exit pupil (≈65 cd/m², photopic)
+rendered grey. The display-unit bleach term also removed about half of every planet's
+colour even at a 7 mm pupil.
+
+**Changes**
+- `colorimetry.py`:
+  - `rec709_luminance()`, a shared helper that replaced 4 copies of the formula.
+  - `mag_arcsec2_to_cd_m2()`, which converts with L = 10.8e4·10^(−0.4S).
+  - Physical constants: `SCOTOPIC_LIMIT_CD_M2` = 0.005 and `PHOTOPIC_LIMIT_CD_M2` = 5
+    (CIE 191); `CONE_HALF_ON_CD_M2` = their geometric mean, 0.16; `CONE_BLEACH_CD_M2` = 1e5
+    (⚠️ order of magnitude).
+  - `mesopic_regime()`.
+  - `apply_mesopic_desaturation(..., luminance_scale_cd_m2=None)`.
+- `sources.py`: `AstronomicalSource.surface_brightness_mag_arcsec2()` returns None by
+  default (stars).
+  - Jupiter (5.3) and the Saturn globe (6.7) are derived by `planet_surface_brightness()`
+    from Mallama & Hilton 2018 V(1,0) at mean opposition.
+  - Moon: 3.35 at full (Allen, V = −12.74 over 1865″), dimming with phase angle by
+    0.026α + 4e-9α⁴.
+- `ray_trace_plot.py`: for an extended source in Eye view, the display→cd/m² scale is
+  **measured** each render. The object's mean display luminance at a naked-eye pupil
+  (pre-filter) is matched to its catalogue luminance.
+  - The gate runs in cd/m².
+  - `info` gains `object_luminance_cd_m2` and `naked_eye_luminance_cd_m2`.
+  - The annotation reads e.g. "Eye: object ≈ 65.4 cd/m² (photopic), CIE 191 colour gate".
+- Stars keep the old display-unit gate, because the tutorial's viewing_modes demo depends
+  on it. The annotation flags it.
+- `PHYSICS.md` §7b rewritten (two calibrations, accuracy flags, resolved note). The table's
+  "photopic = bleaches" row was wrong and is corrected.
+
+**Measured effect** (200 mm f/5, disk chroma = mean |RGB − Y| / Y):
+
+| | 7 mm | 2 mm | 0.5 mm |
+|---|---|---|---|
+| Jupiter old → new | 0.067 → 0.153 | 0.066 → 0.154 | 0.008 → 0.148 |
+| Saturn old → new | 0.091 → 0.220 | 0.100 → 0.219 | 0.013 → 0.195 |
+
+Tutorial Jupiter, Saturn and Moon images now show more colour, as expected. Star scenarios
+are unchanged.
+
+**Verification:** `TestPhotometricMesopicGate` (test_colorimetry) and
+`TestSurfaceBrightness` (test_sources). They cover:
+- naked-eye luminance = catalogue value (±2 %);
+- ∝ (p/7)²;
+- planet colour survives at 0.5 mm and matches the detector at 7 mm;
+- stars get no invented cd/m² scale.
+
+**Revert check:** reverting the renderer wiring fails 5 of them, including both
+colour tests.
+
+---
+
 ## Single-mode follow-up (2026-10-31), issue 2: eyepiece figures re-normalised — FIXED
 
 **606 tests pass** (was 601; +5). Not merged.

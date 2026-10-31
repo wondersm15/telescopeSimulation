@@ -152,7 +152,8 @@ perceive. Human colour vision is **band-pass in luminance**:
 |---|---|---|
 | Scotopic | ≲ 0.005 cd/m² | Rods only — a single receptor class, so **no colour at all** |
 | Mesopic | ~0.005–5 cd/m² | Cones progressively engage; saturation climbs |
-| Photopic (bright) | ≫ 5 cd/m² | Cone pigment bleaches; percept whitens |
+| Photopic | ≳ 5 cd/m² | Full colour (all ordinary daylight scenes) |
+| Glare | ~10⁵ cd/m² and up | Cones overloaded; percept whitens |
 
 Both ends blend a pixel toward its own luminance; only the middle shows full
 chroma. This is why a nebula looks grey in an eyepiece and colourful in a
@@ -166,24 +167,46 @@ differs between the two views: both are drawn through the same display
 transfer function (§7c), so everything else you see between them is physics
 rather than a display curve.
 
+**Two calibrations** (the same curve, different units):
+
+- **Extended sources (Moon, Jupiter, Saturn) — gated in cd/m².** Each source
+  has a catalogue surface brightness (`surface_brightness_mag_arcsec2()`),
+  converted with L = 10.8·10⁴ · 10^(−0.4·S) cd/m². The display-to-cd/m² scale
+  is **measured** in each render: at a naked-eye exit pupil the object's mean
+  display luminance must equal its catalogue luminance, and smaller exit
+  pupils scale it by (p/7 mm)². Values: full Moon 3.35 mag/arcsec² (≈4,900
+  cd/m²; Allen, V = −12.74 over 1865″), Jupiter 5.3 (≈800 cd/m²) and the
+  Saturn globe 6.7 (≈220 cd/m²) (Mallama & Hilton 2018 V(1,0) at mean
+  opposition). The Moon's lit part dims with phase angle α as ΔV = 0.026α +
+  4·10⁻⁹α⁴ (Allen). The cone half-gain sits at the geometric mean of the CIE
+  191 limits (0.16 cd/m²), giving ≈3 % colour at 0.005 cd/m² and ≈97 % at
+  5 cd/m². The figure annotation states the object's luminance and regime.
+- **Star sources — display units.** Stars have no surface brightness, so the
+  original tuned gate (threshold 0.05, bleach 0.5 of display saturation) is
+  kept. The *Viewing Modes* star demo is built on it. Flagged on the figure.
+
 **Accuracy**:
-- ✅ The *shape* is real: the two-sided rod/cone/bleaching structure, and the
-  fact that faint flux is achromatic, are established visual physiology
-- ⚠️ The *calibration* is not derived. The renderer works in normalised
-  display flux (1.0 = saturation level), not cd/m², so the cone threshold
-  (0.05) and bleach level (0.5) are tuned display parameters, and both terms
-  are smooth Michaelis–Menten curves rather than the CIE 191:2010 mesopic
-  interpolation. Flagged in the module docstring and in the module narrative
+- ✅ The *shape* is real: the two-sided rod/cone structure, and the fact that
+  faint light is achromatic, are established visual physiology
+- ✅ Extended sources: the luminance scale and the switch-on thresholds are
+  physical (catalogue photometry + CIE 191:2010)
+- ⚠️ The glare/whitening level for extended sources (10⁵ cd/m²) is an order
+  of magnitude, not fitted. Steady-state half-bleach (~10^4.3 td, Rushton &
+  Henry 1968) does not itself desaturate the percept, because cone gain adapts
+- ⚠️ Saturn's rings get the globe's surface brightness (B ring similar,
+  A/C rings fainter)
+- ⚠️ Stars: thresholds are tuned display parameters, not cd/m²
+- ⚠️ Both terms are smooth Michaelis–Menten curves rather than the CIE
+  191:2010 mesopic interpolation
 
-**Real physics**: ⚠️ Physiologically-motivated perceptual model — ordering and
-limiting behaviour are real, absolute thresholds are tuned
+**Real physics**: ✅ for extended sources (switch-on); ⚠️ glare level and
+the star gate are tuned
 
-**Known consequence (found 2026-10-31, open)**: display flux is normalised *per source*
-(1.0 = that object's naked-eye surface brightness), so the same 0.05 threshold means very
-different real luminances for different objects. Jupiter at a 2 mm exit pupil sits at
-display flux ≈ 0.08 and renders mostly grey. Physically it is ≈ 50 cd/m², photopic, and
-should show colour. Fix direction: a physical surface brightness per source
-(mag/arcsec² → cd/m²), with the gate applied in cd/m².
+**Resolved 2026-10-31** (was: "Jupiter goes grey at a 2 mm exit pupil"). The
+old gate's display units were normalised per source, so one threshold meant
+very different luminances for different objects. Jupiter at 2 mm is ≈65
+cd/m², photopic, and now shows its colour. Its bleach term had also removed
+about half of every planet's colour even at a 7 mm pupil.
 
 #### 7c. Display transfer function (both views)
 

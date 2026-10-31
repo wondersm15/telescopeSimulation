@@ -302,14 +302,79 @@ def band_weights_for_source(centres_nm, rgb_weights,
     return band_w, effective, source_rgb
 
 
+def rec709_luminance(image_rgb):
+    """Relative luminance Y of linear-sRGB pixels (Rec.709 primaries).
+
+    Args:
+        image_rgb: (..., 3) LINEAR RGB. Not valid on sRGB-encoded code values.
+
+    Returns:
+        Array of shape image_rgb.shape[:-1].
+    """
+    image_rgb = np.asarray(image_rgb, dtype=float)
+    return (0.2126 * image_rgb[..., 0]
+            + 0.7152 * image_rgb[..., 1]
+            + 0.0722 * image_rgb[..., 2])
+
+
+# ---------------------------------------------------------------------------
+# Absolute luminance (photometry)
+# ---------------------------------------------------------------------------
+#: Luminance of a surface of 0 V-mag/arcsec², in cd/m². The standard
+#: conversion L = 10.8e4 · 10^(−0.4·S) (e.g. Crumey 2014, MNRAS 442, 2600;
+#: Schaefer 1990, PASP 102, 212). Real physics.
+CD_M2_AT_ZERO_MAG_ARCSEC2 = 10.8e4
+
+
+def mag_arcsec2_to_cd_m2(surface_brightness_mag_arcsec2):
+    """Convert a V-band surface brightness (mag/arcsec²) to luminance (cd/m²).
+
+    Full Moon (≈3.35) → ≈4,900 cd/m²; Jupiter (≈5.3) → ≈800 cd/m².
+    """
+    return CD_M2_AT_ZERO_MAG_ARCSEC2 * 10.0 ** (
+        -0.4 * np.asarray(surface_brightness_mag_arcsec2, dtype=float))
+
+
 # ---------------------------------------------------------------------------
 # Mesopic (rod/cone) colour vision — EYE VIEW ONLY
 # ---------------------------------------------------------------------------
-# Flux below which the cones contribute nothing and vision is rod-only, i.e.
-# achromatic, expressed as a fraction of the display saturation level. Flux
-# above which the cones bleach and the percept whitens, same units.
+# Two calibrations of the same band-pass model (see `mesopic_chroma_gain`).
+#
+# 1. DISPLAY UNITS — used for star sources, which have no surface brightness
+#    to anchor an absolute scale. Flux is a fraction of the display
+#    saturation level. ⚠️ Tuned by eye, not derived from cd/m² — and the
+#    tutorial's "viewing_modes" star demo is built on these values.
 CONE_THRESHOLD_FLUX = 0.05
 CONE_BLEACH_FLUX = 0.5
+
+# 2. ABSOLUTE LUMINANCE (cd/m²) — used for extended sources (Moon, planets),
+#    whose surface brightness is known. Real physics for the switch-on:
+#    CIE 191:2010 puts the mesopic range between the scotopic limit
+#    (0.005 cd/m², rods alone, no colour) and the photopic limit (5 cd/m²,
+#    cones fully in control). Placing the cone half-gain at the geometric
+#    mean of those two limits makes the Michaelis–Menten curve give ≈3 %
+#    chroma at the scotopic limit and ≈97 % at the photopic limit, so the
+#    CIE band maps onto the curve's transition.
+SCOTOPIC_LIMIT_CD_M2 = 0.005
+PHOTOPIC_LIMIT_CD_M2 = 5.0
+CONE_HALF_ON_CD_M2 = float(np.sqrt(SCOTOPIC_LIMIT_CD_M2 * PHOTOPIC_LIMIT_CD_M2))
+#: ⚠️ APPROXIMATION — order of magnitude only. Colour vision is excellent
+#: across ordinary daylight (10²–10⁴ cd/m²; a sunlit landscape and the full
+#: Moon at the eyepiece both sit here), and visible whitening sets in only
+#: toward glare levels. 10⁵ cd/m² keeps every daylight-level scene in full
+#: colour. It is not fitted to a specific bleaching measurement (steady-state
+#: half-bleach, ~10^4.3 td per Rushton & Henry 1968, does NOT itself
+#: desaturate the percept, because cone gain adapts).
+CONE_BLEACH_CD_M2 = 1.0e5
+
+
+def mesopic_regime(luminance_cd_m2: float) -> str:
+    """Name the CIE 191 vision regime for a luminance in cd/m²."""
+    if luminance_cd_m2 < SCOTOPIC_LIMIT_CD_M2:
+        return "scotopic"
+    if luminance_cd_m2 < PHOTOPIC_LIMIT_CD_M2:
+        return "mesopic"
+    return "photopic"
 
 
 def mesopic_chroma_gain(flux,
@@ -333,13 +398,13 @@ def mesopic_chroma_gain(flux,
     Both limits blend the pixel toward its own luminance (neutral grey of the
     same brightness); only the middle of the range shows full chroma.
 
-    ⚠️ APPROXIMATION — the shape is real, the calibration is not. The renderer
-    works in normalised display flux (1.0 = the saturation level), not in
-    cd/m², so the two thresholds are anchored by eye rather than derived from
-    an absolute retinal illuminance. Both terms are smooth Michaelis-Menten
-    saturating curves rather than the CIE mesopic interpolation. Treat the
-    *ordering* of effects as physical and the exact crossover flux as a tuned
-    display parameter.
+    ⚠️ APPROXIMATION — the shape is real; the calibration depends on the
+    caller. `flux` and the two levels just have to be in the same units.
+    With the defaults they are normalised display flux (1.0 = saturation),
+    anchored by eye — what star sources use. Extended sources pass cd/m² and
+    the CIE-derived ``CONE_HALF_ON_CD_M2`` / ``CONE_BLEACH_CD_M2`` instead
+    (see `apply_mesopic_desaturation`). Either way both terms are smooth
+    Michaelis-Menten curves rather than the CIE mesopic interpolation.
 
     Applies to the eye view only. A detector has no cones: a camera records
     the same chromaticity at any flux until the pixel wells clip, so the
@@ -366,7 +431,8 @@ def mesopic_chroma_gain(flux,
 
 def apply_mesopic_desaturation(image_rgb,
                                cone_threshold: float = CONE_THRESHOLD_FLUX,
-                               bleach_level: float = CONE_BLEACH_FLUX):
+                               bleach_level: float = CONE_BLEACH_FLUX,
+                               luminance_scale_cd_m2: float | None = None):
     """Blend an RGB image toward grey where the eye could not see colour.
 
     Thin wrapper over `mesopic_chroma_gain` that computes each pixel's Rec.709
@@ -376,17 +442,24 @@ def apply_mesopic_desaturation(image_rgb,
     Args:
         image_rgb: (H, W, 3) linear RGB, normalised so 1.0 is the display
             saturation level.
-        cone_threshold: See `mesopic_chroma_gain`.
-        bleach_level: See `mesopic_chroma_gain`.
+        cone_threshold: Display-unit threshold, see `mesopic_chroma_gain`.
+            Ignored when ``luminance_scale_cd_m2`` is given.
+        bleach_level: Display-unit bleach level. Ignored likewise.
+        luminance_scale_cd_m2: cd/m² per unit of display luminance. When
+            given, each pixel's luminance is converted to cd/m² and gated by
+            the physical thresholds (``CONE_HALF_ON_CD_M2``,
+            ``CONE_BLEACH_CD_M2``). None keeps the display-unit gate.
 
     Returns:
         A new (H, W, 3) array; the input is not modified.
     """
     image_rgb = np.asarray(image_rgb, dtype=float)
-    lum = (0.2126 * image_rgb[..., 0]
-           + 0.7152 * image_rgb[..., 1]
-           + 0.0722 * image_rgb[..., 2])
-    gain = mesopic_chroma_gain(lum, cone_threshold, bleach_level)
+    lum = rec709_luminance(image_rgb)
+    if luminance_scale_cd_m2 is None:
+        gain = mesopic_chroma_gain(lum, cone_threshold, bleach_level)
+    else:
+        gain = mesopic_chroma_gain(lum * luminance_scale_cd_m2,
+                                   CONE_HALF_ON_CD_M2, CONE_BLEACH_CD_M2)
     return lum[..., None] + gain[..., None] * (image_rgb - lum[..., None])
 
 

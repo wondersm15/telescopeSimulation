@@ -10,7 +10,8 @@ import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 
 from telescope_sim.geometry.eyepiece import DEFAULT_EYE_PUPIL_MM
-from telescope_sim.physics.colorimetry import srgb_encode, srgb_decode
+from telescope_sim.physics.colorimetry import (
+    srgb_encode, srgb_decode, rec709_luminance)
 from telescope_sim.physics.ray import Ray
 from telescope_sim.physics.diffraction import compute_psf, rayleigh_criterion_arcsec
 from telescope_sim.physics.fft_psf import compute_fft_psf
@@ -108,6 +109,20 @@ def resolve_exit_pupil_mm(telescope: Telescope, eyepiece=None,
     if exit_pupil_mm is None:
         return EYE_PUPIL_MM
     return float(exit_pupil_mm)
+
+
+#: A pixel belongs to "the object" when its luminance is at least this
+#: fraction of the frame's peak — excludes dark sky and the faint seeing halo
+#: but keeps limb-darkened edges and Jupiter's darker belts.
+OBJECT_THRESHOLD_FRACTION = 0.10
+
+
+def _object_mean(luminance: np.ndarray) -> float:
+    """Mean luminance over the object's pixels (see OBJECT_THRESHOLD_FRACTION)."""
+    peak = float(luminance.max())
+    if peak <= 0:
+        return 0.0
+    return float(luminance[luminance >= OBJECT_THRESHOLD_FRACTION * peak].mean())
 
 
 def saturated_area_fraction(linear: np.ndarray,
@@ -5383,9 +5398,7 @@ def _render_source_through_telescope(
                 )
 
             # Grayscale from luminance
-            image = (0.2126 * image_rgb[..., 0]
-                     + 0.7152 * image_rgb[..., 1]
-                     + 0.0722 * image_rgb[..., 2])
+            image = rec709_luminance(image_rgb)
 
         else:
             psf = _compute_psf_at_field_angle(
@@ -5596,6 +5609,27 @@ def _render_source_through_telescope(
                     image_rgb[..., c] = gaussian_filter(
                         image_rgb[..., c], sigma=eye_sigma_pix)
 
+    # ── Absolute luminance scale (extended sources, Eye view) ─────────────
+    # The mesopic colour gate is a statement about cd/m² at the retina, but
+    # this renderer works in display units. For a source with a known
+    # surface brightness we can tie the two together by MEASUREMENT rather
+    # than assumption: at a naked-eye exit pupil (surface-brightness factor
+    # 1) the object's mean display luminance must equal its literature mean
+    # surface brightness. Measured here, after seeing and before the filter,
+    # so a filter then genuinely lowers the luminance the eye receives.
+    luminance_scale_cd_m2 = None
+    naked_eye_cd_m2 = None
+    sb_mag = (source.surface_brightness_mag_arcsec2()
+              if is_eye_view and image_rgb is not None else None)
+    if sb_mag is not None:
+        from telescope_sim.physics.colorimetry import mag_arcsec2_to_cd_m2
+        naked_eye_lum = (rec709_luminance(image_rgb) / saturation_divisor
+                         / eye_surface_brightness_factor)
+        naked_eye_cd_m2 = float(mag_arcsec2_to_cd_m2(sb_mag))
+        mean_object_lum = _object_mean(naked_eye_lum)
+        if mean_object_lum > 0:
+            luminance_scale_cd_m2 = naked_eye_cd_m2 / mean_object_lum
+
     # Filter transmission — applied *before* saturation normalisation
     # so the filter genuinely reduces collected photons (a 10% ND on
     # a saturated source recovers detail; a colour filter shifts the
@@ -5645,11 +5679,21 @@ def _render_source_through_telescope(
     # This runs on LINEAR flux, before the transfer function below, which is
     # the only place it is meaningful — the gate is a statement about how
     # many photons reach a cone, not about a code value.
+    #
+    # Extended sources are gated in cd/m² (scale measured above). Star
+    # sources have no surface brightness, so they keep the display-unit gate
+    # — ⚠️ tuned by eye, and the tutorial's viewing_modes star demo depends
+    # on it.
+    object_luminance_cd_m2 = None
     if (display_stretch in ("log", "log_integrated")
             and image_rgb is not None):
         from telescope_sim.physics.colorimetry import (
             apply_mesopic_desaturation)
-        image_rgb = apply_mesopic_desaturation(image_rgb)
+        if luminance_scale_cd_m2 is not None:
+            object_luminance_cd_m2 = luminance_scale_cd_m2 * _object_mean(
+                rec709_luminance(image_rgb))
+        image_rgb = apply_mesopic_desaturation(
+            image_rgb, luminance_scale_cd_m2=luminance_scale_cd_m2)
 
     # ---- Display transfer function (R5.8) ------------------------------
     #
@@ -5703,9 +5747,7 @@ def _render_source_through_telescope(
             # colour toward grey (a 2 % green leak becomes 13 % at
             # γ = 0.575) and collapse the spectral stars the chromatic
             # modules exist to show.
-            lum = (0.2126 * image_rgb[..., 0]
-                   + 0.7152 * image_rgb[..., 1]
-                   + 0.0722 * image_rgb[..., 2])
+            lum = rec709_luminance(image_rgb)
             with np.errstate(divide="ignore", invalid="ignore"):
                 scale = np.where(lum > 1e-9,
                                  np.power(lum, tone_gamma) / lum, 0.0)
@@ -5730,6 +5772,10 @@ def _render_source_through_telescope(
         exposure_applied=(not is_eye_view),
         exit_pupil_mm=exit_pupil_mm,
         eye_surface_brightness_factor=eye_surface_brightness_factor,
+        # Mean luminance of the object as delivered to the eye (cd/m²), and
+        # its naked-eye value; None when no absolute scale is known.
+        object_luminance_cd_m2=object_luminance_cd_m2,
+        naked_eye_luminance_cd_m2=naked_eye_cd_m2,
         # Display-transfer metadata (R5.8). tone_gamma == 1.0 means the
         # render is photometric: screen luminance ∝ simulated radiance.
         # Below 1.0 the scene did not fit the display and was compressed by
@@ -5971,9 +6017,7 @@ def _apply_exit_pupil_washout(image, image_rgb, exit_pupil_mm):
 
         # Pass 2: desaturation — compute luminance from *contrast-reduced*
         # channels so the blend target is consistent with the modified image
-        luminance = (0.2126 * image_rgb[..., 0]
-                     + 0.7152 * image_rgb[..., 1]
-                     + 0.0722 * image_rgb[..., 2])
+        luminance = rec709_luminance(image_rgb)
         for c in range(3):
             image_rgb[..., c] = (luminance
                                  + saturation_factor
@@ -6325,9 +6369,20 @@ def plot_source_image(telescope: Telescope,
         # real contrast by 2.1×. What is left here is the one perceptual
         # effect the screen genuinely cannot supply on its own: at eyepiece
         # light levels the cones are near threshold, so colour desaturates.
-        ann_lines.append(
-            "Eye: cones near threshold — dim areas desaturate (mesopic)"
-        )
+        lum_cd = info.get("object_luminance_cd_m2")
+        if lum_cd is not None:
+            from telescope_sim.physics.colorimetry import mesopic_regime
+            ann_lines.append(
+                f"Eye: object ≈ {lum_cd:,.3g} cd/m² ({mesopic_regime(lum_cd)})"
+                f", CIE 191 colour gate"
+            )
+        else:
+            ann_lines.append(
+                "Eye: cones near threshold — dim areas desaturate (mesopic)"
+            )
+            ann_lines.append(
+                "  Approx: star colour gate in display units, not cd/m²"
+            )
         sb = info.get("eye_surface_brightness_factor")
         if sb is not None:
             # Extended source: exit-pupil-driven surface brightness.

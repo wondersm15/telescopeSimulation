@@ -417,6 +417,123 @@ class TestEyeVersusDetectorColour:
         assert self._ring_sat(rgb, 10) > self._ring_sat(rgb, 20)
 
 
+class TestPhotometricMesopicGate:
+    """Extended sources are colour-gated in cd/m², not display units.
+
+    The display-unit gate meant "1.0 = this object's naked-eye brightness",
+    so the Moon, Jupiter and a faint nebula all hit the same thresholds.
+    Jupiter at a 2 mm exit pupil is ≈65 cd/m² — photopic, full colour — but
+    rendered grey (single-mode follow-up, issue 1).
+    """
+
+    def test_mag_arcsec2_conversion(self):
+        from telescope_sim.physics.colorimetry import mag_arcsec2_to_cd_m2
+        assert mag_arcsec2_to_cd_m2(0.0) == pytest.approx(10.8e4)
+        # 5 magnitudes is exactly a factor of 100.
+        assert mag_arcsec2_to_cd_m2(5.0) == pytest.approx(10.8e4 / 100.0)
+
+    def test_cie_limits_bracket_the_transition(self):
+        """≈3 % colour at the scotopic limit, ≈97 % at the photopic limit."""
+        from telescope_sim.physics.colorimetry import (
+            CONE_BLEACH_CD_M2, CONE_HALF_ON_CD_M2, PHOTOPIC_LIMIT_CD_M2,
+            SCOTOPIC_LIMIT_CD_M2)
+
+        def gain(cd):
+            return mesopic_chroma_gain(cd, CONE_HALF_ON_CD_M2,
+                                       CONE_BLEACH_CD_M2)
+
+        assert gain(SCOTOPIC_LIMIT_CD_M2) < 0.05
+        assert gain(PHOTOPIC_LIMIT_CD_M2) > 0.95
+        # Daylight-level scenes (a sunlit landscape, the full Moon) keep
+        # their colour: bleaching must not bite there.
+        assert gain(5000.0) > 0.9
+
+    def test_regime_names(self):
+        from telescope_sim.physics.colorimetry import mesopic_regime
+        assert mesopic_regime(0.001) == "scotopic"
+        assert mesopic_regime(0.5) == "mesopic"
+        assert mesopic_regime(65.0) == "photopic"
+
+    def test_luminance_scale_switches_to_physical_gate(self):
+        """The same pixel is grey or coloured depending on its cd/m²."""
+        img = np.zeros((1, 1, 3))
+        img[..., 0] = 0.08   # a dim red: lum ≈ 0.017 display units
+        lum = 0.2126 * 0.08
+
+        def chroma(out):
+            return float(out[0, 0, 0] - lum)
+
+        coloured = apply_mesopic_desaturation(img, luminance_scale_cd_m2=1e4)
+        grey = apply_mesopic_desaturation(img, luminance_scale_cd_m2=1e-2)
+        assert chroma(coloured) > 0.9 * (0.08 - lum)
+        assert chroma(grey) < 0.01 * (0.08 - lum)
+
+    @staticmethod
+    def _render(source, exit_pupil_mm, stretch="log"):
+        from telescope_gui.telescope_builder import build_telescope
+        from telescope_sim.plotting.ray_trace_plot import (
+            _render_source_through_telescope)
+        from telescope_sim.physics.colorimetry import (
+            rec709_luminance, srgb_decode)
+        scope = build_telescope(
+            telescope_type="Newtonian", diameter=200.0, focal_length=1000.0,
+            primary_type="parabolic", enable_obstruction=True,
+            obstruction_ratio=0.20, spider_vanes=4)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            _, _, info = _render_source_through_telescope(
+                source, scope, num_pixels=256, seeing_arcsec=2.0,
+                display_stretch=stretch, exit_pupil_mm=exit_pupil_mm)
+        if info["image_rgb"] is None:   # a monochrome star: no colour
+            return info, None
+        lin = srgb_decode(np.asarray(info["image_rgb"], dtype=float))
+        lum = rec709_luminance(lin)
+        disk = lum > 0.1 * lum.max()
+        chroma = (np.abs(lin - lum[..., None]).sum(axis=-1)[disk].mean()
+                  / lum[disk].mean())
+        return info, chroma
+
+    def test_naked_eye_luminance_matches_literature(self):
+        """At a 7 mm exit pupil the object delivers its catalogue surface
+        brightness — the calibration is measured, so this pins it."""
+        from telescope_sim.physics.colorimetry import mag_arcsec2_to_cd_m2
+        from telescope_sim.source.sources import Jupiter
+        jup = Jupiter()
+        info, _ = self._render(jup, 7.0)
+        expected = mag_arcsec2_to_cd_m2(jup.surface_brightness_mag_arcsec2())
+        assert info["object_luminance_cd_m2"] == pytest.approx(expected,
+                                                               rel=0.02)
+
+    def test_luminance_follows_exit_pupil_squared(self):
+        from telescope_sim.source.sources import Jupiter
+        bright, _ = self._render(Jupiter(), 7.0)
+        dim, _ = self._render(Jupiter(), 2.0)
+        ratio = dim["object_luminance_cd_m2"] / bright["object_luminance_cd_m2"]
+        assert ratio == pytest.approx((2.0 / 7.0) ** 2, rel=0.02)
+
+    @pytest.mark.parametrize("source_name", ["Jupiter", "Saturn"])
+    def test_planet_keeps_its_colour_at_high_power(self, source_name):
+        """Jupiter at 0.5 mm is ≈4 cd/m², Saturn ≈1 cd/m² — still near the
+        photopic end, so most colour survives. The display-unit gate kept
+        only ~12 % of the 7 mm colour here, and stripped half even at 7 mm."""
+        from telescope_sim.source import sources
+        src = getattr(sources, source_name)()
+        _, low_power = self._render(src, 7.0)
+        _, high_power = self._render(src, 0.5)
+        _, detector = self._render(src, 7.0, stretch="linear")
+        assert high_power > 0.85 * low_power
+        # In the photopic range the eye sees the colour a camera records.
+        assert low_power > 0.9 * detector
+
+    def test_star_sources_keep_the_display_unit_gate(self):
+        """Stars have no surface brightness → no cd/m² scale is invented."""
+        from telescope_sim.source.sources import PointSource
+        info, chroma = self._render(
+            PointSource(magnitude=0.0, temperature_k=4300.0), 7.0)
+        assert chroma is not None   # coloured, so the gate really ran
+        assert info["object_luminance_cd_m2"] is None
+
+
 class TestSRGBTransferFunction:
     """R5.8: the encode that cancels the monitor's own ~2.2 decode.
 

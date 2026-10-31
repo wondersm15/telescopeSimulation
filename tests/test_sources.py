@@ -438,6 +438,40 @@ class TestMoon:
         assert isinstance(self.source, AstronomicalSource)
 
 
+class TestSurfaceBrightness:
+    """Catalogue surface brightnesses anchor the Eye view to cd/m²."""
+
+    def test_planet_values_match_literature(self):
+        # Commonly quoted mean values: Jupiter ≈ 5.4, Saturn globe ≈ 6.7–6.9.
+        assert Jupiter().surface_brightness_mag_arcsec2() == pytest.approx(
+            5.3, abs=0.15)
+        assert Saturn().surface_brightness_mag_arcsec2() == pytest.approx(
+            6.75, abs=0.2)
+
+    def test_planet_value_is_distance_independent(self):
+        """Flux and disk area both fall as 1/Δ²."""
+        from telescope_sim.source.sources import planet_surface_brightness
+        near = planet_surface_brightness(-9.395, 5.2, 3.95, 71492.0, 0.065)
+        far = planet_surface_brightness(-9.395, 5.2, 6.2, 71492.0, 0.065)
+        assert near == pytest.approx(far, abs=0.2)
+
+    def test_full_moon(self):
+        assert Moon(phase=1.0).surface_brightness_mag_arcsec2() == \
+            pytest.approx(3.35, abs=0.05)
+
+    def test_moon_lit_part_dims_away_from_full(self):
+        """Opposition surge / rough-surface backscatter: the quarter Moon's
+        lit half is ≈1.9 mag/arcsec² fainter than the full Moon."""
+        full = Moon(phase=1.0).surface_brightness_mag_arcsec2()
+        quarter = Moon(phase=0.5).surface_brightness_mag_arcsec2()
+        crescent = Moon(phase=0.1).surface_brightness_mag_arcsec2()
+        assert quarter - full == pytest.approx(1.85, abs=0.1)
+        assert crescent > quarter
+
+    def test_stars_have_none(self):
+        assert PointSource().surface_brightness_mag_arcsec2() is None
+
+
 class TestAdaptiveResolution:
     """Tests for adaptive resolution cap and eyepiece integration."""
 

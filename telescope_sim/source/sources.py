@@ -121,8 +121,49 @@ def _project_globe(half_fov_arcsec: float, num_pixels: int,
             "lat": lat, "lon": lon, "illuminated": illuminated, "mu": mu}
 
 
+# ---------------------------------------------------------------------------
+# Surface brightness (mag/arcsec²) — anchors the Eye view's colour gate to cd/m²
+# ---------------------------------------------------------------------------
+_KM_PER_AU = 1.495978707e8
+_ARCSEC_PER_RAD = 206264.806
+
+
+def planet_surface_brightness(v_1_0: float, r_au: float, delta_au: float,
+                              equatorial_radius_km: float,
+                              flattening: float) -> float:
+    """Mean V surface brightness of a planet's disk, in mag/arcsec².
+
+    Surface brightness is total magnitude spread over the disk's solid
+    angle: S = V + 2.5·log10(area in arcsec²). For a planet seen near
+    opposition it does not depend on distance (both the flux and the area
+    fall as 1/Δ²), so evaluating it at mean opposition gives the value for
+    any distance. Real physics; phase-angle effects (a few % for the outer
+    planets) are ignored.
+
+    Args:
+        v_1_0: Absolute magnitude V(1,0) at 1 AU from Sun and Earth.
+        r_au, delta_au: Sun and Earth distances at which to evaluate.
+        equatorial_radius_km: Planet equatorial radius.
+        flattening: (a − b) / a, for the elliptical disk area.
+    """
+    v_mag = v_1_0 + 5.0 * np.log10(r_au * delta_au)
+    a_arcsec = equatorial_radius_km / (delta_au * _KM_PER_AU) * _ARCSEC_PER_RAD
+    area_arcsec2 = np.pi * a_arcsec * a_arcsec * (1.0 - flattening)
+    return float(v_mag + 2.5 * np.log10(area_arcsec2))
+
+
 class AstronomicalSource(ABC):
     """Base class for astronomical sources."""
+
+    def surface_brightness_mag_arcsec2(self) -> float | None:
+        """Mean V surface brightness of the lit disk at naked-eye viewing.
+
+        Extended sources override this so the Eye view can work in real
+        luminance (cd/m²). None (the default, and every star source) means
+        "no absolute scale known" — the colour gate then falls back to
+        display units.
+        """
+        return None
 
     @abstractmethod
     def render_ideal(self, half_fov_arcsec: float,
@@ -783,6 +824,15 @@ class Jupiter(AstronomicalSource):
     _OBLATENESS = 0.065
     _DEFAULT_SUB_OBS_LON = -60.0
 
+    #: V(1,0) = −9.395 (Mallama & Hilton 2018, Astron. Comput. 25, 10),
+    #: equatorial radius 71,492 km, evaluated at mean opposition (5.20 AU from
+    #: the Sun, 4.20 AU from Earth: V ≈ −2.70, 46.9″). ≈ 5.3 mag/arcsec².
+    _SURFACE_BRIGHTNESS = planet_surface_brightness(
+        -9.395, 5.20, 4.20, 71492.0, _OBLATENESS)
+
+    def surface_brightness_mag_arcsec2(self) -> float:
+        return self._SURFACE_BRIGHTNESS
+
     def render_ideal_rgb(self, half_fov_arcsec: float,
                          num_pixels: int) -> np.ndarray:
         """RGB Jupiter from the bundled REAL cylindrical map.
@@ -867,6 +917,17 @@ class Saturn(AstronomicalSource):
         self.angular_diameter_arcsec = angular_diameter_arcsec
         self.ring_tilt_deg = ring_tilt_deg
         self.use_realtime = use_realtime
+
+    #: Globe only: V(1,0) = −8.914 is the ring-free term of Mallama & Hilton
+    #: 2018, equatorial radius 60,268 km, flattening 0.098, at mean
+    #: opposition (9.54 / 8.54 AU: V ≈ +0.64, 19.5″). ≈ 6.7 mag/arcsec².
+    #: ⚠️ APPROXIMATION: the rings get the globe's value. The B ring is of
+    #: similar brightness, but the A and C rings are fainter.
+    _SURFACE_BRIGHTNESS = planet_surface_brightness(
+        -8.914, 9.54, 8.54, 60268.0, 0.098)
+
+    def surface_brightness_mag_arcsec2(self) -> float:
+        return self._SURFACE_BRIGHTNESS
 
     def _build_geometry(self, half_fov_arcsec, num_pixels):
         """Compute shared coordinate grids and geometry parameters."""
@@ -1163,6 +1224,28 @@ class Moon(AstronomicalSource):
         self.phase = np.clip(phase, 0.0, 1.0)
         self.sub_observer_lon_deg = sub_observer_lon_deg
         self.use_realtime = use_realtime
+
+    #: Full Moon: V = −12.74 over a mean 1865″ disk (Allen's Astrophysical
+    #: Quantities, 4th ed.) → ≈ 3.35 mag/arcsec².
+    _FULL_MOON_V = -12.74
+    _MEAN_DIAMETER_ARCSEC = 1865.0
+
+    def surface_brightness_mag_arcsec2(self) -> float:
+        """Mean surface brightness of the LIT part of the disk at this phase.
+
+        Total brightness fades with phase angle α faster than the lit area
+        shrinks (the lunar surface is rough and back-scatters strongly), so
+        the lit part itself gets dimmer away from full:
+        ΔV(α) = 0.026·|α| + 4.0e-9·α⁴ (Allen), with α from the illuminated
+        fraction k = (1 + cos α) / 2, and lit area ∝ k. A quarter Moon's lit
+        half is ≈ 1.9 mag/arcsec² fainter than the full Moon. Real physics.
+        """
+        disk_area = np.pi * (self._MEAN_DIAMETER_ARCSEC / 2.0) ** 2
+        s_full = self._FULL_MOON_V + 2.5 * np.log10(disk_area)
+        k = float(max(self.phase, 1e-3))
+        alpha = np.degrees(np.arccos(np.clip(2.0 * k - 1.0, -1.0, 1.0)))
+        delta_v = 0.026 * alpha + 4.0e-9 * alpha ** 4
+        return float(s_full + delta_v + 2.5 * np.log10(k))
 
     @classmethod
     def _load_texture(cls):
