@@ -1307,3 +1307,16 @@ combo, checkbox and slider on all **18** scenarios:
   look at. There is still no `tests/test_design_tab.py`.
 - `_WASHOUT_LOCAL_SCALE = 0.04` is **empirical**, flagged in code and in PHYSICS.md.
 - Eye relief, eyepiece aberrations and field-stop vignetting are **not modelled**.
+
+### Post-Round-5: single-mode review (2026-10-31)
+
+- **Washed-out Jupiter (Design + Comparison tabs): FIXED.** Root cause: library defaults
+  (Detector view, exposure 1.0) clip anything over 100 mm, and those tabs had no controls.
+  The controls are now shared via `telescope_gui/widgets/display_controls.py`, with Eye
+  view as default, an on-figure SATURATED warning, and the eyepiece driving the
+  surface-brightness exit pupil. `tests/test_design_tab.py` added (23 tests, checked by
+  revert). Details in IMPLEMENTATION_LOG.md.
+- **Single-mode sweep debt: paid** for the standardized / true-size / eyepiece views.
+- **Open (needs user decision):** (a) mesopic thresholds use per-source normalised units,
+  which greys out Jupiter at a 2 mm exit pupil; (b) the eyepiece true-size and
+  eyepiece-view figures re-normalise and lose the Eye-view dimming.

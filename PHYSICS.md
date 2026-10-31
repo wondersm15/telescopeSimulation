@@ -178,6 +178,13 @@ rather than a display curve.
 **Real physics**: ⚠️ Physiologically-motivated perceptual model — ordering and
 limiting behaviour are real, absolute thresholds are tuned
 
+**Known consequence (found 2026-10-31, open)**: display flux is normalised *per source*
+(1.0 = that object's naked-eye surface brightness), so the same 0.05 threshold means very
+different real luminances for different objects. Jupiter at a 2 mm exit pupil sits at
+display flux ≈ 0.08 and renders mostly grey. Physically it is ≈ 50 cd/m², photopic, and
+should show colour. Fix direction: a physical surface brightness per source
+(mag/arcsec² → cd/m²), with the gate applied in cd/m².
+
 #### 7c. Display transfer function (both views)
 
 **Location**: `colorimetry.srgb_encode` / `srgb_decode` / `tone_map_gamma`,

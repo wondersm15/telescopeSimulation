@@ -13,7 +13,10 @@ import matplotlib.pyplot as plt
 
 from telescope_gui.widgets.matplotlib_canvas import MatplotlibCanvas
 from telescope_gui.widgets.telescope_controls import TelescopeControlPanel
-from telescope_gui.widgets.source_controls import get_source, get_seeing
+from telescope_gui.widgets.source_controls import (
+    get_source, get_seeing, is_extended_source,
+)
+from telescope_gui.widgets.display_controls import ImageDisplayControls
 from telescope_gui.telescope_builder import build_telescope
 from telescope_sim.plotting import plot_source_image
 
@@ -71,6 +74,18 @@ class ImagesTab(QWidget):
         self.seeing_combo.setCurrentText("Good")
         t1_layout.addWidget(self.seeing_combo)
 
+        # One set of display controls for BOTH panels: a comparison is only
+        # honest when both telescopes are viewed the same way. Same widgets
+        # (same code) as the Design and Tutorial tabs.
+        display_header = QLabel("Display (both panels)")
+        display_header.setStyleSheet("font-weight: bold; padding-top: 6px;")
+        t1_layout.addWidget(display_header)
+        self.display_controls = ImageDisplayControls()
+        t1_layout.addWidget(self.display_controls)
+        self.source_combo.currentIndexChanged.connect(
+            self.sync_display_context)
+        self.sync_display_context()
+
         self.update_button = QPushButton("Update Comparison")
         self.update_button.clicked.connect(self.update_view)
         t1_layout.addWidget(self.update_button)
@@ -120,6 +135,14 @@ class ImagesTab(QWidget):
         # Initial render
         self.update_view()
 
+    def sync_display_context(self, *_):
+        """Disable the exit-pupil choice for star sources (not used there)."""
+        self.display_controls.set_context(
+            is_extended_source=is_extended_source(
+                self.source_combo.currentText()),
+            eyepiece_exit_pupil_mm=None,
+        )
+
     def update_view(self):
         """Update simulated images comparison."""
         try:
@@ -135,7 +158,8 @@ class ImagesTab(QWidget):
                 result = plot_source_image(
                     telescope,
                     source,
-                    seeing_arcsec=seeing
+                    seeing_arcsec=seeing,
+                    **self.display_controls.plot_kwargs(),
                 )
 
                 if isinstance(result, list):

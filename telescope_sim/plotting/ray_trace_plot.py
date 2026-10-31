@@ -80,6 +80,59 @@ SATURATION_LEVEL = 1.0
 # physics the rest of the program uses (R5.9/S1).
 EYE_PUPIL_MM = DEFAULT_EYE_PUPIL_MM
 
+# An extended object whose clipped area exceeds this fraction gets a visible
+# SATURATED warning on the figure. 1 % ignores a handful of specular pixels
+# at the brightest limb while still catching any exposure that whites out a
+# real fraction of the disk.
+SATURATION_WARNING_FRACTION = 0.01
+
+
+def resolve_exit_pupil_mm(telescope: Telescope, eyepiece=None,
+                          exit_pupil_mm: float | None = None) -> float:
+    """Return the observing exit pupil (mm) the Eye-view model should use.
+
+    With a real eyepiece the exit pupil is DERIVED, not chosen: it is
+    D / magnification, so an independently chosen value could describe a
+    pair no telescope can produce (a 25 mm eyepiece on a 200 mm f/5 cannot
+    give a 0.5 mm pupil). The eyepiece therefore always wins. Without one,
+    the caller's choice is used, falling back to the dark-adapted eye pupil
+    (naked-eye surface brightness) when nothing was chosen.
+
+    Every front end (Tutorial, Design, Comparison, main.py) resolves the
+    exit pupil through this one function, so the Eye view cannot mean
+    different things in different tabs.
+    """
+    if eyepiece is not None:
+        return eyepiece.exit_pupil_mm(telescope.primary_diameter,
+                                      telescope.focal_length)
+    if exit_pupil_mm is None:
+        return EYE_PUPIL_MM
+    return float(exit_pupil_mm)
+
+
+def saturated_area_fraction(linear: np.ndarray,
+                            object_threshold: float = 0.05) -> float:
+    """Fraction of an object's area that is driven past saturation.
+
+    Args:
+        linear: Normalised LINEAR image (1.0 = saturation), before clipping.
+            Greyscale (H, W) or RGB (H, W, 3); for RGB a pixel counts as
+            clipped when ANY channel reaches 1.0, because one clipped channel
+            already shifts the hue and erases detail.
+        object_threshold: A pixel belongs to the object when it is at least
+            this fraction of the frame's brightest pixel. Relative, so the
+            measure does not depend on exposure.
+
+    Returns:
+        Clipped object pixels / object pixels, in [0, 1] (0 for a blank frame).
+    """
+    peak_map = linear.max(axis=-1) if linear.ndim == 3 else linear
+    peak = float(peak_map.max())
+    if peak <= 0.0:
+        return 0.0
+    on_object = peak_map >= object_threshold * peak
+    return float(np.mean(peak_map[on_object] >= SATURATION_LEVEL))
+
 
 def _draw_ray_trace(ax: plt.Axes, rays: list[Ray], components: dict,
                     title: str = "Newtonian Telescope Ray Trace",
@@ -5566,6 +5619,18 @@ def _render_source_through_telescope(
     if image_rgb is not None:
         image_rgb = image_rgb / saturation_divisor
 
+    # How much of an extended object the final clip is about to whiten.
+    # Measured here, on linear flux after every brightness factor (exposure,
+    # filter, exit pupil) and before the clip that destroys the information.
+    # Extended sources only: on a star field a clipped core is the expected
+    # behaviour that the dynamic-range lessons teach, but on a planet or the
+    # Moon it means surface detail is gone, and nothing on the old figure
+    # said so — a 200 mm Jupiter rendered 67 % white without comment.
+    saturated_fraction = None
+    if is_extended_source:
+        saturated_fraction = saturated_area_fraction(
+            image_rgb if image_rgb is not None else image)
+
     # Mesopic desaturation (Eye-view modes only). Human colour vision is
     # band-pass in luminance: rods alone below the cone threshold (no colour
     # at all), full chroma through the mesopic/photopic range, then bleaching
@@ -5672,6 +5737,8 @@ def _render_source_through_telescope(
         scene_contrast=scene_contrast,
         tone_gamma=tone_gamma,
         display_usable_contrast=DISPLAY_USABLE_CONTRAST,
+        # None for star sources; see the measurement above the clip.
+        saturated_fraction=saturated_fraction,
     )
     return image, half_fov_arcsec, info
 
@@ -5928,6 +5995,42 @@ _ANNOTATION_WIDTH = 62
 _TITLE_WIDTH = 42
 
 
+def _saturation_warning_text(info: dict) -> str | None:
+    """One-line SATURATED warning for a render, or None when it isn't.
+
+    Only extended objects carry a measured `saturated_fraction` (see
+    `_render_source_through_telescope`). The remedy offered depends on the
+    view, because exposure is a detector concept: in the Eye view the only
+    knobs that lower brightness are a filter or a smaller exit pupil.
+    """
+    frac = info.get("saturated_fraction")
+    if frac is None or frac < SATURATION_WARNING_FRACTION:
+        return None
+    if info.get("is_eye_view"):
+        remedy = "add an ND filter or use a smaller exit pupil"
+    else:
+        remedy = "lower Exposure, add an ND filter, or use Eye view"
+    return f"\u26a0 SATURATED: {frac:.0%} of the object clipped to white \u2014 {remedy}"
+
+
+def _draw_saturation_warning(ax: plt.Axes, info: dict) -> None:
+    """Draw the saturation warning along the bottom of `ax`, if any.
+
+    A separate red box rather than another line in the grey annotation: the
+    whole problem it reports is that a white-clipped disk looked like a
+    plausible (if bright) planet, so the warning has to be impossible to miss.
+    """
+    text = _saturation_warning_text(info)
+    if text is None:
+        return
+    lines = [text]
+    txt = ax.text(0.5, 0.02, _wrap_annotation(lines), transform=ax.transAxes,
+                  fontsize=7, ha="center", va="bottom", color="white",
+                  bbox=dict(boxstyle="round,pad=0.3", facecolor="#b00020",
+                            alpha=0.85))
+    _fit_annotation_to_axes(txt, ax, lines)
+
+
 def _wrap_annotation(lines: list[str], width: int = _ANNOTATION_WIDTH) -> str:
     """Wrap annotation lines to `width` chars, preserving the indent style.
 
@@ -6044,7 +6147,7 @@ def plot_source_image(telescope: Telescope,
                       focus_wavelength_nm: float = 550.0,
                       exposure_level: float = 1.0,
                       filter_name: str = "None",
-                      exit_pupil_mm: float = EYE_PUPIL_MM,
+                      exit_pupil_mm: float | None = None,
                       apply_aperture_diffraction: bool = True,
                       ) -> plt.Figure | list[plt.Figure]:
     """Plot a simulated image of an astronomical source through the telescope.
@@ -6070,6 +6173,14 @@ def plot_source_image(telescope: Telescope,
         eyepiece: An Eyepiece instance for visual observing simulation.
             When provided, crops/pads the image to the eyepiece's true FOV
             and produces a second "true angular size" figure.
+        display_stretch: "linear" = Detector view (exposure applies);
+            "log" = Eye view (exit pupil sets an extended object's surface
+            brightness); "log_integrated" = Eye + 1″ spatial integration.
+        exposure_level: Detector-view exposure (1.0 = a mag-0 star through
+            100 mm just below saturation). Ignored in the Eye views.
+        exit_pupil_mm: Observing exit pupil for the Eye view. Ignored when an
+            eyepiece is given (the eyepiece determines it); None means the
+            dark-adapted eye pupil. See `resolve_exit_pupil_mm`.
 
     Returns:
         A single Figure (no eyepiece) or a list of Figures (with eyepiece).
@@ -6113,6 +6224,13 @@ def plot_source_image(telescope: Telescope,
     )
     _is_star_source = isinstance(source, (_PointSrc, _StarFld, _DblStar))
 
+    # One exit pupil for both the Eye-view surface brightness and the
+    # eyepiece washout below. They used to be read from two places — the
+    # argument and the eyepiece — so the Design tab, which passed an eyepiece
+    # but no exit pupil, dimmed for a 7 mm pupil while washing out for a 1 mm
+    # one: two different observers in one figure.
+    exit_pupil_mm = resolve_exit_pupil_mm(telescope, eyepiece, exit_pupil_mm)
+
     # Cap: Moon texture is 2048x1024, so ~2048 useful max; 4096 hard ceiling
     max_cap = 4096
     if hasattr(source, '_load_texture'):
@@ -6154,10 +6272,8 @@ def plot_source_image(telescope: Telescope,
     washout_strength = 0.0
     _is_extended = info["source_type"] not in ("PointSource", "StarField")
     if eyepiece is not None and _is_extended:
-        _exit_pupil = eyepiece.exit_pupil_mm(
-            telescope.primary_diameter, telescope.focal_length)
         image, image_rgb, washout_strength = _apply_exit_pupil_washout(
-            image, image_rgb, _exit_pupil)
+            image, image_rgb, exit_pupil_mm)
 
     # ── Build title and annotations ──────────────────────────────────
     if title is None:
@@ -6348,6 +6464,7 @@ def plot_source_image(telescope: Telescope,
                                 alpha=0.6),
                       color="white")
     _fit_annotation_to_axes(ann_txt, ax, ann_lines)
+    _draw_saturation_warning(ax, info)
 
     # NOTE: Obstruction overlay removed — the secondary obstruction effect
     # is already correctly modeled in the PSF computation. Drawing a black
@@ -6464,6 +6581,7 @@ def plot_source_image(telescope: Telescope,
                                   alpha=0.6),
                         color="white")
     _fit_annotation_to_axes(true_txt, ax2, true_ann)
+    _draw_saturation_warning(ax2, info)
 
     plt.tight_layout()
     figures.append(fig2)
@@ -6532,6 +6650,7 @@ def plot_source_image(telescope: Telescope,
                                     facecolor="black", alpha=0.6),
                           color="white")
         _fit_annotation_to_axes(ev_txt, ax3, ev_ann)
+        _draw_saturation_warning(ax3, info)
 
         plt.tight_layout()
         figures.append(fig3)

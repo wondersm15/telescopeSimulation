@@ -37,6 +37,11 @@ from telescope_gui.tutorial_mode.widgets.theory_readout import TheoryReadoutPane
 from telescope_gui.tutorial_mode.widgets.terminal_panel import TerminalPanel
 from telescope_gui.tutorial_mode.widgets.effect_toggles import EffectTogglesPanel
 from telescope_gui.tutorial_mode.widgets.source_code_panel import SourceCodePanel
+from telescope_gui.widgets.display_controls import (
+    caption_label, exposure_column, exposure_to_slider, is_eye_view,
+    make_exit_pupil_combo, make_exposure_slider, make_filter_combo,
+    make_view_combo, slider_to_exposure, sync_exposure_enabled,
+)
 
 # Source-level imports for the source code viewer
 from telescope_sim.plotting.ray_trace_plot import (
@@ -744,39 +749,18 @@ class TutorialTab(QWidget):
         one physically-correct transfer function, and what separates them is
         the physics above.
         """
-        col = QVBoxLayout()
-        lbl = QLabel("View")
-        lbl.setStyleSheet("font-size: 8pt; font-weight: normal; color: #555;")
-        combo = QComboBox()
-        # The data values ("linear"/"log"/"log_integrated") are historical
-        # API strings kept so every scenario definition does not have to
-        # change; they no longer name a display curve (R5.8).
-        combo.addItem("Detector (CCD)", "linear")
-        combo.addItem("Eye (visual)", "log")
-        combo.addItem("Eye + integration (1″ blur)", "log_integrated")
         # Default per-scenario: "log" (Eye) for most; "linear" (Detector)
         # for exposure / saturation lessons where the exposure slider and
         # saturation clipping need to be live. Eye view ignores exposure.
-        _default_idx = combo.findData(default_stretch)
-        combo.setCurrentIndex(_default_idx if _default_idx >= 0 else 1)
-        combo.setToolTip(
-            "Both views are rendered so that screen brightness is\n"
-            "proportional to simulated light; what differs is the\n"
-            "instrument, not the display curve.\n\n"
-            "Detector: you choose the exposure, and silicon records the\n"
-            "  same colour at any light level.\n"
-            "Eye: no exposure control (~0.1s fixed); brightness is set by\n"
-            "  the exit pupil, and colour fades where the cones fall\n"
-            "  below threshold.\n"
-            "Eye + integration: Eye plus 1″ spatial integration (eye's\n"
-            "  ~1″ resolution at moderate eyepiece magnification —\n"
-            "  chromatic-disk light mixes into the perceived core)."
-        )
+        # Built by the shared factory so the Design and Comparison tabs
+        # offer exactly the same views (telescope_gui/widgets/display_controls).
+        col = QVBoxLayout()
+        combo = make_view_combo(default_stretch)
         combo.currentIndexChanged.connect(self._on_update_clicked)
         # Keep the exposure slider's enabled state in sync with the view:
         # exposure is a detector concept, so it's greyed out in Eye view.
         combo.currentIndexChanged.connect(self._sync_exposure_enabled)
-        col.addWidget(lbl)
+        col.addWidget(caption_label("View"))
         col.addWidget(combo)
         self.controls_layout.addLayout(col)
         self._display_stretch_combo = combo
@@ -801,35 +785,14 @@ class TutorialTab(QWidget):
         else:
             stretch = (self._display_stretch_combo.currentData()
                        if self._display_stretch_combo is not None else "linear")
-            is_eye = stretch in ("log", "log_integrated")
-        self._exposure_slider.setEnabled(not is_eye)
-        if self._exposure_value_label is not None:
-            if is_eye:
-                self._exposure_value_label.setText("N/A (Eye)")
-                self._exposure_value_label.setStyleSheet(
-                    "font-size: 8pt; font-weight: bold; color: #999;")
-            else:
-                self._exposure_value_label.setText(
-                    f"{self._slider_to_exposure(self._exposure_slider.value()):.2f}×")
-                self._exposure_value_label.setStyleSheet(
-                    "font-size: 8pt; font-weight: bold; color: #333;")
+            is_eye = is_eye_view(stretch)
+        sync_exposure_enabled(self._exposure_slider,
+                              self._exposure_value_label, is_eye)
 
-    # Exposure slider — log-scaled, internal range 0..200 maps to
-    # 10^((slider-100)/50) = 0.01× → 1× → 100×. Default position 100
-    # is overridden by ScenarioDefinition.default_exposure.
-    _EXPOSURE_SLIDER_MIN = 0
-    _EXPOSURE_SLIDER_MAX = 200
-    _EXPOSURE_SLIDER_CENTER = 100
-
-    @classmethod
-    def _slider_to_exposure(cls, pos: int) -> float:
-        return 10.0 ** ((pos - cls._EXPOSURE_SLIDER_CENTER) / 50.0)
-
-    @classmethod
-    def _exposure_to_slider(cls, exposure: float) -> int:
-        import math
-        return int(round(cls._EXPOSURE_SLIDER_CENTER
-                          + 50.0 * math.log10(max(exposure, 1e-9))))
+    # Exposure slider mapping lives in display_controls (shared with the
+    # Design and Comparison tabs); kept as static aliases for callers here.
+    _slider_to_exposure = staticmethod(slider_to_exposure)
+    _exposure_to_slider = staticmethod(exposure_to_slider)
 
     def _add_exposure_slider(self, default_exposure: float):
         """Exposure-level slider for source-image scenarios.
@@ -840,43 +803,9 @@ class TutorialTab(QWidget):
         whatever exposure makes their lesson read clearly without
         forcing the user to fiddle.
         """
-        col = QVBoxLayout()
-        header = QHBoxLayout()
-        lbl = QLabel("Exposure")
-        lbl.setStyleSheet(
-            "font-size: 8pt; font-weight: normal; color: #555;")
-        value_lbl = QLabel(f"{default_exposure:.2f}×")
-        value_lbl.setStyleSheet(
-            "font-size: 8pt; font-weight: bold; color: #333;")
-        header.addWidget(lbl)
-        header.addStretch()
-        header.addWidget(value_lbl)
-        col.addLayout(header)
-
-        slider = QSlider(Qt.Orientation.Horizontal)
-        slider.setMinimum(self._EXPOSURE_SLIDER_MIN)
-        slider.setMaximum(self._EXPOSURE_SLIDER_MAX)
-        slider.setValue(self._exposure_to_slider(default_exposure))
-        slider.setToolTip(
-            "Collected flux ∝ exposure. Higher = brighter image.\n"
-            "1.0× is the photometric anchor (mag-0 star, 100 mm,\n"
-            "no seeing → just-below-saturation). Bright sources or\n"
-            "large apertures will saturate at lower exposure; faint\n"
-            "sources need higher exposure to lift above the noise.\n"
-            "Range: 0.01× to 100×, log-scaled."
-        )
-
-        def _on_change(v):
-            value_lbl.setText(f"{self._slider_to_exposure(v):.2f}×")
-
-        def _on_release():
-            self._on_update_clicked()
-
-        slider.valueChanged.connect(_on_change)
-        slider.sliderReleased.connect(_on_release)
-
-        col.addWidget(slider)
-        self.controls_layout.addLayout(col)
+        slider, value_lbl = make_exposure_slider(default_exposure)
+        slider.sliderReleased.connect(self._on_update_clicked)
+        self.controls_layout.addLayout(exposure_column(slider, value_lbl))
         self._exposure_slider = slider
         self._exposure_value_label = value_lbl
 
@@ -919,44 +848,13 @@ class TutorialTab(QWidget):
         physically reduce photons and shift colour balance, exactly
         like a real eyepiece filter.
         """
-        from telescope_sim.physics.filters import FILTER_LIBRARY
         col = QVBoxLayout()
-        lbl = QLabel("Filter")
-        lbl.setStyleSheet(
-            "font-size: 8pt; font-weight: normal; color: #555;")
-        combo = QComboBox()
-        for flt in FILTER_LIBRARY:
-            combo.addItem(flt.name, flt.name)
-            combo.setItemData(combo.count() - 1, flt.description,
-                              Qt.ItemDataRole.ToolTipRole)
-        idx = combo.findData(default_filter)
-        if idx >= 0:
-            combo.setCurrentIndex(idx)
-        combo.setToolTip(
-            "Optical filter applied before the detector. ND = neutral\n"
-            "density (uniform dimming). W = Wratten colour filters that\n"
-            "shift the RGB balance — useful for revealing low-contrast\n"
-            "planetary features (a light-blue W80A darkens Jupiter's\n"
-            "blue-absorbing belts and Red Spot against the bright zones;\n"
-            "a red W25 mostly cuts haze and gives a uniform red disk)."
-        )
+        combo = make_filter_combo(default_filter)
         combo.currentIndexChanged.connect(self._on_update_clicked)
-        col.addWidget(lbl)
+        col.addWidget(caption_label("Filter"))
         col.addWidget(combo)
         self.controls_layout.addLayout(col)
         self._filter_combo = combo
-
-    # Exit-pupil options (mm) for the Eye-view surface-brightness model.
-    # Each maps to a representative observing magnification regime. The
-    # surface-brightness factor (exit_pupil / 7 mm)² is shown so the user
-    # sees how much dimmer-than-naked-eye each choice is.
-    _EXIT_PUPIL_OPTIONS = [
-        (7.0, "7.0 mm — max (naked-eye SB)"),
-        (4.0, "4.0 mm — low power"),
-        (2.0, "2.0 mm — planetary"),
-        (1.0, "1.0 mm — high power"),
-        (0.5, "0.5 mm — very high power"),
-    ]
 
     def _add_exit_pupil_combo(self, default_exit_pupil_mm: float):
         """Exit-pupil dropdown driving the Eye-view extended-source brightness.
@@ -970,24 +868,9 @@ class TutorialTab(QWidget):
         (point sources are aperture-driven, magnification-independent).
         """
         col = QVBoxLayout()
-        lbl = QLabel("Exit pupil")
-        lbl.setStyleSheet(
-            "font-size: 8pt; font-weight: normal; color: #555;")
-        combo = QComboBox()
-        for p_mm, text in self._EXIT_PUPIL_OPTIONS:
-            combo.addItem(text, p_mm)
-        idx = combo.findData(default_exit_pupil_mm)
-        combo.setCurrentIndex(idx if idx >= 0 else 2)  # 2.0 mm planetary
-        combo.setToolTip(
-            "Eye-view surface-brightness model (extended objects):\n"
-            "a telescope can't exceed naked-eye surface brightness, and\n"
-            "at higher magnification (smaller exit pupil) it falls as\n"
-            "(exit pupil / 7 mm)². Exit pupil = aperture / magnification.\n"
-            "No effect in Detector view (exposure drives brightness there)\n"
-            "or on point-like stars (aperture-driven). Perceptual model."
-        )
+        combo = make_exit_pupil_combo(default_exit_pupil_mm)
         combo.currentIndexChanged.connect(self._on_update_clicked)
-        col.addWidget(lbl)
+        col.addWidget(caption_label("Exit pupil"))
         col.addWidget(combo)
         self.controls_layout.addLayout(col)
         self._exit_pupil_combo = combo

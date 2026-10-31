@@ -2,6 +2,63 @@
 
 ---
 
+## Single-mode review (2026-10-31): "Jupiter is completely washed out" — FIXED (uncommitted)
+
+**User report:** the Design tab's Jupiter is a white disc. **601 tests pass** (was 578; +23
+in the new `tests/test_design_tab.py`). Not committed, not merged.
+
+**Root cause — the Design and Comparison tabs never used what the tutorial validates.**
+Both called `plot_source_image` with the library defaults: Detector view, exposure 1.0.
+Brightness scales as `(D/100 mm)²` against a saturation level of 1.0, so any aperture
+above 100 mm clips every extended source. Measured at the 200 mm default: Jupiter **89 %**
+of the disc clipped, Saturn 83 %, Moon 100 %. Neither tab had a View or Exposure control,
+so a user could not get out of it. The tutorial always passes its own view/exposure and
+never exercised those defaults, so its validation could not catch it. Second, related bug:
+the Design tab's eyepiece set the washout but *not* the Eye-view surface brightness, so
+one image used two different exit pupils.
+
+**Changes**
+- New `telescope_gui/widgets/display_controls.py`: the View / Exposure / Filter /
+  Exit-pupil controls, factored out of `tutorial_tab.py` (factories + an
+  `ImageDisplayControls` widget). The Tutorial, Design and Comparison-Images tabs all use
+  it now, so the control logic lives in one place. Defaults: **Eye view**, 2 mm exit pupil.
+  Context-aware: exposure is greyed out in Eye view; exit pupil is greyed out for stars, in
+  Detector view, and when an eyepiece sets it ("Set by eyepiece: X mm").
+- `ray_trace_plot.py`: `resolve_exit_pupil_mm()`. One rule, used by `plot_source_image`
+  and the tutorial runner: an eyepiece's exit pupil (D/mag) always wins.
+  `saturated_area_fraction()` gives the fraction of the *object* (not the frame) at the
+  clip level. Every extended-source figure (standardized, true-size, eyepiece view) now
+  draws a red **⚠ SATURATED** box when that fraction is ≥ 1 %, with a remedy that fits the
+  view.
+- `source_controls.is_extended_source()`; `main.py` gained a display-options block
+  (view / exposure / filter / exit pupil, with commented alternatives).
+
+**Verification**
+- Real-canvas sweep of the Design tab: 5 sources × 3 views × exposures × 3 exit pupils,
+  plus filters, plus eyepiece 25/10/5 mm × 3 display modes. **0 errors.** Clipping only
+  where it is real (Detector view at exposure 1.0), and flagged on the figure every time.
+- No bright-square artifact in the Design tab's eyepiece views (Batch S padding fix
+  confirmed).
+- `main.py` checked in both compare and single mode.
+- Revert checks: removing the `plot_kwargs()` forwarding fails 5 tests; reverting
+  `resolve_exit_pupil_mm` in `plot_source_image` fails the eyepiece test.
+
+**Found, NOT fixed — need a user decision**
+1. **Eye view renders bright planets grey.** At the 2 mm default, Jupiter's surface
+   brightness is 0.08× naked-eye, i.e. display flux ≈ 0.08 against
+   `CONE_THRESHOLD_FLUX = 0.05`, so the mesopic model strips most of its colour. Real
+   Jupiter at a 2 mm exit pupil is ≈ 50 cd/m² (photopic), so it should show colour. Cause:
+   the mesopic thresholds are in *per-source normalised* display units (1.0 = that
+   object's naked-eye brightness), not cd/m². A Moon-bright object and a nebula get the
+   same colour gate. Proper fix: give each source a physical surface brightness
+   (mag/arcsec²) and gate on cd/m². That is shared physics that also affects the tutorial,
+   so I did not re-tune it.
+2. **Eyepiece true-size and eyepiece-view figures re-normalise to max = 1.** In Eye view
+   they show a bright white planet while the standardized view of the same settings is dim
+   grey. The surface-brightness dimming is lost in those two figures.
+
+---
+
 ## Tutorial Tab — Round 5, Batch S (the eyepiece module): COMPLETE — **ROUND 5 CLOSES**
 
 Ledger: `PLAN_TUTORIAL_ROUND5.md`. Closes **R5.9** (new module) and **R5.4** (field-of-view

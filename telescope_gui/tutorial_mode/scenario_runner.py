@@ -16,6 +16,7 @@ from matplotlib.figure import Figure
 
 from telescope_gui.telescope_builder import build_telescope
 from telescope_sim.geometry.eyepiece import Eyepiece
+from telescope_sim.plotting.ray_trace_plot import resolve_exit_pupil_mm
 from telescope_gui.tutorial_mode.scenario_registry import (
     ScenarioDefinition, TelescopeConfig, SourceConfig,
 )
@@ -165,13 +166,11 @@ def run_scenario_side(
         telescope = build_scenario_telescope(telescope_config)
         source = build_source(source_config)
 
-        # R5.9/S2: with a real eyepiece the exit pupil is DERIVED, not chosen.
-        # Exit pupil = D / magnification, so letting the eyepiece combo and the
-        # exit-pupil combo be set independently would let the tutorial display
-        # a pair that no telescope can produce — a 25 mm eyepiece on this scope
-        # simply cannot give a 0.5 mm exit pupil. One control, one consistent
-        # set of numbers: magnification, true field, apparent size and eye-view
-        # surface brightness all follow from the eyepiece.
+        # R5.9/S2: with a real eyepiece the exit pupil is DERIVED, not chosen
+        # (D / magnification). The rule lives in `resolve_exit_pupil_mm`, the
+        # same function `plot_source_image` and the Design/Comparison tabs
+        # use, so the value quoted in the terminal panel is the value the
+        # render used.
         eyepiece = None
         if eyepiece_focal_length_mm is not None:
             eyepiece = Eyepiece(
@@ -179,8 +178,8 @@ def run_scenario_side(
                 apparent_fov_deg=eyepiece_afov_deg,
                 field_stop_mm=eyepiece_field_stop_mm,
             )
-            exit_pupil_mm = eyepiece.exit_pupil_mm(
-                telescope.primary_diameter, telescope.focal_length)
+        exit_pupil_mm = resolve_exit_pupil_mm(telescope, eyepiece,
+                                              exit_pupil_mm)
 
         fig, info = _call_plot_function(
             plot_function_name, telescope, source,

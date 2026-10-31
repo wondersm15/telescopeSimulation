@@ -42,6 +42,17 @@ def get_source(source_name):
         return None
 
 
+def is_extended_source(source_name):
+    """True when the combo label names a resolved (extended) object.
+
+    Uses the same test as the renderer (`render_ideal_rgb`), so the GUI and
+    the physics can never disagree about which sources follow the Eye-view
+    surface-brightness (exit pupil) model.
+    """
+    source = get_source(source_name)
+    return source is not None and hasattr(source, "render_ideal_rgb")
+
+
 def get_seeing(seeing_name):
     """Convert a seeing preset label to a numeric value.
 

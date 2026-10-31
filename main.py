@@ -173,8 +173,14 @@ def run_single(telescope, num_display_rays, wavelength_nm, method,
                show_focal_image=True, show_psf_profile=True,
                show_psf_2d=True, show_source_image=True,
                polychromatic=False,
-               show_polychromatic_ray_trace=False):
-    """Run all plots for a single telescope configuration."""
+               show_polychromatic_ray_trace=False,
+               display_settings=None):
+    """Run all plots for a single telescope configuration.
+
+    `display_settings` is a dict of `plot_source_image` keyword arguments
+    (display_stretch, exposure_level, filter_name, exit_pupil_mm) — the same
+    four settings the GUI's View / Exposure / Filter / Exit-pupil controls set.
+    """
     if isinstance(telescope, MaksutovCassegrainTelescope):
         tel_name = "Maksutov-Cass"
     elif isinstance(telescope, SchmidtCassegrainTelescope):
@@ -281,6 +287,7 @@ def run_single(telescope, num_display_rays, wavelength_nm, method,
             log_scale=log_scale,
             eyepiece=eyepiece,
             polychromatic=polychromatic,
+            **(display_settings or {}),
         )
 
 
@@ -539,6 +546,29 @@ def main():
     eyepiece_apparent_fov_deg = 50.0     # Plössl-style
     # eyepiece_apparent_fov_deg = 68.0   # wide-field
     # eyepiece_apparent_fov_deg = 82.0   # ultra-wide
+
+    # ── Image display (View / Exposure / Filter / Exit pupil) ────────
+    # The same four settings as the GUI's display controls. They decide how
+    # simulated light becomes a picture, so they matter as much as the optics:
+    # in the Detector view at exposure 1.0, any planet through more than
+    # ~100 mm saturates to white (a real camera would too — you would shorten
+    # the exposure). The figure prints a red SATURATED warning when that
+    # happens.
+    display_stretch = "log"             # Eye view: what you'd see at the eyepiece
+    # display_stretch = "linear"        # Detector (CCD) view: exposure applies
+    # display_stretch = "log_integrated"  # Eye + ~1" eye spatial integration
+
+    exposure_level = 1.0                # Detector view only (1.0 = mag-0 star at 100 mm just unsaturated)
+    # exposure_level = 0.25             # e.g. a 200 mm scope on Jupiter
+
+    filter_name = "None"                # see telescope_sim/physics/filters.py
+    # filter_name = "W80A (light blue)" # boosts Jupiter belt contrast
+    # filter_name = "ND-1.0"            # neutral density (Moon filter)
+
+    exit_pupil_mm = 2.0                 # Eye view, no eyepiece: planetary magnification
+    # exit_pupil_mm = 7.0               # max (naked-eye surface brightness)
+    # (With an eyepiece configured, the exit pupil is derived from it and
+    #  this value is ignored.)
 
     # ── Vignetting ───────────────────────────────────────────────────
     # Show illumination fraction vs off-axis angle
@@ -814,7 +844,13 @@ def main():
                         show_psf_2d=show_psf_2d,
                         show_source_image=show_source_image,
                         polychromatic=polychromatic,
-                        show_polychromatic_ray_trace=show_polychromatic_ray_trace)
+                        show_polychromatic_ray_trace=show_polychromatic_ray_trace,
+                        display_settings=dict(
+                            display_stretch=display_stretch,
+                            exposure_level=exposure_level,
+                            filter_name=filter_name,
+                            exit_pupil_mm=exit_pupil_mm,
+                        ))
 
     plt.show()
 

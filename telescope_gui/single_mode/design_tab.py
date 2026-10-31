@@ -16,7 +16,10 @@ import numpy as np
 from telescope_gui.widgets.matplotlib_canvas import MatplotlibCanvas
 from telescope_gui.widgets.image_popout import ImagePopoutWindow
 from telescope_gui.widgets.telescope_controls import TelescopeControlPanel
-from telescope_gui.widgets.source_controls import get_source, get_seeing
+from telescope_gui.widgets.source_controls import (
+    get_source, get_seeing, is_extended_source,
+)
+from telescope_gui.widgets.display_controls import ImageDisplayControls
 from telescope_gui.telescope_builder import build_telescope
 from telescope_sim.geometry.eyepiece import Eyepiece
 from telescope_sim.plotting import plot_ray_trace, plot_source_image, plot_polychromatic_ray_trace
@@ -140,6 +143,8 @@ class DesignTab(QWidget):
             "Point Source (Star)", "None"
         ])
         self.source_combo.setCurrentText("Jupiter")
+        self.source_combo.currentIndexChanged.connect(
+            self.sync_display_context)
         extra_layout.addWidget(self.source_combo, row, 0); row += 1
 
         # Seeing
@@ -149,10 +154,19 @@ class DesignTab(QWidget):
         self.seeing_combo.setCurrentText("Good")
         extra_layout.addWidget(self.seeing_combo, row, 0); row += 1
 
+        # View / Exposure / Filter / Exit pupil — the same controls (built by
+        # the same code) as the Tutorial tab, so the settings the tutorial
+        # validates are the settings this tab can actually reach. Before
+        # these existed the tab rendered with the library defaults (Detector,
+        # exposure 1.0), which whites out any planet through more than 100 mm.
+        self.display_controls = ImageDisplayControls()
+        extra_layout.addWidget(self.display_controls, row, 0); row += 1
+
         # Eyepiece controls
         self.eyepiece_check = QCheckBox("Use Eyepiece")
         self.eyepiece_check.setChecked(False)
         self.eyepiece_check.toggled.connect(self.toggle_eyepiece)
+        self.eyepiece_check.toggled.connect(self.sync_display_context)
         extra_layout.addWidget(self.eyepiece_check, row, 0); row += 1
 
         extra_layout.addWidget(QLabel("Eyepiece FL (mm):"), row, 0); row += 1
@@ -161,6 +175,7 @@ class DesignTab(QWidget):
         self.eyepiece_spin.setSingleStep(1.0)
         self.eyepiece_spin.setValue(10.0)
         self.eyepiece_spin.setEnabled(False)
+        self.eyepiece_spin.valueChanged.connect(self.sync_display_context)
         extra_layout.addWidget(self.eyepiece_spin, row, 0); row += 1
 
         extra_layout.addWidget(QLabel("Apparent FOV (\u00b0):"), row, 0); row += 1
@@ -212,6 +227,23 @@ class DesignTab(QWidget):
 
         # Initial render
         self.update_view()
+
+    def sync_display_context(self, *_):
+        """Tell the display controls what the exit-pupil choice will do.
+
+        It only applies to an extended source with no eyepiece; otherwise
+        the control is disabled with a note (stars, or "set by eyepiece").
+        """
+        telescope = self.telescope_panel.build()
+        eyepiece = self.get_eyepiece(telescope)
+        self.display_controls.set_context(
+            is_extended_source=is_extended_source(
+                self.source_combo.currentText()),
+            eyepiece_exit_pupil_mm=(
+                eyepiece.exit_pupil_mm(telescope.primary_diameter,
+                                       telescope.focal_length)
+                if eyepiece is not None else None),
+        )
 
     def toggle_eyepiece(self, checked):
         """Enable/disable eyepiece controls."""
@@ -398,6 +430,7 @@ class DesignTab(QWidget):
 
             # Update eyepiece label
             self.update_eyepiece_label(telescope, eyepiece)
+            self.sync_display_context()
 
             # Update ray trace
             telescope_type = self.telescope_panel.type_combo.currentText()
@@ -436,6 +469,7 @@ class DesignTab(QWidget):
                     seeing_arcsec=seeing,
                     eyepiece=eyepiece,
                     eyepiece_view_figsize=(8, 8) if eyepiece is not None else None,
+                    **self.display_controls.plot_kwargs(),
                 )
 
                 if isinstance(result, list):
