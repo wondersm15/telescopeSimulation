@@ -2,6 +2,44 @@
 
 ---
 
+## Web port, phases 0–1: freeze + feasibility test (2026-11-21), branch `feature/web-app`
+
+**622 tests pass** (+2 freeze guards). Not merged. Go/no-go is pending with the user.
+
+**Phase 0**
+- The desktop app is frozen at tag `desktop-v1.0` (local tag, not pushed).
+- `tests/test_desktop_freeze.py` fails on any edit or new file under `telescope_sim/`,
+  `telescope_gui/`, `main.py`, `gui.py` or `requirements.txt`. Revert-checked.
+- Added an MIT `LICENSE`; the texture credits stay in CREDITS.md.
+
+**Phase 1: feasibility test** (all new code is in `web/`; see web/README.md)
+- **Runtime:** Pyodide 314.0.8 ships **Python 3.14.2**, the same as the desktop venv.
+  Package versions:
+  - numpy 2.4.6, scipy 1.18.0, matplotlib 3.10.8, Pillow 12.2.0;
+  - skyfield, jplephem and sgp4 as pure-Python wheels pinned to the desktop versions.
+- **`build_web.py`:** self-hosted runtime with no CDN.
+  - Downloads only the package closure we need, sha256-verified, and zips the frozen
+    packages unchanged.
+  - dist/ is 61 MB, 16.8 MB of which is DE421. The largest file is 16.8 MB, under
+    Cloudflare's 25 MiB limit.
+- **Results:**
+  - All 18 tutorial scenarios run in Pyodide, 11.8 s in total (about 1.8× native).
+    The slowest is Star Field at 2.5 s.
+  - Browser output matches the desktop numerically: max relative difference ≤ 2e-14
+    on every figure array (`compare_desktop.py`, revert-checked with a 1% perturbation).
+  - Live-sky positions work: Jupiter 37.29″, computed in 0.17 s from the bundled DE421.
+  - Headless Chrome at `/apps/telescope-simulation/`: the worker page loads and renders
+    4 scenarios in 9.3 s, and survives a refresh at the same URL.
+- **Notes for phase 2:**
+  - Load DE421 only when live sky is switched on. The test page loaded it eagerly; the
+    first visit without it is about 43 MB uncompressed.
+  - Pass each scenario's own display defaults (the test page used exposure 1.0, so
+    Saturn saturates).
+  - The Pyodide core tarball includes CLI extras (python.exe and similar) that can be
+    trimmed.
+
+---
+
 ## Merged to main (2026-11-21)
 
 `feature/tutorial-testing-tab` was fast-forwarded into `main` at 0602e04 with user
