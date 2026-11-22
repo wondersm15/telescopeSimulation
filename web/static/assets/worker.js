@@ -2,24 +2,25 @@
 // Loads the self-hosted runtime + the frozen desktop code (py/app.zip).
 import { loadPyodide } from "./pyodide/pyodide.mjs";
 
-const base = new URL("./", import.meta.url);
+// Manifest paths are relative to the site root, one level above assets/.
+const root = new URL("../", import.meta.url);
 const say = (text) => postMessage({ type: "log", text });
 const fetchBytes = async (rel) =>
-  new Uint8Array(await (await fetch(new URL(rel, base))).arrayBuffer());
+  new Uint8Array(await (await fetch(new URL(rel, root))).arrayBuffer());
 const secs = (t) => ((performance.now() - t) / 1000).toFixed(2) + " s";
 
 self.onmessage = async ({ data }) => {
   try {
     let t = performance.now();
-    const pyodide = await loadPyodide({ indexURL: new URL("pyodide/", base).href });
+    const pyodide = await loadPyodide({ indexURL: new URL("./pyodide/", import.meta.url).href });
     say(`runtime ${secs(t)}`);
 
     t = performance.now();
     await pyodide.loadPackage(["numpy", "scipy", "matplotlib", "pillow"]);
-    const manifest = await (await fetch(new URL("py/manifest.json", base))).json();
+    const manifest = await (await fetch(new URL("./py/manifest.json", import.meta.url))).json();
     const site = pyodide.runPython("import site; site.getsitepackages()[0]");
     for (const wheel of manifest.wheels) {
-      pyodide.unpackArchive(await fetchBytes(`py/wheels/${wheel}`), "wheel",
+      pyodide.unpackArchive(await fetchBytes(wheel), "wheel",
                             { extractDir: site });
     }
     pyodide.unpackArchive(await fetchBytes(manifest.app_zip), "zip",

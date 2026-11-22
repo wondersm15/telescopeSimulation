@@ -9,7 +9,7 @@ target host is Cloudflare at `/apps/telescope-simulation/`.
 ## The desktop app is frozen
 The desktop app (`telescope_sim/`, `telescope_gui/`, `main.py`, `gui.py`,
 `requirements.txt`) is frozen at git tag `desktop-v1.0`. The web build copies
-those packages, unchanged, into `dist/py/app.zip`.
+those packages, unchanged, into `assets/py/app.zip`.
 `tests/test_desktop_freeze.py` fails on any edit to them. Everything specific to
 the browser lives here, in `web/`.
 
@@ -76,6 +76,7 @@ venv/bin/python -m pytest tests/test_web_qtshim.py tests/test_desktop_freeze.py
 node web/tools/browser_check.mjs --reload       # headless Chrome at /apps/telescope-simulation/
 node web/tools/browser_check.mjs --hash tutorial --screenshot out.png   # open a mode directly
 venv/bin/python web/tools/desktop_screenshots.py OUT_DIR   # desktop screenshots to compare layout by eye
+venv/bin/python web/tools/export_handoff.py     # hosting export + checks + handoff note → web/handoff/
 ```
 
 To preview locally, serve `web/dist` with any static server and open the page.
@@ -86,7 +87,41 @@ python3 -m http.server -d web/dist
 ```
 
 The page then loads from `/`. `browser_check.mjs` serves it from
-`/apps/telescope-simulation/`, the path used in production.
+`/apps/telescope-simulation/`, the path used in production. Pass
+`--root DIR` to check another folder, such as an export.
+
+## Output layout, desktop download, and hosting export
+The build output follows the hosting handoff format:
+
+- **HTML pages at the root:**
+  - `index.html`: the app;
+  - `about.html`: credits, licences and the desktop download.
+- **`assets/`:** everything the pages load.
+- **`data/`:** the ephemeris.
+
+Paths in `assets/py/manifest.json` are relative to the site root.
+
+**Desktop download** (`assets/downloads/telescope-simulation-desktop-v1.0.zip`)
+- It is read straight from git tag `desktop-v1.0`: the code, tests, user and
+  technical docs, and texture credits.
+- It adds `LICENSE` and the install guide `download/INSTALL.md`.
+- It leaves out internal notes: CLAUDE.md, plans, logs and `docs/development/`.
+- The zip is byte-reproducible.
+- Verified by a clean `pip install -r requirements.txt` in a new venv, then
+  its test suite: 620 passed.
+
+**Hosting export:** `tools/export_handoff.py` does four things.
+1. Builds a fresh copy into `web/handoff/telescope-simulation/`.
+2. Checks it:
+   - the layout;
+   - app-relative URLs only;
+   - no internal files, including inside the zip;
+   - Cloudflare's 25 MiB per-file limit.
+3. Runs the browser check on that exact folder.
+4. Writes `web/handoff/telescope-simulation-HANDOFF.md`. The note sits beside
+   the folder so it is never published.
+
+To deliver, copy both into the deployment project's `artifacts/incoming/`.
 
 ### Phase-1 feasibility tools
 These ran the physics code alone, without the GUI, and are kept as extra checks:
@@ -98,7 +133,8 @@ These ran the physics code alone, without the GUI, and are kept as extra checks:
 
 | Path | What |
 |---|---|
-| `static/` | front-end: `index.html`, `app.js` (loads Pyodide and starts the app), `qtshim.css`; copied into `dist/` |
+| `static/` | front-end, copied into `dist/`: `index.html`, `about.html`, and `assets/` (`app.js` loads Pyodide and starts the app; `qtshim.css`; licence texts) |
+| `download/INSTALL.md` | install guide shipped inside the desktop zip |
 | `py/PyQt6/` | stand-in for the PyQt6 API (QtCore, QtGui, QtWidgets) |
 | `py/qtshim/` | display backends (headless and DOM) and the matplotlib canvas |
 | `py/web_app.py` | browser entry point; the web-only differences listed above |
@@ -106,11 +142,12 @@ These ran the physics code alone, without the GUI, and are kept as extra checks:
 | `tools/qt_parity.py` | whole-GUI comparison, real Qt vs stand-in |
 | `tools/browser_check.mjs` | real-browser check under the production base path |
 | `tools/desktop_screenshots.py` | reference screenshots of the desktop app |
+| `tools/export_handoff.py` | hosting export, its checks, and the handoff note |
 | `tools/fig_arrays.py` | figure → data arrays; used by the comparisons |
-| `vendor/`, `dist/`, `smoke/` | generated; git-ignored |
+| `vendor/`, `dist/`, `smoke/`, `handoff/` | generated; git-ignored |
 
 ## Pinned versions
 - **Runtime:** Pyodide 314.0.8 (Python 3.14.2).
 - **Pyodide packages:** numpy 2.4.6, scipy 1.18.0, matplotlib 3.10.8, Pillow 12.2.0.
 - **PyPI wheels:** skyfield 1.54, jplephem 2.24 and sgp4 2.25, the same versions as the desktop.
-- **Ephemeris:** JPL DE421, 16.8 MB, in `dist/data/`.
+- **Ephemeris:** JPL DE421, 16.8 MB, in `data/`.

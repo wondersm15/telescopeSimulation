@@ -9,13 +9,22 @@ What it does:
    simulator needs) into web/vendor/ — cached, sha256-verified, never
    committed. No CDN is used at runtime: the export works on a plain static
    server.
-2. Zips the desktop Python packages, UNCHANGED, into dist/py/app.zip. The
+Output layout (the hosting handoff format): HTML pages at the root,
+everything they load under assets/, the ephemeris under data/. Paths in
+assets/py/manifest.json are relative to the site root.
+
+2. Zips the desktop Python packages, UNCHANGED, into assets/py/app.zip. The
    browser runs the same physics code as the desktop app; the desktop code is
    frozen at tag desktop-v1.0 (see tests/test_desktop_freeze.py).
 3. Zips the browser layer (web/py/: the Qt stand-in and the entry
-   module) into dist/py/web.zip.
+   module) into assets/py/web.zip.
 4. Copies the static front-end (web/static/) into dist/. The phase-1
    test page (smoke.html + worker.js) is left out unless --dev-pages.
+5. Packages the desktop app's source, read straight from git tag
+   desktop-v1.0, as assets/downloads/telescope-simulation-desktop-v1.0.zip,
+   with LICENSE and an install guide (web/download/INSTALL.md). Internal
+   notes (CLAUDE.md, plans, logs, docs/development/) are not included.
+   The app's LICENSE goes to assets/licenses/ for about.html (credits).
 
 Versions are pinned so a rebuild is reproducible. Pyodide 314.x ships
 Python 3.14, matching the desktop venv.
@@ -25,9 +34,12 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import io
 import json
 import shutil
+import subprocess
 import tarfile
+import time
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -54,6 +66,16 @@ APP_PACKAGES = ("telescope_sim", "telescope_gui")
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WEB_DIR = REPO_ROOT / "web"
+
+# The desktop download: the frozen release, public files only.
+DESKTOP_TAG = "desktop-v1.0"
+DESKTOP_NAME = f"telescope-simulation-{DESKTOP_TAG}"
+DESKTOP_PUBLIC_PATHS = ("telescope_sim", "telescope_gui", "tests", "main.py",
+                        "gui.py", "requirements.txt", "README.md",
+                        "PHYSICS.md", "docs/user", "docs/technical")
+# Added to the download from the current tree (published after the tag).
+DESKTOP_EXTRA_FILES = {"LICENSE": REPO_ROOT / "LICENSE",
+                       "INSTALL.md": WEB_DIR / "download" / "INSTALL.md"}
 VENDOR_DIR = WEB_DIR / "vendor"
 STATIC_DIR = WEB_DIR / "static"
 WEB_PY_DIR = WEB_DIR / "py"
@@ -155,6 +177,35 @@ def bundle(dest_zip: Path, root: Path, entries) -> None:
                 zf.write(path, path.relative_to(root).as_posix())
 
 
+def bundle_desktop_source(dest_zip: Path) -> None:
+    """Zip the public desktop files at DESKTOP_TAG, plus the extras.
+
+    Reads from git, not the working tree, so the download is exactly the
+    tagged release. Every entry gets the tag's timestamp, so rebuilding
+    gives a byte-identical zip.
+    """
+    tar_bytes = subprocess.run(
+        ["git", "archive", "--format=tar", DESKTOP_TAG, "--",
+         *DESKTOP_PUBLIC_PATHS],
+        cwd=REPO_ROOT, check=True, capture_output=True).stdout
+    dest_zip.parent.mkdir(parents=True, exist_ok=True)
+    with tarfile.open(fileobj=io.BytesIO(tar_bytes)) as tar, \
+            zipfile.ZipFile(dest_zip, "w", zipfile.ZIP_DEFLATED) as zf:
+        files = [m for m in tar.getmembers() if m.isfile()]
+        stamp = time.gmtime(files[0].mtime)[:6]   # the tag's commit time
+
+        def add(name: str, data: bytes) -> None:
+            info = zipfile.ZipInfo(f"{DESKTOP_NAME}/{name}", stamp)
+            info.external_attr = 0o644 << 16
+            info.compress_type = zipfile.ZIP_DEFLATED
+            zf.writestr(info, data)
+
+        for member in files:
+            add(member.name, tar.extractfile(member).read())
+        for name, source in DESKTOP_EXTRA_FILES.items():
+            add(name, source.read_bytes())
+
+
 # Runtime files only used by Node / the command-line launcher.
 PYODIDE_NOT_FOR_BROWSER = ("python", "python.bat", "python.exe",
                            "python_cli_entry.mjs", "package.json", "*.d.ts",
@@ -172,29 +223,36 @@ def build(dist: Path, dev_pages: bool = False) -> None:
     print(f"Assembling {dist}…")
     if dist.exists():
         shutil.rmtree(dist)
-    shutil.copytree(pyodide_dir, dist / "pyodide",
+    assets = dist / "assets"
+    rel = lambda path: path.relative_to(dist).as_posix()   # manifest paths
+
+    shutil.copytree(pyodide_dir, assets / "pyodide",
                     ignore=shutil.ignore_patterns(*PYODIDE_NOT_FOR_BROWSER))
-    (dist / "py" / "wheels").mkdir(parents=True)
-    for wheel in wheels:
-        shutil.copy2(wheel, dist / "py" / "wheels" / wheel.name)
-    (dist / "data").mkdir(parents=True, exist_ok=True)
-    shutil.copy2(de421, dist / "data" / de421.name)
-    bundle(dist / "py" / "app.zip", REPO_ROOT, APP_PACKAGES)
-    bundle(dist / "py" / "web.zip", WEB_PY_DIR,
-           sorted(p.name for p in WEB_PY_DIR.iterdir()
-                  if p.name != "__pycache__"))
+    (assets / "py" / "wheels").mkdir(parents=True)
+    wheel_paths = [assets / "py" / "wheels" / w.name for w in wheels]
+    for wheel, dest in zip(wheels, wheel_paths):
+        shutil.copy2(wheel, dest)
+    ephemeris = dist / "data" / de421.name
+    ephemeris.parent.mkdir(parents=True)
+    shutil.copy2(de421, ephemeris)
+    app_zip, web_zip = assets / "py" / "app.zip", assets / "py" / "web.zip"
+    bundle(app_zip, REPO_ROOT, APP_PACKAGES)
+    bundle(web_zip, WEB_PY_DIR, sorted(p.name for p in WEB_PY_DIR.iterdir()
+                                       if p.name != "__pycache__"))
     shutil.copytree(STATIC_DIR, dist, dirs_exist_ok=True,
                     ignore=None if dev_pages else shutil.ignore_patterns(*DEV_PAGES))
+    bundle_desktop_source(assets / "downloads" / f"{DESKTOP_NAME}.zip")
+    shutil.copy2(REPO_ROOT / "LICENSE", assets / "licenses" / "LICENSE.txt")
 
     manifest = {
         "pyodide": PYODIDE_VERSION,
         "pyodide_packages": list(PYODIDE_PACKAGES),
-        "wheels": [w.name for w in wheels],
-        "app_zip": "py/app.zip",
-        "web_zip": "py/web.zip",
-        "ephemeris": "data/de421.bsp",
+        "wheels": [rel(p) for p in wheel_paths],
+        "app_zip": rel(app_zip),
+        "web_zip": rel(web_zip),
+        "ephemeris": rel(ephemeris),
     }
-    (dist / "py" / "manifest.json").write_text(json.dumps(manifest, indent=2))
+    (assets / "py" / "manifest.json").write_text(json.dumps(manifest, indent=2))
     total = sum(p.stat().st_size for p in dist.rglob("*") if p.is_file())
     print(f"Done: {total / 1e6:.1f} MB in {dist}")
 

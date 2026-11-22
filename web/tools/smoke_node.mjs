@@ -15,7 +15,7 @@ import path from "node:path";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const dist = path.resolve(here, "..", "dist");
 const outDir = path.resolve(here, "..", "smoke");
-const { loadPyodide } = await import(path.join(dist, "pyodide", "pyodide.mjs"));
+const { loadPyodide } = await import(path.join(dist, "assets", "pyodide", "pyodide.mjs"));
 
 // Pyodide wants plain typed arrays, not Node Buffers.
 const readBytes = async (file) => new Uint8Array(await readFile(file));
@@ -24,21 +24,21 @@ const t0 = performance.now();
 const lap = (label, since) =>
   console.log(`${label.padEnd(28)} ${((performance.now() - since) / 1000).toFixed(2)} s`);
 
-const pyodide = await loadPyodide({ indexURL: path.join(dist, "pyodide") + "/" });
+const pyodide = await loadPyodide({ indexURL: path.join(dist, "assets", "pyodide") + "/" });
 lap("runtime", t0);
 
 let t = performance.now();
 await pyodide.loadPackage(["numpy", "scipy", "matplotlib", "pillow"]);
-const manifest = JSON.parse(await readFile(path.join(dist, "py", "manifest.json")));
+const manifest = JSON.parse(await readFile(path.join(dist, "assets", "py", "manifest.json")));
 const sitePackages = pyodide.runPython("import site; site.getsitepackages()[0]");
 for (const wheel of manifest.wheels) {
-  const buf = await readBytes(path.join(dist, "py", "wheels", wheel));
+  const buf = await readBytes(path.join(dist, wheel));
   pyodide.unpackArchive(buf, "wheel", { extractDir: sitePackages });
 }
 lap("packages", t);
 
 t = performance.now();
-pyodide.unpackArchive(await readBytes(path.join(dist, "py", "app.zip")), "zip",
+pyodide.unpackArchive(await readBytes(path.join(dist, manifest.app_zip)), "zip",
                       { extractDir: "/home/pyodide" });
 pyodide.FS.mkdirTree("/home/pyodide/.skyfield");
 pyodide.FS.writeFile("/home/pyodide/.skyfield/de421.bsp",

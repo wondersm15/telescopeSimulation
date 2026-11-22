@@ -1,9 +1,9 @@
 // Real-browser check of web/dist, served under the production base path.
 //
 //   node web/tools/browser_check.mjs [--page smoke.html] [--hash tutorial]
-//        [--eval JS] [--screenshot out.png] [--reload]
+//        [--eval JS] [--screenshot out.png] [--reload] [--root DIR]
 //
-// Serves web/dist at http://127.0.0.1:<port>/apps/telescope-simulation/ (a
+// Serves web/dist (or --root DIR, e.g. an exported handoff folder) at http://127.0.0.1:<port>/apps/telescope-simulation/ (a
 // plain static server, like Cloudflare), opens it in headless Chrome via the
 // DevTools protocol, waits for the page to set <html data-status> to
 // "ready" or "error" and for any "Working…" state to clear, then prints the
@@ -30,8 +30,10 @@ const MIME = {
 };
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const dist = path.resolve(here, "..", "dist");
 const args = process.argv.slice(2);
+const dist = args.includes("--root")
+  ? path.resolve(args[args.indexOf("--root") + 1])
+  : path.resolve(here, "..", "dist");
 const screenshotPath = args.includes("--screenshot")
   ? path.resolve(args[args.indexOf("--screenshot") + 1]) : null;
 

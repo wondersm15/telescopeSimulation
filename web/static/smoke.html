@@ -21,7 +21,7 @@ scenarios from the desktop code in a background worker.</p>
   // e.g. /apps/telescope-simulation/.
   const log = document.getElementById("log");
   const say = (line) => { log.textContent += "\n" + line; };
-  const worker = new Worker("./worker.js", { type: "module" });
+  const worker = new Worker("./assets/worker.js", { type: "module" });
   const t0 = performance.now();
   worker.onmessage = ({ data }) => {
     if (data.type === "log") say(data.text);

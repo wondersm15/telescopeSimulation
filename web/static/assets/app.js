@@ -2,13 +2,14 @@
 //
 // All URLs are relative to this file, so the site works under any base
 // path (e.g. /apps/telescope-simulation/) and on refresh. Nothing is
-// fetched from another origin.
+// fetched from another origin. This file lives in assets/; paths in the
+// manifest are relative to the site root, one level up.
 //
 // Pyodide runs on the page's main thread because the interface code
 // manipulates the page directly (see web/py/qtshim/dom.py).
 import { loadPyodide } from "./pyodide/pyodide.mjs";
 
-const base = new URL("./", import.meta.url);
+const root = new URL("../", import.meta.url);
 const logEl = document.getElementById("load-log");
 const progress = document.getElementById("load-progress");
 const t0 = performance.now();
@@ -18,7 +19,7 @@ const step = (text) => {
   logEl.textContent += `${text} (${secs()})\n`;
 };
 const fetchBytes = async (rel) => {
-  const res = await fetch(new URL(rel, base));
+  const res = await fetch(new URL(rel, root));
   if (!res.ok) throw new Error(`${rel}: HTTP ${res.status}`);
   return new Uint8Array(await res.arrayBuffer());
 };
@@ -40,7 +41,7 @@ function writeEphemeris(bytes) {
 function loadEphemerisNow() {
   if (ephemerisReady) return;
   const xhr = new XMLHttpRequest();
-  xhr.open("GET", new URL(manifest.ephemeris, base), false);
+  xhr.open("GET", new URL(manifest.ephemeris, root), false);
   xhr.overrideMimeType("text/plain; charset=x-user-defined");
   xhr.send();
   if (xhr.status !== 200) throw new Error(`ephemeris: HTTP ${xhr.status}`);
@@ -53,16 +54,16 @@ function loadEphemerisNow() {
 window.telescopeApp = { loadEphemerisNow, status: "loading" };
 
 async function main() {
-  pyodide = await loadPyodide({ indexURL: new URL("pyodide/", base).href });
+  pyodide = await loadPyodide({ indexURL: new URL("./pyodide/", import.meta.url).href });
   step("Python runtime");
 
-  manifest = await (await fetch(new URL("py/manifest.json", base))).json();
+  manifest = await (await fetch(new URL("./py/manifest.json", import.meta.url))).json();
   await pyodide.loadPackage(manifest.pyodide_packages, { messageCallback: () => {} });
   step("numpy, scipy, matplotlib");
 
   const site = pyodide.runPython("import site; site.getsitepackages()[0]");
   for (const wheel of manifest.wheels) {
-    pyodide.unpackArchive(await fetchBytes(`py/wheels/${wheel}`), "wheel",
+    pyodide.unpackArchive(await fetchBytes(wheel), "wheel",
                           { extractDir: site });
   }
   for (const archive of [manifest.app_zip, manifest.web_zip]) {

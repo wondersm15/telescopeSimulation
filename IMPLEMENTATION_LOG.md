@@ -2,6 +2,58 @@
 
 ---
 
+## Web port, phases 6–7: desktop download + hosting export (2026-11-21), branch `feature/web-app`
+
+**Desktop download:** `assets/downloads/telescope-simulation-desktop-v1.0.zip`, 1.6 MB.
+- Built by `build_web.py` straight from git tag `desktop-v1.0`. Contents:
+  - the code, tests, README, PHYSICS, user and technical docs, and texture credits;
+  - plus `LICENSE` and a new install guide, `web/download/INSTALL.md`.
+- Left out: CLAUDE.md, plans, logs and `docs/development/`.
+- Byte-reproducible: two builds give the same md5.
+- **Verified like a visitor would:** unzipped into a scratch folder, created a
+  fresh venv, ran `pip install -r requirements.txt`, then the tests: **620
+  passed**, the full tagged suite.
+
+**About page** (`about.html`, linked from the app's header bar):
+- what the browser version is, and how it differs from the desktop;
+- the download and the short install steps;
+- credits and licences. The CC BY 4.0 textures need on-page attribution. Each
+  shipped package's licence was read from its own wheel metadata, and
+  CPython's licence text ships in `assets/licenses/`.
+
+**Handoff layout:** the output now matches the hosting format.
+- HTML pages at the root, everything they load in `assets/`, the ephemeris in `data/`.
+- `app.js` and `worker.js` resolve manifest paths, which are now relative to
+  the site root.
+- `smoke_node.mjs` was updated to match.
+
+**`web/tools/export_handoff.py`:**
+1. A fresh build into `web/handoff/telescope-simulation/` (git-ignored).
+2. Five checks on that folder:
+   - the layout;
+   - manifest completeness;
+   - app-relative URLs only;
+   - no internal or development files, including inside the zip;
+   - Cloudflare's per-file and file-count limits.
+3. Headless Chrome at `/apps/telescope-simulation/` with a refresh, using the
+   new `browser_check.mjs --root DIR` option.
+4. Writes the handoff note *beside* the folder, so it is never published.
+
+All six checks pass. The audit was mutation-tested: a planted `CLAUDE.md`, a
+root-absolute URL and a stray `smoke.html` each make it fail.
+
+**Delivery:** not done. macOS privacy settings block this terminal from
+`~/Documents`, so the user copies the two items into the deployment
+project's `artifacts/incoming/`.
+
+**Distribution approval:** still pending, the owner's decision (see the handoff note).
+
+## Installed
+Nothing in the project. The clean-install test used a throwaway venv in the
+session scratch folder.
+
+---
+
 ## Web port, phase 2: the full desktop GUI in the browser (2026-11-21), branch `feature/web-app`
 
 **630 tests pass** (+8 tests for the Qt stand-in). Not merged, not pushed.

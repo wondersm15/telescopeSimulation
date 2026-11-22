@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Telescope Simulator: about and download</title>
+<style>
+  body { margin: 0; font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI",
+         Roboto, Helvetica, Arial, sans-serif; color: #1f2937; background: #fafafa; }
+  main { max-width: 760px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 26px; margin: 0 0 4px; }
+  h2 { font-size: 19px; margin: 32px 0 8px; border-bottom: 1px solid #e5e7eb; padding-bottom: 4px; }
+  code, pre { font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; }
+  pre { background: #f3f4f6; padding: 10px 12px; border-radius: 6px; overflow-x: auto; }
+  .download { display: inline-block; margin: 8px 0; padding: 8px 14px; border-radius: 6px;
+              background: #1f2937; color: #fff; text-decoration: none; font-weight: 600; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid #e5e7eb; vertical-align: top; }
+  .muted { color: #6b7280; }
+</style>
+</head>
+<body>
+<main>
+<p><a href="./">← Back to the simulator</a></p>
+<h1>Telescope Simulator</h1>
+<p class="muted">A physics-based telescope simulator: ray tracing, diffraction,
+atmospheric seeing and simulated eyepiece views.</p>
+
+<h2>The browser version</h2>
+<p>The simulator page runs the desktop application itself (the same Python code)
+in your browser through <a href="https://pyodide.org">Pyodide</a>, which is
+Python compiled to WebAssembly. Everything runs on your computer and nothing
+is sent to a server.</p>
+<p>It differs from the desktop app in a few small ways:</p>
+<ul>
+  <li>Plots are static images with no zoom or pan toolbar.</li>
+  <li>There is no menu bar.</li>
+  <li>The page cannot redraw while a simulation is computing, so it shows "Working…".</li>
+</ul>
+
+<h2>Download the desktop app</h2>
+<p>The desktop app is the same simulator in a native window. Use it to work
+offline, or to check the browser version.</p>
+<p><a class="download" href="./assets/downloads/telescope-simulation-desktop-v1.0.zip"
+   download>Download source, v1.0 (zip, 1.6 MB)</a></p>
+<p>It needs Python 3.11 or newer. Unzip it, open a terminal in the folder, then run:</p>
+<pre>python3 -m venv venv
+source venv/bin/activate            # Windows: venv\Scripts\activate
+pip install -r requirements.txt
+python gui.py</pre>
+<p><code>INSTALL.md</code> in the zip has the full instructions, including how
+to run the test suite.</p>
+
+<h2>Credits and licences</h2>
+<p>The Telescope Simulator is © 2026 Marc Wonders, released under the
+<a href="./assets/licenses/LICENSE.txt">MIT licence</a>.</p>
+<table>
+  <tr><th>Data</th><th>Source and licence</th></tr>
+  <tr><td>Moon</td><td>NASA/GSFC/ASU LRO LROC WAC mosaic, from the NASA Scientific
+    Visualization Studio <a href="https://svs.gsfc.nasa.gov/4720">CGI Moon Kit</a>.
+    Public domain.</td></tr>
+  <tr><td>Jupiter, Saturn, Saturn's rings</td><td>
+    <a href="https://www.solarsystemscope.com/textures/">Solar System Scope</a>,
+    based on NASA imagery, under the
+    <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a> licence.
+    Attribution: Solar System Scope.</td></tr>
+  <tr><td>Ephemeris</td><td>JPL DE421 planetary ephemeris, NASA Jet Propulsion Laboratory.</td></tr>
+</table>
+<p>Software included in this page:</p>
+<table>
+  <tr><th>Component</th><th>Licence</th></tr>
+  <tr><td><a href="https://github.com/pyodide/pyodide">Pyodide</a> 314.0.8 (runtime)</td>
+      <td><a href="https://www.mozilla.org/MPL/2.0/">MPL 2.0</a>; source on GitHub</td></tr>
+  <tr><td>CPython 3.14 (inside Pyodide)</td>
+      <td><a href="./assets/licenses/python-LICENSE.txt">PSF licence</a></td></tr>
+  <tr><td>numpy, scipy, contourpy, kiwisolver, cycler</td><td>BSD</td></tr>
+  <tr><td>matplotlib</td><td>matplotlib licence (PSF-based)</td></tr>
+  <tr><td>Pillow</td><td>MIT-CMU</td></tr>
+  <tr><td>skyfield, jplephem, sgp4, fonttools, pyparsing, pytz, six</td><td>MIT</td></tr>
+  <tr><td>python-dateutil, packaging</td><td>Apache 2.0 / BSD</td></tr>
+  <tr><td>certifi</td><td>MPL 2.0</td></tr>
+</table>
+<p class="muted">Each package's full licence text ships inside its wheel file
+(the <code>.dist-info</code> folder) in this site's <code>assets/pyodide/</code> and
+<code>assets/py/wheels/</code> folders.</p>
+</main>
+</body>
+</html>
