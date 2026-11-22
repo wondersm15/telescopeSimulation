@@ -16,7 +16,7 @@ only, with no server code.
 - **Repository:** https://github.com/wondersm15/telescopeSimulation
 - **Branch:** `feature/web-app`. The browser version lives on this branch on
   purpose; it is not merged into main.
-- **Commit:** `b63869b` (with uncommitted changes)
+- **Commit:** `2cc5121`
 - **Desktop app:** frozen at git tag `desktop-v1.0`. The browser
   runs that code unchanged.
 - **Runtime:** Pyodide 314.0.8 (Python 3.14), self-hosted.
