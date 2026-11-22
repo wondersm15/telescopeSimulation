@@ -2,6 +2,15 @@
 
 ---
 
+## Merged to main (2026-11-21)
+
+`feature/tutorial-testing-tab` was fast-forwarded into `main` at 0602e04 with user
+approval: 43 commits, covering Tutorial Rounds 3–5, the eyepiece module and the
+single-mode fixes. 620 tests pass on `main`. Not yet pushed to GitHub. This is the
+starting point for the Cloudflare deployment work.
+
+---
+
 ## Eye view: stop dimming extended objects by exit pupil (2026-10-31)
 
 **620 tests pass.** Not merged.
