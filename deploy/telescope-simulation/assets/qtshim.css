@@ -1,0 +1,168 @@
+/* Look and layout for the Qt stand-in (web/py/qtshim).
+ *
+ * Qt layouts map onto CSS flexbox / grid: QVBoxLayout → flex column,
+ * QHBoxLayout → flex row, QGridLayout → grid. Stretch factors and size
+ * policies are applied per item as inline `flex` by QtWidgets.py; this
+ * sheet only sets the defaults and the native-looking widget styles.
+ */
+
+:root {
+  --bg: #ececec;
+  --panel: #f6f6f6;
+  --border: #bdbdbd;
+  --text: #1d1d1d;
+  --accent: #2563eb;
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  color-scheme: light;
+}
+
+html, body { height: 100%; margin: 0; }
+body {
+  display: flex; flex-direction: column;
+  font: 13px/1.35 var(--font); color: var(--text); background: var(--bg);
+}
+
+/* ── Page chrome (outside the app) ─────────────────────────────────── */
+.site-bar {
+  display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+  padding: 6px 16px; background: #1f2937; color: #f3f4f6; font-size: 13px;
+}
+.site-note { color: #9ca3af; font-size: 12px; }
+.site-link { color: #93c5fd; font-size: 12px; }
+.site-busy {
+  margin-left: auto; visibility: hidden; color: #fde68a; font-weight: 600;
+}
+body.qbusy .site-busy { visibility: visible; }
+body.qbusy, body.qbusy * { cursor: progress !important; }
+
+#app { flex: 1 1 auto; min-height: 0; display: flex; }
+#app > .qw { flex: 1 1 auto; }
+
+#loading { margin: 8vh auto; max-width: 560px; padding: 0 16px; }
+#loading h1 { font-size: 24px; margin: 0 0 8px; }
+#loading progress { width: 100%; height: 10px; }
+#load-log { font-size: 12px; color: #555; white-space: pre-wrap; }
+
+/* ── Generic widget / layout behaviour ─────────────────────────────── */
+.qw, .qlayout { box-sizing: border-box; min-width: 0; min-height: 0; }
+.qw { display: flex; flex-direction: column; }
+.qw > .qlayout { flex: 1 1 auto; }
+.qlayout { display: flex; }
+.QVBoxLayout { flex-direction: column; }
+.QHBoxLayout { flex-direction: row; }
+.QGridLayout, .QFormLayout {
+  display: grid; align-items: center; grid-auto-columns: auto;
+}
+.QHBoxLayout > .QLabel, .QHBoxLayout > .QPushButton,
+.QHBoxLayout > .QComboBox, .QHBoxLayout > .QCheckBox,
+.QHBoxLayout > .QRadioButton, .QHBoxLayout > .QDoubleSpinBox,
+.QHBoxLayout > .QSpinBox, .QHBoxLayout > .QSlider { align-self: center; }
+
+/* Qt stretch factors (flex-grow is set inline). In a bounded layout they
+ * divide the space in proportion; in a scroll area's vertical layout Qt
+ * first gives every item its size hint and the content scrolls. */
+.qlayout > .qstretched { flex-basis: 0; }
+.QScrollArea .QVBoxLayout > .qstretched { flex-basis: auto; }
+
+.qhidden { display: none !important; }
+.qstretch { min-width: 0; min-height: 0; }
+
+/* ── Leaf widgets ──────────────────────────────────────────────────── */
+.QLabel { display: block; }
+/* Plain-text labels keep their line breaks, as in Qt; rich text (HTML)
+ * treats source newlines as spaces. */
+.QLabel.qwrap { white-space: pre-line; overflow-wrap: anywhere; }
+.QLabel:not(.qwrap) { white-space: pre; }
+.QLabel.qrich { white-space: normal; }
+.QLabel img { max-width: 100%; height: auto; display: block; }
+.QLabel a { color: inherit; }
+
+.QPushButton, .qtab, .qdialog-title button {
+  display: inline-block; font: inherit; padding: 3px 12px;
+  border: 1px solid #a9a9a9; border-radius: 5px;
+  background: linear-gradient(#ffffff, #f0f0f0); color: var(--text);
+}
+.QPushButton:hover:not(:disabled) { border-color: #7a7a7a; }
+.QPushButton:active:not(:disabled) { background: #e2e2e2; }
+.QPushButton.qflat { border: none; background: none; text-align: left; padding: 3px 6px; }
+.QPushButton.qflat:hover:not(:disabled) { background: rgba(0, 0, 0, 0.06); }
+.QPushButton:disabled { color: #9a9a9a; }
+
+.QCheckBox, .QRadioButton {
+  display: inline-flex; flex-direction: row; align-items: center; gap: 4px;
+  white-space: nowrap;
+}
+.QCheckBox input, .QRadioButton input { margin: 0; }
+.QCheckBox.qdisabled, .QRadioButton.qdisabled { color: #9a9a9a; }
+
+.QComboBox { display: inline-block; font: inherit; padding: 2px 4px; max-width: 100%; }
+.QDoubleSpinBox, .QSpinBox {
+  display: inline-flex; flex-direction: row; align-items: center; gap: 2px;
+}
+.QDoubleSpinBox input, .QSpinBox input { font: inherit; width: 7em; padding: 1px 3px; }
+.qaffix:empty { display: none; }
+.QSlider { display: inline-block; min-width: 100px; }
+
+.QTextEdit {
+  display: block; margin: 0; overflow: auto; white-space: pre-wrap;
+  background: #fff; border: 1px solid var(--border); padding: 4px;
+  font: inherit;
+}
+.QTextEdit.qnowrap { white-space: pre; }
+
+.QGroupBox {
+  margin: 0; padding: 6px 8px 8px; border: 1px solid var(--border);
+  border-radius: 5px; background: rgba(255, 255, 255, 0.35);
+}
+.QGroupBox > legend { padding: 0 4px; font-weight: 600; }
+
+.qframe-VLine { width: 1px; min-width: 1px; background: var(--border); align-self: stretch; }
+.qframe-HLine { height: 1px; min-height: 1px; background: var(--border); }
+.qframe-Box, .qframe-StyledPanel, .qframe-Panel { border: 1px solid var(--border); }
+
+.QScrollArea { display: block; overflow: auto; }
+.QScrollArea > .qw { min-height: 100%; }
+
+.QTableWidget { display: block; overflow: auto; background: #fff; border: 1px solid var(--border); }
+.QTableWidget table { border-collapse: collapse; width: 100%; }
+.QTableWidget th, .QTableWidget td { border: 1px solid #ddd; padding: 2px 6px; text-align: left; }
+.QTableWidget th { background: #f1f1f1; font-weight: 600; }
+
+/* The desktop canvas shows a pre-rendered bitmap scaled to fill the
+ * widget with its aspect ratio kept (imshow on an axis-off axes); the
+ * image element does the same. */
+.FigureCanvas {
+  display: block; width: 100%;
+  min-width: 0; min-height: 120px; object-fit: contain; object-position: center;
+}
+
+/* ── Tabs ──────────────────────────────────────────────────────────── */
+.QTabWidget { min-height: 0; }
+.qtabbar { display: flex; gap: 2px; padding: 0 8px; border-bottom: 1px solid var(--border); }
+.qtab { border-radius: 5px 5px 0 0; border-bottom: none; margin-bottom: -1px; }
+.qtab.qcurrent { background: var(--panel); font-weight: 600; border-bottom: 1px solid var(--panel); }
+.qtabstack { flex: 1 1 auto; min-height: 0; display: flex; background: var(--panel); }
+.qtabstack > .qw { flex: 1 1 auto; }
+
+/* ── Main window ───────────────────────────────────────────────────── */
+.QMainWindow { min-height: 0; }
+.qcentral { flex: 1 1 auto; min-height: 0; display: flex; }
+.qcentral > .qw { flex: 1 1 auto; }
+.QStatusBar { display: block; padding: 2px 10px; font-size: 12px; color: #555; border-top: 1px solid var(--border); }
+
+/* ── Dialogs ───────────────────────────────────────────────────────── */
+.qdialog-overlay {
+  position: fixed; inset: 0; z-index: 100; display: flex;
+  align-items: center; justify-content: center; background: rgba(0, 0, 0, 0.45);
+}
+.qdialog-frame {
+  display: flex; flex-direction: column; max-width: 95vw; max-height: 95vh;
+  background: var(--panel); border-radius: 8px; overflow: hidden;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
+}
+.qdialog-frame > .qw { overflow: auto; }
+.qdialog-title {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 16px; padding: 6px 10px; background: #e2e2e2; font-weight: 600;
+}
+.qdialog-title button { padding: 0 8px; font-size: 16px; }

@@ -1,0 +1,18 @@
+{
+  "pyodide": "314.0.8",
+  "pyodide_packages": [
+    "numpy",
+    "scipy",
+    "matplotlib",
+    "pillow"
+  ],
+  "wheels": [
+    "assets/py/wheels/skyfield-1.54-py3-none-any.whl",
+    "assets/py/wheels/jplephem-2.24-py3-none-any.whl",
+    "assets/py/wheels/sgp4-2.25-py3-none-any.whl",
+    "assets/py/wheels/certifi-2026.5.20-py3-none-any.whl"
+  ],
+  "app_zip": "assets/py/app.zip",
+  "web_zip": "assets/py/web.zip",
+  "ephemeris": "data/de421.bsp"
+}
