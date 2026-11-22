@@ -131,7 +131,9 @@ def browser_check(site: Path) -> tuple[str, bool, str]:
 def handoff_note(results, site: Path) -> str:
     commit = _git("rev-parse", "--short", "HEAD")
     branch = _git("rev-parse", "--abbrev-ref", "HEAD")
-    dirty = " (with uncommitted changes)" if _git("status", "--porcelain") else ""
+    # The export's own output folder doesn't count as a source change.
+    dirty = (" (with uncommitted changes)"
+             if _git("status", "--porcelain", "--", ".", f":!{OUT_REL}") else "")
     checks = "\n".join(f"- {'PASS' if ok else 'FAIL'}: {name}. {detail}"
                        for name, ok, detail in results)
     return f"""# Handoff: Telescope Simulator ({APP_NAME})
