@@ -3,40 +3,26 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Telescope Simulator — feasibility check</title>
-<style>
-  body { font: 14px system-ui, sans-serif; margin: 0 auto; padding: 16px; max-width: 900px; }
-  pre { background: #f4f4f4; padding: 8px; white-space: pre-wrap; }
-  img { max-width: 100%; border: 1px solid #ddd; margin: 4px 0; }
-</style>
+<title>Telescope Simulator</title>
+<meta name="description" content="Physics-based telescope simulator: ray tracing, diffraction, seeing and simulated eyepiece views, running entirely in your browser.">
+<link rel="stylesheet" href="./qtshim.css">
 </head>
 <body>
-<h1>Telescope Simulator (browser feasibility check)</h1>
-<p>Phase 1 test page: runs tutorial scenarios from the desktop code in a
-background worker. The real interface replaces this page in phase 2.</p>
-<pre id="log">Starting…</pre>
-<div id="figures"></div>
-<script type="module">
-  // All paths are relative so the app works under any base path,
-  // e.g. /apps/telescope-simulation/.
-  const log = document.getElementById("log");
-  const say = (line) => { log.textContent += "\n" + line; };
-  const worker = new Worker("./worker.js", { type: "module" });
-  const t0 = performance.now();
-  worker.onmessage = ({ data }) => {
-    if (data.type === "log") say(data.text);
-    if (data.type === "figure") {
-      const img = new Image();
-      img.alt = data.title;
-      img.src = URL.createObjectURL(new Blob([data.png], { type: "image/png" }));
-      document.getElementById("figures").append(img);
-    }
-    if (data.type === "done" || data.type === "error") {
-      say(data.text + ` (page total ${((performance.now() - t0) / 1000).toFixed(1)} s)`);
-      document.title = (data.type === "done" ? "DONE " : "ERROR ") + data.text;
-    }
-  };
-  worker.postMessage({ scenarios: [0, 1, 16, 17] });
-</script>
+<header class="site-bar">
+  <strong>Telescope Simulator</strong>
+  <span class="site-note">Desktop application running in your browser (Python via WebAssembly). Nothing is sent to a server.</span>
+  <span class="site-busy" aria-live="polite">Working…</span>
+</header>
+<main id="app">
+  <section id="loading">
+    <h1>Telescope Simulator</h1>
+    <p>Loading the Python runtime and the simulator (about 40 MB the first
+    time; cached afterwards). This takes 10–30 seconds.</p>
+    <progress id="load-progress" max="6" value="0"></progress>
+    <pre id="load-log"></pre>
+    <noscript>This simulator needs JavaScript and WebAssembly.</noscript>
+  </section>
+</main>
+<script type="module" src="./app.js"></script>
 </body>
 </html>

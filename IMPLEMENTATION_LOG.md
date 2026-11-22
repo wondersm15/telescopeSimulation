@@ -2,6 +2,55 @@
 
 ---
 
+## Web port, phase 2: the full desktop GUI in the browser (2026-11-21), branch `feature/web-app`
+
+**630 tests pass** (+8 tests for the Qt stand-in). Not merged, not pushed.
+
+**Approach:** the browser runs the unchanged desktop `MainWindow`.
+- `web/py/PyQt6/` re-implements the parts of the PyQt6 API that the GUI uses.
+- Widgets render as HTML through `web/py/qtshim/dom.py`.
+- Plots are shown as the same bitmaps the desktop displays.
+- The desktop code is untouched; the freeze test still passes.
+
+**Verification**
+- `web/tools/qt_parity.py` runs the whole GUI under real PyQt6 and under the stand-in:
+  - every mode and tab, control changes, all 18 tutorial scenarios, and the
+    "Learn more" link;
+  - result: **identical**. 178 steps, 22,611 widget states and 605 plots, with zero
+    pixel difference.
+  - Live sky is compared at a frozen instant. Before that change, the Moon moved
+    between the two runs and caused the only 3 differences.
+- Headless Chrome (`browser_check.mjs`):
+  - all four modes load in about 7–10 s (local);
+  - the page survives a refresh at `/apps/telescope-simulation/`;
+  - interactions tested: a tutorial scenario, live-ephemeris toggle, Learn-more → Reference
+    tab scroll, Comparison images and analytics table, combo change, Pop Out dialog.
+- Layout compared by eye with screenshots of the real desktop app
+  (`desktop_screenshots.py`). Fixes from that comparison:
+  - plots fill their space and keep their aspect ratio;
+  - in a scroll area each plot gets its Qt size-hint height, while in a bounded row the
+    stretch factors set the proportions (Qt's two behaviours);
+  - plain-text labels keep their newlines.
+- `tests/test_web_qtshim.py`:
+  - covers spin-box rounding, radio signal order, combo defaults, combo item flags,
+    blockSignals, inherited visibility, timer stop/restart and flag algebra;
+  - each case runs in a subprocess, isolated from the real-Qt tests;
+  - mutation-checked: breaking `QTimer.stop` or the `& ~flag` operation fails 3 tests.
+
+**Web-only differences** (documented in web/README.md):
+- a mode switch builds once, not twice;
+- DE421 is fetched in the background, or on demand;
+- no menu bar and no zoom/pan toolbar;
+- a "Working…" indicator, because Python runs on the main thread.
+
+**Build**
+- `web/dist` now contains only what gets published: 59.8 MB, of which DE421 is 16.8 MB.
+- Left out: the Node/CLI-only runtime files and the phase-1 test page (`--dev-pages` adds it back).
+
+## Nothing installed
+
+---
+
 ## Web port, phases 0–1: freeze + feasibility test (2026-11-21), branch `feature/web-app`
 
 **622 tests pass** (+2 freeze guards). Not merged. Go/no-go is pending with the user.

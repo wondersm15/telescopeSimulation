@@ -12,7 +12,10 @@ What it does:
 2. Zips the desktop Python packages, UNCHANGED, into dist/py/app.zip. The
    browser runs the same physics code as the desktop app; the desktop code is
    frozen at tag desktop-v1.0 (see tests/test_desktop_freeze.py).
-3. Copies the static front-end (web/static/) into dist/.
+3. Zips the browser layer (web/py/: the Qt stand-in and the entry
+   module) into dist/py/web.zip.
+4. Copies the static front-end (web/static/) into dist/. The phase-1
+   test page (smoke.html + worker.js) is left out unless --dev-pages.
 
 Versions are pinned so a rebuild is reproducible. Pyodide 314.x ships
 Python 3.14, matching the desktop venv.
@@ -53,6 +56,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 WEB_DIR = REPO_ROOT / "web"
 VENDOR_DIR = WEB_DIR / "vendor"
 STATIC_DIR = WEB_DIR / "static"
+WEB_PY_DIR = WEB_DIR / "py"
 DEFAULT_DIST = WEB_DIR / "dist"
 
 
@@ -138,18 +142,28 @@ def fetch_de421() -> Path:
 
 # ── Bundling ──────────────────────────────────────────────────────────
 
-def bundle_app(dest_zip: Path) -> None:
-    """Zip the frozen desktop packages (sources + data, no caches)."""
+def bundle(dest_zip: Path, root: Path, entries) -> None:
+    """Zip `entries` (files or package folders under `root`), no caches."""
     dest_zip.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(dest_zip, "w", zipfile.ZIP_DEFLATED) as zf:
-        for package in APP_PACKAGES:
-            for path in sorted((REPO_ROOT / package).rglob("*")):
+        for entry in entries:
+            top = root / entry
+            paths = [top] if top.is_file() else sorted(top.rglob("*"))
+            for path in paths:
                 if path.is_dir() or "__pycache__" in path.parts:
                     continue
-                zf.write(path, path.relative_to(REPO_ROOT).as_posix())
+                zf.write(path, path.relative_to(root).as_posix())
 
 
-def build(dist: Path) -> None:
+# Runtime files only used by Node / the command-line launcher.
+PYODIDE_NOT_FOR_BROWSER = ("python", "python.bat", "python.exe",
+                           "python_cli_entry.mjs", "package.json", "*.d.ts",
+                           "*.part")
+# Development pages (the phase-1 feasibility test); not published.
+DEV_PAGES = ("smoke.html", "worker.js")
+
+
+def build(dist: Path, dev_pages: bool = False) -> None:
     print("Fetching runtime (cached in web/vendor/)…")
     pyodide_dir = fetch_pyodide()
     wheels = fetch_pypi_wheels()
@@ -159,21 +173,25 @@ def build(dist: Path) -> None:
     if dist.exists():
         shutil.rmtree(dist)
     shutil.copytree(pyodide_dir, dist / "pyodide",
-                    ignore=shutil.ignore_patterns("*.part"))
+                    ignore=shutil.ignore_patterns(*PYODIDE_NOT_FOR_BROWSER))
     (dist / "py" / "wheels").mkdir(parents=True)
     for wheel in wheels:
         shutil.copy2(wheel, dist / "py" / "wheels" / wheel.name)
     (dist / "data").mkdir(parents=True, exist_ok=True)
     shutil.copy2(de421, dist / "data" / de421.name)
-    bundle_app(dist / "py" / "app.zip")
-    if STATIC_DIR.exists():
-        shutil.copytree(STATIC_DIR, dist, dirs_exist_ok=True)
+    bundle(dist / "py" / "app.zip", REPO_ROOT, APP_PACKAGES)
+    bundle(dist / "py" / "web.zip", WEB_PY_DIR,
+           sorted(p.name for p in WEB_PY_DIR.iterdir()
+                  if p.name != "__pycache__"))
+    shutil.copytree(STATIC_DIR, dist, dirs_exist_ok=True,
+                    ignore=None if dev_pages else shutil.ignore_patterns(*DEV_PAGES))
 
     manifest = {
         "pyodide": PYODIDE_VERSION,
         "pyodide_packages": list(PYODIDE_PACKAGES),
         "wheels": [w.name for w in wheels],
         "app_zip": "py/app.zip",
+        "web_zip": "py/web.zip",
         "ephemeris": "data/de421.bsp",
     }
     (dist / "py" / "manifest.json").write_text(json.dumps(manifest, indent=2))
@@ -185,7 +203,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--dist", type=Path, default=DEFAULT_DIST,
                         help="output folder (default: web/dist)")
-    build(parser.parse_args().dist)
+    parser.add_argument("--dev-pages", action="store_true",
+                        help="also copy the development test page "
+                             "(smoke.html + worker.js)")
+    args = parser.parse_args()
+    build(args.dist, dev_pages=args.dev_pages)
 
 
 if __name__ == "__main__":
