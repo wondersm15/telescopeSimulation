@@ -2,6 +2,21 @@
 
 ---
 
+## Web port: deploy from the branch (2026-11-21), branch `feature/web-app`
+
+The user decided that the browser version stays on its own branch. It is
+pushed to GitHub, and the deploying agent takes it from there.
+- `export_handoff.py` now writes into `deploy/`, which is **committed**:
+  - the built site, `deploy/telescope-simulation/` (61 MB, ephemeris included
+    through a `.gitignore` exception);
+  - `deploy/HANDOFF.md`;
+  - `deploy/DEPLOY_PROMPT.md`: the message to paste into the deployment session,
+    with the clone and copy commands.
+- `web/handoff/` (the old staging folder) was removed.
+- Export checks: all six pass. Main is untouched.
+
+---
+
 ## Web port, phases 6–7: desktop download + hosting export (2026-11-21), branch `feature/web-app`
 
 **Desktop download:** `assets/downloads/telescope-simulation-desktop-v1.0.zip`, 1.6 MB.

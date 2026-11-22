@@ -5,7 +5,8 @@ Run from the repo root with the desktop venv:
     venv/bin/python web/tools/export_handoff.py [--out DIR]
 
 1. Builds a fresh copy of the site into DIR/telescope-simulation/ (default
-   DIR: web/handoff/, git-ignored).
+   DIR: deploy/, committed on the web branch so the deploying agent can take
+   it straight from git).
 2. Checks the copy before anything is handed over:
    - the handoff layout (index.html at the root, plus assets/ and data/);
    - every path is app-relative;
@@ -13,8 +14,9 @@ Run from the repo root with the desktop venv:
    - the file sizes fit Cloudflare's limits.
 3. Runs the real-browser check (browser_check.mjs) on that exact folder,
    served at /apps/telescope-simulation/, including a refresh.
-4. Writes the handoff note, DIR/telescope-simulation-HANDOFF.md, beside the
-   folder rather than in it, so the published folder holds only public files.
+4. Writes the handoff note, DIR/HANDOFF.md, and the prompt for the deploying
+   agent, DIR/DEPLOY_PROMPT.md, beside the folder rather than in it, so the
+   published folder holds only public files.
 
 The note records the source commit, the commands, the check results, and
 what still needs the owner's approval. The script exits non-zero if any
@@ -36,7 +38,11 @@ import build_web  # noqa: E402  (sibling tool)
 
 APP_NAME = "telescope-simulation"
 ROUTE = f"/apps/{APP_NAME}/"
-DEFAULT_OUT = build_web.WEB_DIR / "handoff"
+DEFAULT_OUT = build_web.REPO_ROOT / "deploy"
+OUT_REL = "deploy"            # as seen from the repository root
+REPO_URL = "https://github.com/wondersm15/telescopeSimulation"
+HANDOFF_DIR = ("/Users/marcwonders/Documents/Codex/Projects/"
+               "Public Apps Deployment/artifacts/incoming/telescope-simulation/")
 
 # Cloudflare Workers Static Assets limits (per file / per deployment).
 MAX_FILE_BYTES = 25 * 1024 * 1024
@@ -143,8 +149,9 @@ only, with no server code.
 - **About page:** `about.html`: credits, licences, and the desktop download.
 
 ## Source version
-- **Repository:** telescopeSimulationProject
-- **Branch:** `{branch}`
+- **Repository:** {REPO_URL}
+- **Branch:** `{branch}`. The browser version lives on this branch on
+  purpose; it is not merged into main.
 - **Commit:** `{commit}`{dirty}
 - **Desktop app:** frozen at git tag `{build_web.DESKTOP_TAG}`. The browser
   runs that code unchanged.
@@ -158,6 +165,8 @@ only, with no server code.
     licence texts (`licenses/`).
   - `data/de421.bsp`: the JPL planetary ephemeris, 16.8 MB. It is fetched after
     the page starts.
+- **Where:** `{OUT_REL}/{APP_NAME}/` on branch `{branch}`. It is committed
+  as built, so no build step is needed to deploy it.
 - **Paths:** every path is relative to the page, so the folder can sit at any
   base path. The page works when refreshed at `{ROUTE}`.
 
@@ -168,7 +177,7 @@ From the source repository root:
 venv/bin/python web/tools/build_web.py         # build into web/dist/
 venv/bin/python web/tools/export_handoff.py    # fresh build + checks + this note
 python3 -m http.server -d web/dist 8000        # preview at http://localhost:8000/
-node web/tools/browser_check.mjs --root web/handoff/{APP_NAME} --reload   # test at {ROUTE}
+node web/tools/browser_check.mjs --root {OUT_REL}/{APP_NAME} --reload   # test at {ROUTE}
 ```
 
 The build downloads its pinned inputs once and caches them in `web/vendor/`.
@@ -226,17 +235,73 @@ Recorded in the source repository (`web/README.md`, `IMPLEMENTATION_LOG.md`):
 """
 
 
+def deploy_prompt() -> str:
+    """The message to give the deploying agent."""
+    branch = _git("rev-parse", "--abbrev-ref", "HEAD")
+    return f"""# Prompt for the deploying agent: Telescope Simulator
+
+Paste the text below into the Public Apps Deployment session.
+
+---
+
+Please integrate the Telescope Simulator at `{ROUTE}`.
+
+**Get the files.** Everything is in git, built and checked, with no build
+step needed.
+- Repository: {REPO_URL}
+- Branch: `{branch}`. Use this branch, not main.
+- Folder: `{OUT_REL}/{APP_NAME}/`
+
+```sh
+git clone --depth 1 --branch {branch} {REPO_URL}.git telescope-src
+cp -R telescope-src/{OUT_REL}/{APP_NAME}/ "{HANDOFF_DIR}"
+```
+
+**What it contains.**
+- The folder follows the handoff format: `index.html` at the root, plus
+  `assets/` and `data/` (and `about.html`).
+- All paths are app-relative.
+- It is static only. At runtime it makes no requests to any other origin.
+
+**Read `{OUT_REL}/HANDOFF.md` on the same branch.** It covers:
+- the source version;
+- the build and preview commands;
+- the validation results;
+- the distribution approval and licences;
+- the external services and headers.
+
+In short:
+- `.wasm` must be served as `application/wasm`.
+- No COOP/COEP headers are needed.
+- If a Content-Security-Policy is set, it must allow `'wasm-unsafe-eval'`.
+  Pyodide may also need `'unsafe-eval'`, so test with the CSP enabled.
+- Long cache lifetimes are fine for `assets/pyodide/`, `assets/py/wheels/`
+  and `data/`.
+- The largest file is 16.8 MB (`data/de421.bsp`). The first visit downloads
+  about 43 MB.
+
+**Check after integrating.** Open `{ROUTE}` and wait for the mode bar; it
+takes 10–30 s on first load. Reload the page; it must come back. Check that
+the "About · download the desktop app · credits" link opens `about.html`
+and that the zip download works.
+
+**Approval.** Do not publish publicly until Marc confirms the distribution
+approval listed in HANDOFF.md.
+"""
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT,
-                        help="folder to export into (default: web/handoff)")
+                        help="folder to export into (default: deploy/)")
     args = parser.parse_args()
     site = args.out / APP_NAME
 
     build_web.build(site)
     results = audit(site) + [browser_check(site)]
-    note = args.out / f"{APP_NAME}-HANDOFF.md"
+    note = args.out / "HANDOFF.md"
     note.write_text(handoff_note(results, site))
+    (args.out / "DEPLOY_PROMPT.md").write_text(deploy_prompt())
 
     for name, ok, detail in results:
         print(f"{'PASS' if ok else 'FAIL'}  {name}\n      {detail}")

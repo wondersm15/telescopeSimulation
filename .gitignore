@@ -33,4 +33,5 @@ de421.bsp
 # Web port: downloaded runtime cache (rebuilt by web/tools/build_web.py)
 web/vendor/
 web/smoke/
-web/handoff/
+# The hosting export is committed on purpose (deploy/), ephemeris included.
+!deploy/telescope-simulation/data/de421.bsp
